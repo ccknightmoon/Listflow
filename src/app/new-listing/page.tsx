@@ -1,8 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import Link from "next/link";
-import { ArrowLeft, Camera, Ruler, ZoomIn, Sparkles, Upload, FileText } from "lucide-react";
+import {
+  ArrowLeft,
+  Camera,
+  Ruler,
+  ZoomIn,
+  Sparkles,
+  Upload,
+  FileText,
+  Loader2,
+  Check,
+} from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 
 const CONDITIONS: Condition[] = [
@@ -13,15 +23,99 @@ const CONDITIONS: Condition[] = [
   "Fair - notable flaws",
 ];
 
+interface SlotImage {
+  data: string;
+  mediaType: string;
+  previewUrl: string;
+}
+
+interface AiResult {
+  itemType: string;
+  brand: string;
+  color: string;
+  size: string;
+  condition: Condition;
+  flaws: string;
+  suggestedTitle: string;
+}
+
+const SLOTS = [
+  { key: "front", label: "Front", icon: Camera },
+  { key: "measure", label: "Measure", icon: Ruler },
+  { key: "flaw", label: "Flaw", icon: ZoomIn },
+] as const;
+
 export default function NewListingPage() {
+  const [photos, setPhotos] = useState<Record<string, SlotImage>>({});
   const [title, setTitle] = useState("");
   const [condition, setCondition] = useState<Condition>("Excellent used");
   const [flaws, setFlaws] = useState("");
   const [result, setResult] = useState<PriceSuggestion | null>(null);
+  const [aiResult, setAiResult] = useState<AiResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  function handleAnalyze() {
-    const suggestion = getPriceSuggestion(condition, flaws.trim().length > 0);
-    setResult(suggestion);
+  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  function handleFileChange(slotKey: string, file: File | undefined) {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      const [header, base64] = result.split(",");
+      const mediaType = header.match(/data:(.*);base64/)?.[1] ?? "image/jpeg";
+
+      setPhotos((prev) => ({
+        ...prev,
+        [slotKey]: { data: base64, mediaType, previewUrl: result },
+      }));
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleAnalyze() {
+    setError(null);
+    const images = Object.values(photos).map((p) => ({
+      data: p.data,
+      mediaType: p.mediaType,
+    }));
+
+    if (images.length === 0) {
+      const suggestion = getPriceSuggestion(condition, flaws.trim().length > 0);
+      setResult(suggestion);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/analyze-item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Analysis failed");
+      }
+
+      setAiResult(data);
+      setTitle(data.suggestedTitle ?? title);
+      setCondition(data.condition ?? condition);
+      setFlaws(data.flaws ?? flaws);
+
+      const suggestion = getPriceSuggestion(
+        data.condition ?? condition,
+        Boolean(data.flaws && data.flaws.trim().length > 0)
+      );
+      setResult(suggestion);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -34,9 +128,17 @@ export default function NewListingPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <PhotoSlot icon={Camera} label="Front" />
-        <PhotoSlot icon={Ruler} label="Measure" />
-        <PhotoSlot icon={ZoomIn} label="Flaw" />
+        {SLOTS.map(({ key, label, icon: Icon }) => (
+          <PhotoSlot
+            key={key}
+            icon={Icon}
+            label={label}
+            image={photos[key]}
+            onClick={() => fileInputs.current[key]?.click()}
+            inputRef={(el) => (fileInputs.current[key] = el)}
+            onFileChange={(file) => handleFileChange(key, file)}
+          />
+        ))}
       </div>
 
       <div className="bg-brand-50 rounded-lg px-3 py-2 flex items-center gap-2 mb-4">
@@ -75,10 +177,39 @@ export default function NewListingPage() {
         />
       </div>
 
-      <button onClick={handleAnalyze} className="btn btn-primary w-full mb-4">
-        <Sparkles className="w-4 h-4" />
-        Analyze & price
+      <button
+        onClick={handleAnalyze}
+        disabled={loading}
+        className="btn btn-primary w-full mb-4"
+      >
+        {loading ? (
+          <Loader2 className="w-4 h-4 animate-spin" />
+        ) : (
+          <Sparkles className="w-4 h-4" />
+        )}
+        {loading ? "Analyzing photos..." : "Analyze & price"}
       </button>
+
+      {error && (
+        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
+          {error}
+        </div>
+      )}
+
+      {aiResult && (
+        <div className="card p-4 mb-4">
+          <p className="text-xs text-[var(--text-secondary)] mb-2 flex items-center gap-1">
+            <Sparkles className="w-3.5 h-3.5 text-brand-600" />
+            AI detected
+          </p>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <DetectedField label="Item type" value={aiResult.itemType} />
+            <DetectedField label="Brand" value={aiResult.brand} />
+            <DetectedField label="Color" value={aiResult.color} />
+            <DetectedField label="Size" value={aiResult.size} />
+          </div>
+        </div>
+      )}
 
       {result && (
         <div className="card p-4">
@@ -121,11 +252,61 @@ export default function NewListingPage() {
   );
 }
 
-function PhotoSlot({ icon: Icon, label }: { icon: React.ElementType; label: string }) {
+function PhotoSlot({
+  icon: Icon,
+  label,
+  image,
+  onClick,
+  inputRef,
+  onFileChange,
+}: {
+  icon: React.ElementType;
+  label: string;
+  image?: SlotImage;
+  onClick: () => void;
+  inputRef: (el: HTMLInputElement | null) => void;
+  onFileChange: (file: File | undefined) => void;
+}) {
   return (
-    <div className="card border-dashed flex flex-col items-center justify-center gap-1 aspect-square cursor-pointer">
-      <Icon className="w-5 h-5 text-[var(--text-secondary)]" />
-      <span className="text-[10px] text-[var(--text-secondary)]">{label}</span>
+    <div
+      onClick={onClick}
+      className="card border-dashed flex flex-col items-center justify-center gap-1 aspect-square cursor-pointer overflow-hidden relative"
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        className="hidden"
+        onChange={(e) => onFileChange(e.target.files?.[0])}
+      />
+      {image ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={image.previewUrl}
+            alt={label}
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+          <div className="absolute top-1 right-1 bg-white rounded-full p-0.5">
+            <Check className="w-3 h-3" style={{ color: "#3B6D11" }} />
+          </div>
+        </>
+      ) : (
+        <>
+          <Icon className="w-5 h-5 text-[var(--text-secondary)]" />
+          <span className="text-[10px] text-[var(--text-secondary)]">{label}</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function DetectedField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[11px] text-[var(--text-tertiary)]">{label}</p>
+      <p className="font-medium">{value || "—"}</p>
     </div>
   );
 }
