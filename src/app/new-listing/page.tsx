@@ -45,6 +45,47 @@ const SLOTS = [
   { key: "flaw", label: "Flaw", icon: ZoomIn },
 ] as const;
 
+const MAX_DIMENSION = 1568;
+
+function resizeImage(file: File): Promise<{ dataUrl: string; mediaType: string }> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+
+        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
+          if (width > height) {
+            height = Math.round((height * MAX_DIMENSION) / width);
+            width = MAX_DIMENSION;
+          } else {
+            width = Math.round((width * MAX_DIMENSION) / height);
+            height = MAX_DIMENSION;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          reject(new Error("Could not get canvas context"));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+        resolve({ dataUrl, mediaType: "image/jpeg" });
+      };
+      img.onerror = () => reject(new Error("Could not load image"));
+      img.src = reader.result as string;
+    };
+    reader.onerror = () => reject(new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
+
 export default function NewListingPage() {
   const [photos, setPhotos] = useState<Record<string, SlotImage>>({});
   const [title, setTitle] = useState("");
@@ -57,21 +98,20 @@ export default function NewListingPage() {
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
-  function handleFileChange(slotKey: string, file: File | undefined) {
+  async function handleFileChange(slotKey: string, file: File | undefined) {
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const [header, base64] = result.split(",");
-      const mediaType = header.match(/data:(.*);base64/)?.[1] ?? "image/jpeg";
+    try {
+      const { dataUrl, mediaType } = await resizeImage(file);
+      const base64 = dataUrl.split(",")[1];
 
       setPhotos((prev) => ({
         ...prev,
-        [slotKey]: { data: base64, mediaType, previewUrl: result },
+        [slotKey]: { data: base64, mediaType, previewUrl: dataUrl },
       }));
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      setError(`Could not process image: ${(err as Error).message}`);
+    }
   }
 
   async function handleAnalyze() {
