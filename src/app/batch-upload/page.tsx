@@ -11,6 +11,7 @@ import {
   FileText,
   Upload,
   GripVertical,
+  RotateCw,
 } from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 
@@ -33,40 +34,57 @@ interface AiResult {
 
 type Step = "upload" | "grouping" | "review" | "analyzing" | "results";
 
-const MAX_DIMENSION = 1568;
+const MAX_DIMENSION = 1024;
+const THUMB_DIMENSION = 400;
 const MAX_PHOTOS = 60;
+const MAX_PHOTOS_PER_ITEM = 6;
+
+function resizeFromDataUrl(
+  dataUrl: string,
+  maxDim: number,
+  quality: number
+): Promise<{ dataUrl: string; mediaType: string }> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+
+      if (width > maxDim || height > maxDim) {
+        if (width > height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        reject(new Error("Could not get canvas context"));
+        return;
+      }
+      ctx.drawImage(img, 0, 0, width, height);
+      resolve({ dataUrl: canvas.toDataURL("image/jpeg", quality), mediaType: "image/jpeg" });
+    };
+    img.onerror = () => reject(new Error("Could not load image"));
+    img.src = dataUrl;
+  });
+}
 
 function resizeImage(file: File): Promise<{ dataUrl: string; mediaType: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        let { width, height } = img;
-
-        if (width > MAX_DIMENSION || height > MAX_DIMENSION) {
-          if (width > height) {
-            height = Math.round((height * MAX_DIMENSION) / width);
-            width = MAX_DIMENSION;
-          } else {
-            width = Math.round((width * MAX_DIMENSION) / height);
-            height = MAX_DIMENSION;
-          }
-        }
-
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) {
-          reject(new Error("Could not get canvas context"));
-          return;
-        }
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.85), mediaType: "image/jpeg" });
-      };
-      img.onerror = () => reject(new Error("Could not load image"));
-      img.src = reader.result as string;
+    reader.onload = async () => {
+      try {
+        const result = await resizeFromDataUrl(reader.result as string, MAX_DIMENSION, 0.75);
+        resolve(result);
+      } catch (err) {
+        reject(err);
+      }
     };
     reader.onerror = () => reject(new Error("Could not read file"));
     reader.readAsDataURL(file);
@@ -78,6 +96,7 @@ export default function BatchUploadPage() {
   const [photos, setPhotos] = useState<SlotImage[]>([]);
   const [groups, setGroups] = useState<number[][]>([]);
   const [results, setResults] = useState<AiResult[]>([]);
+  const [retrying, setRetrying] = useState<Record<number, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement | null>(null);
 
@@ -105,12 +124,21 @@ export default function BatchUploadPage() {
     setStep("grouping");
 
     try {
+      const thumbnails = await Promise.all(
+        photos.map(async (p) => {
+          const { dataUrl, mediaType } = await resizeFromDataUrl(
+            p.previewUrl,
+            THUMB_DIMENSION,
+            0.6
+          );
+          return { data: dataUrl.split(",")[1], mediaType };
+        })
+      );
+
       const res = await fetch("/api/group-photos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          images: photos.map((p) => ({ data: p.data, mediaType: p.mediaType })),
-        }),
+        body: JSON.stringify({ images: thumbnails }),
       });
 
       const data = await res.json();
@@ -142,6 +170,13 @@ export default function BatchUploadPage() {
     setGroups((prev) => [...prev, []]);
   }
 
+  function groupImagesForRequest(group: number[]) {
+    return group.slice(0, MAX_PHOTOS_PER_ITEM).map((idx) => ({
+      data: photos[idx].data,
+      mediaType: photos[idx].mediaType,
+    }));
+  }
+
   async function handleAnalyzeBatch() {
     setError(null);
     setStep("analyzing");
@@ -151,12 +186,7 @@ export default function BatchUploadPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          groups: groups.map((g) => ({
-            images: g.map((idx) => ({
-              data: photos[idx].data,
-              mediaType: photos[idx].mediaType,
-            })),
-          })),
+          groups: groups.map((g) => ({ images: groupImagesForRequest(g) })),
         }),
       });
 
@@ -171,6 +201,41 @@ export default function BatchUploadPage() {
     } catch (err) {
       setError((err as Error).message);
       setStep("review");
+    }
+  }
+
+  async function handleRetry(index: number) {
+    setRetrying((prev) => ({ ...prev, [index]: true }));
+
+    try {
+      const group = groups[index] ?? [];
+      const res = await fetch("/api/analyze-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          groups: [{ images: groupImagesForRequest(group) }],
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error || "Retry failed");
+      }
+
+      setResults((prev) => {
+        const next = [...prev];
+        next[index] = data.results[0];
+        return next;
+      });
+    } catch (err) {
+      setResults((prev) => {
+        const next = [...prev];
+        next[index] = { ...next[index], error: (err as Error).message };
+        return next;
+      });
+    } finally {
+      setRetrying((prev) => ({ ...prev, [index]: false }));
     }
   }
 
@@ -249,7 +314,9 @@ export default function BatchUploadPage() {
       {step === "review" && (
         <>
           <p className="text-sm text-[var(--text-secondary)] mb-4">
-            Drag a photo into a different group to fix any mistakes.
+            Drag a photo into a different group to fix any mistakes. Only
+            the first {MAX_PHOTOS_PER_ITEM} photos per item will be used
+            for analysis.
           </p>
           <div className="flex flex-col gap-4 mb-4">
             {groups.map((group, gIdx) => (
@@ -268,6 +335,12 @@ export default function BatchUploadPage() {
                 <p className="text-xs text-[var(--text-secondary)] mb-2">
                   Item {gIdx + 1} &middot; {group.length} photo
                   {group.length !== 1 ? "s" : ""}
+                  {group.length > MAX_PHOTOS_PER_ITEM && (
+                    <span style={{ color: "#B3261E" }}>
+                      {" "}
+                      (only first {MAX_PHOTOS_PER_ITEM} will be used)
+                    </span>
+                  )}
                 </p>
                 <div className="flex flex-wrap gap-2 min-h-[64px]">
                   {group.map((photoIdx) => (
@@ -330,9 +403,21 @@ export default function BatchUploadPage() {
               return (
                 <div key={i} className="card p-4">
                   <p className="text-sm font-medium mb-1">Item {i + 1}</p>
-                  <p className="text-sm" style={{ color: "#B3261E" }}>
+                  <p className="text-sm mb-3" style={{ color: "#B3261E" }}>
                     {result.error}
                   </p>
+                  <button
+                    onClick={() => handleRetry(i)}
+                    disabled={retrying[i]}
+                    className="btn w-full"
+                  >
+                    {retrying[i] ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RotateCw className="w-4 h-4" />
+                    )}
+                    {retrying[i] ? "Retrying..." : "Retry this item"}
+                  </button>
                 </div>
               );
             }

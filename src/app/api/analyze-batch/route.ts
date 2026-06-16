@@ -4,14 +4,17 @@ import { NextRequest, NextResponse } from "next/server";
  * POST /api/analyze-batch
  *
  * Accepts multiple groups of photos (one group per item) and analyzes
- * each group in parallel using the same prompt as the single-item flow.
+ * them ONE AT A TIME (not in parallel) to stay within OpenAI's per-minute
+ * token rate limit on smaller accounts. Images are sent in "low detail"
+ * mode, which uses far fewer tokens per image while still being plenty
+ * for reading tags, identifying brands/condition, and spotting flaws.
  *
  * Request body:
  * { "groups": [ { "images": [{ "data": "<base64>", "mediaType": "image/jpeg" }, ...] }, ... ] }
  *
  * Response:
  * { "results": [ { itemType, brand, color, size, condition, flaws, suggestedTitle }, ... ] }
- * If a group fails to analyze, its entry will have an "error" field instead.
+ * If a group fails after retries, its entry will have an "error" field instead.
  */
 
 const PROMPT = `You are helping a reseller list a clothing item on eBay.
@@ -29,13 +32,25 @@ shape:
   "suggestedTitle": "a concise eBay listing title under 80 characters"
 }`;
 
-async function analyzeGroup(
+const MAX_ATTEMPTS = 3;
+const NORMAL_RETRY_DELAY_MS = 1000;
+const RATE_LIMIT_RETRY_DELAY_MS = 15000;
+const DELAY_BETWEEN_ITEMS_MS = 1500;
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callOpenAi(
   apiKey: string,
   images: { data: string; mediaType: string }[]
 ) {
   const imageContent = images.map((img) => ({
     type: "image_url" as const,
-    image_url: { url: `data:${img.mediaType};base64,${img.data}` },
+    image_url: {
+      url: `data:${img.mediaType};base64,${img.data}`,
+      detail: "low" as const,
+    },
   }));
 
   const response = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -58,7 +73,10 @@ async function analyzeGroup(
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`OpenAI API error: ${errText}`);
+    const isRateLimit = errText.includes("rate_limit_exceeded");
+    const error = new Error(`OpenAI API error: ${errText}`);
+    (error as Error & { isRateLimit?: boolean }).isRateLimit = isRateLimit;
+    throw error;
   }
 
   const data = await response.json();
@@ -66,6 +84,29 @@ async function analyzeGroup(
   const cleaned = rawText.replace(/```json|```/g, "").trim();
 
   return JSON.parse(cleaned);
+}
+
+async function analyzeGroupWithRetry(
+  apiKey: string,
+  images: { data: string; mediaType: string }[]
+) {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callOpenAi(apiKey, images);
+    } catch (err) {
+      lastError = err as Error;
+      const isRateLimit = (err as Error & { isRateLimit?: boolean }).isRateLimit;
+
+      if (attempt < MAX_ATTEMPTS) {
+        const waitTime = isRateLimit ? RATE_LIMIT_RETRY_DELAY_MS : NORMAL_RETRY_DELAY_MS * attempt;
+        await delay(waitTime);
+      }
+    }
+  }
+
+  throw lastError;
 }
 
 export async function POST(req: NextRequest) {
@@ -95,16 +136,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const results = await Promise.all(
-    groups.map(async (group) => {
-      try {
-        const parsed = await analyzeGroup(apiKey, group.images);
-        return parsed;
-      } catch (err) {
-        return { error: (err as Error).message };
-      }
-    })
-  );
+  const results = [];
+  for (let i = 0; i < groups.length; i++) {
+    try {
+      const result = await analyzeGroupWithRetry(apiKey, groups[i].images);
+      results.push(result);
+    } catch (err) {
+      results.push({ error: (err as Error).message });
+    }
+
+    if (i < groups.length - 1) {
+      await delay(DELAY_BETWEEN_ITEMS_MS);
+    }
+  }
 
   return NextResponse.json({ results });
 }
