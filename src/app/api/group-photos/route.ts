@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 
+export const runtime = "nodejs";
+
 const MAX_ATTEMPTS = 3;
 const RATE_LIMIT_DELAY_MS = 15000;
 const RETRY_DELAY_MS = 2000;

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 
+export const runtime = "nodejs";
+
 const PROMPT = `You are helping a reseller list a clothing item on eBay.
 Look at these photos (front/back, measurements, and any flaw close-ups) and
 respond with ONLY a JSON object (no markdown, no extra text) in this exact
