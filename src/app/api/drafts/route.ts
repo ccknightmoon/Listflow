@@ -18,6 +18,30 @@ export async function GET() {
   return NextResponse.json({ drafts: data });
 }
 
+export async function DELETE(req: NextRequest) {
+  let body: { ids?: string[] };
+
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  const ids = body.ids ?? [];
+
+  if (ids.length === 0) {
+    return NextResponse.json({ error: "No ids provided." }, { status: 400 });
+  }
+
+  const { error } = await supabase.from("drafts").delete().in("id", ids);
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ deleted: ids.length });
+}
+
 export async function POST(req: NextRequest) {
   let body;
 

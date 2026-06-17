@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { openAIPost } from "@/lib/openai-request";
 
 const prompt = `You are helping a reseller list a clothing item on eBay.
 Look at these photos (front/back, measurements, and any flaw close-ups) and
@@ -43,15 +43,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const imageContent: OpenAI.Chat.ChatCompletionContentPart[] = images.map((img) => ({
-    type: "image_url",
+  const imageContent = images.map((img) => ({
+    type: "image_url" as const,
     image_url: { url: `data:${img.mediaType};base64,${img.data}` },
   }));
 
   try {
-    const client = new OpenAI({ apiKey, fetch: globalThis.fetch });
-    const response = await client.chat.completions.create({
-      model: "gpt-4o",
+    const data = await openAIPost(apiKey, {
+      model: "gpt-4o-mini",
       max_tokens: 500,
       messages: [
         {
@@ -59,9 +58,9 @@ export async function POST(req: NextRequest) {
           content: [{ type: "text", text: prompt }, ...imageContent],
         },
       ],
-    });
+    }) as { choices?: { message?: { content?: string } }[] };
 
-    const rawText = response.choices[0]?.message?.content ?? "";
+    const rawText = data.choices?.[0]?.message?.content ?? "";
     const cleaned = rawText.replace(/```json|```/g, "").trim();
 
     let parsed;

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { openAIPost } from "@/lib/openai-request";
 
 const PROMPT = `You are helping a reseller list a clothing item on eBay.
 Look at these photos (front/back, measurements, and any flaw close-ups) and
@@ -19,21 +19,21 @@ shape:
 const MAX_ATTEMPTS = 3;
 const NORMAL_RETRY_DELAY_MS = 1000;
 const RATE_LIMIT_RETRY_DELAY_MS = 15000;
-const DELAY_BETWEEN_ITEMS_MS = 1500;
+const DELAY_BETWEEN_ITEMS_MS = 3000;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function analyzeGroupWithRetry(
-  client: OpenAI,
+async function analyzeGroup(
+  apiKey: string,
   images: { data: string; mediaType: string }[]
 ) {
-  const imageContent: OpenAI.Chat.ChatCompletionContentPart[] = images.map((img) => ({
-    type: "image_url",
+  const imageContent = images.map((img) => ({
+    type: "image_url" as const,
     image_url: {
       url: `data:${img.mediaType};base64,${img.data}`,
-      detail: "low",
+      detail: "low" as const,
     },
   }));
 
@@ -41,8 +41,8 @@ async function analyzeGroupWithRetry(
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const response = await client.chat.completions.create({
-        model: "gpt-4o",
+      const data = await openAIPost(apiKey, {
+        model: "gpt-4o-mini",
         max_tokens: 500,
         messages: [
           {
@@ -50,21 +50,17 @@ async function analyzeGroupWithRetry(
             content: [{ type: "text", text: PROMPT }, ...imageContent],
           },
         ],
-      });
+      }) as { choices?: { message?: { content?: string } }[] };
 
-      const rawText = response.choices[0]?.message?.content ?? "";
+      const rawText = data.choices?.[0]?.message?.content ?? "";
       const cleaned = rawText.replace(/```json|```/g, "").trim();
       return JSON.parse(cleaned);
     } catch (err) {
       lastError = err as Error;
-      const isRateLimit =
-        err instanceof OpenAI.APIError && err.status === 429;
+      const isRateLimit = (err as { isRateLimit?: boolean }).isRateLimit;
 
       if (attempt < MAX_ATTEMPTS) {
-        const waitTime = isRateLimit
-          ? RATE_LIMIT_RETRY_DELAY_MS
-          : NORMAL_RETRY_DELAY_MS * attempt;
-        await delay(waitTime);
+        await delay(isRateLimit ? RATE_LIMIT_RETRY_DELAY_MS : NORMAL_RETRY_DELAY_MS * attempt);
       }
     }
   }
@@ -99,12 +95,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const client = new OpenAI({ apiKey, fetch: globalThis.fetch });
   const results = [];
 
   for (let i = 0; i < groups.length; i++) {
     try {
-      const result = await analyzeGroupWithRetry(client, groups[i].images);
+      const result = await analyzeGroup(apiKey, groups[i].images);
       results.push(result);
     } catch (err) {
       results.push({ error: (err as Error).message });

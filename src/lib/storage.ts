@@ -3,7 +3,7 @@ import { supabase } from "./supabase";
 export async function uploadThumbnail(dataUrl: string): Promise<string> {
   const res = await fetch(dataUrl);
   const blob = await res.blob();
-  const filename = `thumbnails/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+  const filename = `public/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
 
   const { error } = await supabase.storage
     .from("photos")

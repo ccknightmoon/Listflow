@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { openAIPost } from "@/lib/openai-request";
 
 const MAX_ATTEMPTS = 3;
 const RATE_LIMIT_DELAY_MS = 15000;
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const imageContent: OpenAI.Chat.ChatCompletionContentPart[] = images.flatMap((img, i) => [
+  const imageContent = images.flatMap((img, i) => [
     { type: "text" as const, text: `Photo index ${i}:` },
     {
       type: "image_url" as const,
@@ -68,12 +68,11 @@ Each inner array lists the photo indices belonging to one item, in
 ascending order. Every index from 0 to ${images.length - 1} must appear
 in exactly one group. Order the groups by the index of their first photo.`;
 
-  const client = new OpenAI({ apiKey, fetch: globalThis.fetch });
   let lastError: string | null = null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const response = await client.chat.completions.create({
+      const data = await openAIPost(apiKey, {
         model: "gpt-4o",
         max_tokens: 1000,
         messages: [
@@ -82,9 +81,9 @@ in exactly one group. Order the groups by the index of their first photo.`;
             content: [{ type: "text", text: prompt }, ...imageContent],
           },
         ],
-      });
+      }) as { choices?: { message?: { content?: string } }[] };
 
-      const rawText = response.choices[0]?.message?.content ?? "";
+      const rawText = data.choices?.[0]?.message?.content ?? "";
       const cleaned = rawText.replace(/```json|```/g, "").trim();
 
       let parsed: { groups?: number[][] };
@@ -107,7 +106,7 @@ in exactly one group. Order the groups by the index of their first photo.`;
       return NextResponse.json({ groups: parsed.groups });
     } catch (err) {
       lastError = (err as Error).message;
-      const isRateLimit = err instanceof OpenAI.APIError && err.status === 429;
+      const isRateLimit = (err as { isRateLimit?: boolean }).isRateLimit;
 
       if (attempt < MAX_ATTEMPTS) {
         await delay(isRateLimit ? RATE_LIMIT_DELAY_MS : RETRY_DELAY_MS * attempt);
