@@ -12,8 +12,12 @@ import {
   Upload,
   GripVertical,
   RotateCw,
+  Check,
+  X,
+  Trash2,
 } from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
+import { uploadThumbnail } from "@/lib/storage";
 
 interface SlotImage {
   data: string;
@@ -32,12 +36,25 @@ interface AiResult {
   error?: string;
 }
 
+interface Thumbnail {
+  data: string;
+  mediaType: string;
+}
+
 type Step = "upload" | "grouping" | "review" | "analyzing" | "results";
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const MAX_DIMENSION = 1024;
-const THUMB_DIMENSION = 400;
-const MAX_PHOTOS = 60;
+const THUMB_DIMENSION = 256;
+const THUMB_QUALITY = 0.5;
+const MAX_PHOTOS = 100;
 const MAX_PHOTOS_PER_ITEM = 6;
+const GROUPING_CHUNK_SIZE = 15;
+const DELAY_BETWEEN_CHUNKS_MS = 1500;
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function resizeFromDataUrl(
   dataUrl: string,
@@ -97,7 +114,10 @@ export default function BatchUploadPage() {
   const [groups, setGroups] = useState<number[][]>([]);
   const [results, setResults] = useState<AiResult[]>([]);
   const [retrying, setRetrying] = useState<Record<number, boolean>>({});
+  const [saveStatus, setSaveStatus] = useState<Record<number, SaveStatus>>({});
+  const [savingAll, setSavingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [groupingProgress, setGroupingProgress] = useState<string>("");
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   async function handleFilesSelected(files: FileList | null) {
@@ -119,39 +139,103 @@ export default function BatchUploadPage() {
     }
   }
 
+  async function handleRetryAllFailed() {
+    const failedIndices = results
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.error)
+      .map(({ i }) => i);
+
+    for (const i of failedIndices) {
+      await handleRetry(i);
+    }
+  }
+
+  async function handleSaveAllDrafts() {
+    setSavingAll(true);
+    const indices = results
+      .map((_, i) => i)
+      .filter((i) => !results[i].error && (saveStatus[i] ?? "idle") === "idle");
+
+    for (const i of indices) {
+      await handleSaveDraft(i);
+    }
+    setSavingAll(false);
+  }
+
   async function handleGroupPhotos() {
     setError(null);
     setStep("grouping");
 
     try {
-      const thumbnails = await Promise.all(
+      const thumbnails: Thumbnail[] = await Promise.all(
         photos.map(async (p) => {
           const { dataUrl, mediaType } = await resizeFromDataUrl(
             p.previewUrl,
             THUMB_DIMENSION,
-            0.6
+            THUMB_QUALITY
           );
           return { data: dataUrl.split(",")[1], mediaType };
         })
       );
 
-      const res = await fetch("/api/group-photos", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ images: thumbnails }),
-      });
+      const totalPhotos = thumbnails.length;
+      const finalGroups: number[][] = [];
+      let pending: number[] = [];
+      let cursor = 0;
+      let chunkNum = 0;
 
-      const data = await res.json();
+      while (cursor < totalPhotos) {
+        chunkNum += 1;
+        setGroupingProgress(`Grouping photos (part ${chunkNum})...`);
 
-      if (!res.ok) {
-        throw new Error(data.error || "Grouping failed");
+        const take = Math.max(GROUPING_CHUNK_SIZE - pending.length, 1);
+        const newIndices: number[] = [];
+        for (let i = cursor; i < Math.min(cursor + take, totalPhotos); i++) {
+          newIndices.push(i);
+        }
+
+        const chunkGlobalIndices = [...pending, ...newIndices];
+        const chunkImages = chunkGlobalIndices.map((gi) => thumbnails[gi]);
+
+        const res = await fetch("/api/group-photos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ images: chunkImages }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.error || "Grouping failed");
+        }
+
+        const remapped: number[][] = data.groups.map((g: number[]) =>
+          g.map((localIdx: number) => chunkGlobalIndices[localIdx])
+        );
+
+        cursor += newIndices.length;
+        const isLastChunk = cursor >= totalPhotos;
+
+        if (isLastChunk) {
+          finalGroups.push(...remapped);
+          pending = [];
+        } else {
+          finalGroups.push(...remapped.slice(0, -1));
+          pending = remapped[remapped.length - 1] ?? [];
+        }
+
+        if (!isLastChunk) {
+          await delay(DELAY_BETWEEN_CHUNKS_MS);
+        }
       }
 
-      setGroups(data.groups);
+      setGroups(finalGroups);
       setStep("review");
     } catch (err) {
       setError((err as Error).message);
       setStep("upload");
+    } finally {
+      setGroupingProgress("");
     }
   }
 
@@ -168,6 +252,18 @@ export default function BatchUploadPage() {
 
   function addNewGroup() {
     setGroups((prev) => [...prev, []]);
+  }
+
+  function removePhoto(photoIndex: number, fromGroup: number) {
+    setGroups((prev) => {
+      const next = prev.map((g) => [...g]);
+      next[fromGroup] = next[fromGroup].filter((i) => i !== photoIndex);
+      return next.filter((g) => g.length > 0);
+    });
+  }
+
+  function removeGroup(gIdx: number) {
+    setGroups((prev) => prev.filter((_, i) => i !== gIdx));
   }
 
   function groupImagesForRequest(group: number[]) {
@@ -239,6 +335,57 @@ export default function BatchUploadPage() {
     }
   }
 
+  async function handleSaveDraft(index: number) {
+    setSaveStatus((prev) => ({ ...prev, [index]: "saving" }));
+
+    try {
+      const result = results[index];
+      const group = groups[index] ?? [];
+      const thumb = group.length > 0 ? photos[group[0]].previewUrl : null;
+
+      const suggestion: PriceSuggestion = getPriceSuggestion(
+        result.condition,
+        Boolean(result.flaws && result.flaws.trim().length > 0)
+      );
+
+      let thumbnailUrl: string | null = null;
+      if (thumb) {
+        try {
+          thumbnailUrl = await uploadThumbnail(thumb);
+        } catch {
+          // non-fatal — draft saves without thumbnail
+        }
+      }
+
+      const res = await fetch("/api/drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: result.suggestedTitle,
+          brand: result.brand,
+          color: result.color,
+          size: result.size,
+          condition: result.condition,
+          flaws: result.flaws,
+          suggestedPrice: suggestion.suggestedPrice,
+          avgSold: suggestion.avgSold,
+          activeRangeLow: suggestion.activeRangeLow,
+          activeRangeHigh: suggestion.activeRangeHigh,
+          sellOdds: suggestion.sellOdds,
+          thumbnailUrl,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to save draft");
+      }
+
+      setSaveStatus((prev) => ({ ...prev, [index]: "saved" }));
+    } catch {
+      setSaveStatus((prev) => ({ ...prev, [index]: "error" }));
+    }
+  }
+
   return (
     <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
       <div className="flex items-center gap-3 mb-6">
@@ -270,7 +417,7 @@ export default function BatchUploadPage() {
             />
             <CloudUpload className="w-7 h-7 mx-auto text-[var(--text-secondary)] mb-2" />
             <p className="text-sm text-[var(--text-secondary)]">
-              Select all photos for this batch
+              Select all photos for this batch (up to {MAX_PHOTOS})
               <br />
               Upload in order: front of item 1, its other shots, then front
               of item 2, and so on
@@ -306,7 +453,7 @@ export default function BatchUploadPage() {
         <div className="card p-8 text-center">
           <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
           <p className="text-sm text-[var(--text-secondary)]">
-            AI is grouping your photos by item...
+            {groupingProgress || "AI is grouping your photos by item..."}
           </p>
         </div>
       )}
@@ -332,16 +479,25 @@ export default function BatchUploadPage() {
                 }}
                 className="card p-3"
               >
-                <p className="text-xs text-[var(--text-secondary)] mb-2">
-                  Item {gIdx + 1} &middot; {group.length} photo
-                  {group.length !== 1 ? "s" : ""}
-                  {group.length > MAX_PHOTOS_PER_ITEM && (
-                    <span style={{ color: "#B3261E" }}>
-                      {" "}
-                      (only first {MAX_PHOTOS_PER_ITEM} will be used)
-                    </span>
-                  )}
-                </p>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Item {gIdx + 1} &middot; {group.length} photo
+                    {group.length !== 1 ? "s" : ""}
+                    {group.length > MAX_PHOTOS_PER_ITEM && (
+                      <span style={{ color: "#B3261E" }}>
+                        {" "}
+                        (only first {MAX_PHOTOS_PER_ITEM} will be used)
+                      </span>
+                    )}
+                  </p>
+                  <button
+                    onClick={() => removeGroup(gIdx)}
+                    className="p-1 rounded hover:bg-[var(--bg-page)]"
+                    title="Delete group"
+                  >
+                    <Trash2 className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+                  </button>
+                </div>
                 <div className="flex flex-wrap gap-2 min-h-[64px]">
                   {group.map((photoIdx) => (
                     <div
@@ -353,7 +509,7 @@ export default function BatchUploadPage() {
                           JSON.stringify({ photoIndex: photoIdx, fromGroup: gIdx })
                         );
                       }}
-                      className="relative cursor-grab"
+                      className="relative cursor-grab group/photo"
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
@@ -361,6 +517,15 @@ export default function BatchUploadPage() {
                         alt={`Photo ${photoIdx + 1}`}
                         className="w-14 h-14 object-cover rounded-md"
                       />
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removePhoto(photoIdx, gIdx);
+                        }}
+                        className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-200 rounded-full flex items-center justify-center opacity-0 group-hover/photo:opacity-100 transition-opacity"
+                      >
+                        <X className="w-2.5 h-2.5 text-gray-600" />
+                      </button>
                       <GripVertical
                         className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-white rounded-full p-0.5"
                         style={{ color: "var(--text-tertiary)" }}
@@ -395,9 +560,48 @@ export default function BatchUploadPage() {
 
       {step === "results" && (
         <div className="flex flex-col gap-4">
+          {(() => {
+            const unsaved = results.filter((r, i) => !r.error && (saveStatus[i] ?? "idle") === "idle").length;
+            const allSaved = results.every((r, i) => r.error || saveStatus[i] === "saved");
+            const failedCount = results.filter((r) => r.error).length;
+            const anyRetrying = Object.values(retrying).some(Boolean);
+            return (
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSaveAllDrafts}
+                  disabled={savingAll || allSaved || unsaved === 0}
+                  className="btn btn-primary flex-1"
+                >
+                  {savingAll ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : allSaved ? (
+                    <Check className="w-4 h-4" />
+                  ) : (
+                    <FileText className="w-4 h-4" />
+                  )}
+                  {allSaved ? "All saved" : savingAll ? "Saving..." : `Save all (${unsaved})`}
+                </button>
+                {failedCount > 0 && (
+                  <button
+                    onClick={handleRetryAllFailed}
+                    disabled={anyRetrying}
+                    className="btn flex-1"
+                  >
+                    {anyRetrying ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <RotateCw className="w-4 h-4" />
+                    )}
+                    {anyRetrying ? "Retrying..." : `Retry failed (${failedCount})`}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
           {results.map((result, i) => {
             const group = groups[i] ?? [];
             const thumb = group.length > 0 ? photos[group[0]].previewUrl : undefined;
+            const status = saveStatus[i] ?? "idle";
 
             if (result.error) {
               return (
@@ -461,10 +665,26 @@ export default function BatchUploadPage() {
                   />
                 </div>
 
+                {status === "error" && (
+                  <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
+                    Could not save draft. Try again.
+                  </p>
+                )}
+
                 <div className="flex gap-2">
-                  <button className="btn flex-1">
-                    <FileText className="w-4 h-4" />
-                    Save draft
+                  <button
+                    onClick={() => handleSaveDraft(i)}
+                    disabled={status === "saving" || status === "saved"}
+                    className="btn flex-1"
+                  >
+                    {status === "saving" ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : status === "saved" ? (
+                      <Check className="w-4 h-4" style={{ color: "#3B6D11" }} />
+                    ) : (
+                      <FileText className="w-4 h-4" />
+                    )}
+                    {status === "saved" ? "Saved" : status === "saving" ? "Saving..." : "Save draft"}
                   </button>
                   <button className="btn btn-primary flex-1">
                     <Upload className="w-4 h-4" />
@@ -509,3 +729,4 @@ function MiniStat({
     </div>
   );
 }
+

@@ -13,7 +13,9 @@ import {
   Loader2,
   Check,
 } from "lucide-react";
+
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
+import { uploadThumbnail } from "@/lib/storage";
 
 const CONDITIONS: Condition[] = [
   "New with tags",
@@ -95,6 +97,7 @@ export default function NewListingPage() {
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -155,6 +158,47 @@ export default function NewListingPage() {
       setError((err as Error).message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSaveDraft() {
+    setSaveStatus("saving");
+    try {
+      const thumb = photos["front"]?.previewUrl ?? photos[Object.keys(photos)[0]]?.previewUrl ?? null;
+      let thumbnailUrl: string | null = null;
+      if (thumb) {
+        try {
+          thumbnailUrl = await uploadThumbnail(thumb);
+        } catch {
+          // non-fatal
+        }
+      }
+
+      const { suggestedPrice, avgSold, activeRangeLow, activeRangeHigh, sellOdds } = result ?? {};
+
+      const res = await fetch("/api/drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          brand: aiResult?.brand ?? null,
+          color: aiResult?.color ?? null,
+          size: aiResult?.size ?? null,
+          condition,
+          flaws,
+          suggestedPrice: suggestedPrice ?? null,
+          avgSold: avgSold ?? null,
+          activeRangeLow: activeRangeLow ?? null,
+          activeRangeHigh: activeRangeHigh ?? null,
+          sellOdds: sellOdds ?? null,
+          thumbnailUrl,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to save draft");
+      setSaveStatus("saved");
+    } catch {
+      setSaveStatus("error");
     }
   }
 
@@ -277,9 +321,19 @@ export default function NewListingPage() {
           </p>
 
           <div className="flex gap-2">
-            <button className="btn flex-1">
-              <FileText className="w-4 h-4" />
-              Save draft
+            <button
+              className="btn flex-1"
+              onClick={handleSaveDraft}
+              disabled={saveStatus === "saving" || saveStatus === "saved"}
+            >
+              {saveStatus === "saving" ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : saveStatus === "saved" ? (
+                <Check className="w-4 h-4" />
+              ) : (
+                <FileText className="w-4 h-4" />
+              )}
+              {saveStatus === "saved" ? "Saved!" : saveStatus === "saving" ? "Saving..." : "Save draft"}
             </button>
             <button className="btn btn-primary flex-1">
               <Upload className="w-4 h-4" />

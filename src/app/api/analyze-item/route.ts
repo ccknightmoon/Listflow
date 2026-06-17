@@ -1,4 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
+import OpenAI from "openai";
+
+const prompt = `You are helping a reseller list a clothing item on eBay.
+Look at these photos (front/back, measurements, and any flaw close-ups) and
+respond with ONLY a JSON object (no markdown, no extra text) in this exact
+shape:
+
+{
+  "itemType": "string, e.g. 'hoodie', 'jeans', 'jacket'",
+  "brand": "string, best guess at brand or 'Unknown'",
+  "color": "string",
+  "size": "string, best guess from tags/labels visible, or 'Unknown'",
+  "condition": "one of: New with tags, New without tags, Excellent used, Good - minor flaws, Fair - notable flaws",
+  "flaws": "short description of any visible flaws, or empty string if none",
+  "suggestedTitle": "a concise eBay listing title under 80 characters"
+}`;
 
 export async function POST(req: NextRequest) {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -27,59 +43,25 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const imageContent = images.map((img) => ({
-    type: "image_url" as const,
-    image_url: {
-      url: `data:${img.mediaType};base64,${img.data}`,
-    },
+  const imageContent: OpenAI.Chat.ChatCompletionContentPart[] = images.map((img) => ({
+    type: "image_url",
+    image_url: { url: `data:${img.mediaType};base64,${img.data}` },
   }));
 
-  const prompt = `You are helping a reseller list a clothing item on eBay.
-Look at these photos (front/back, measurements, and any flaw close-ups) and
-respond with ONLY a JSON object (no markdown, no extra text) in this exact
-shape:
-
-{
-  "itemType": "string, e.g. 'hoodie', 'jeans', 'jacket'",
-  "brand": "string, best guess at brand or 'Unknown'",
-  "color": "string",
-  "size": "string, best guess from tags/labels visible, or 'Unknown'",
-  "condition": "one of: New with tags, New without tags, Excellent used, Good - minor flaws, Fair - notable flaws",
-  "flaws": "short description of any visible flaws, or empty string if none",
-  "suggestedTitle": "a concise eBay listing title under 80 characters"
-}`;
-
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        max_tokens: 500,
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: prompt }, ...imageContent],
-          },
-        ],
-      }),
+    const client = new OpenAI({ apiKey, fetch: globalThis.fetch });
+    const response = await client.chat.completions.create({
+      model: "gpt-4o",
+      max_tokens: 500,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: prompt }, ...imageContent],
+        },
+      ],
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      return NextResponse.json(
-        { error: `OpenAI API error: ${errText}` },
-        { status: 502 }
-      );
-    }
-
-    const data = await response.json();
-
-    const rawText: string = data.choices?.[0]?.message?.content ?? "";
-
+    const rawText = response.choices[0]?.message?.content ?? "";
     const cleaned = rawText.replace(/```json|```/g, "").trim();
 
     let parsed;

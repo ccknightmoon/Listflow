@@ -1,21 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-
-/**
- * POST /api/analyze-batch
- *
- * Accepts multiple groups of photos (one group per item) and analyzes
- * them ONE AT A TIME (not in parallel) to stay within OpenAI's per-minute
- * token rate limit on smaller accounts. Images are sent in "low detail"
- * mode, which uses far fewer tokens per image while still being plenty
- * for reading tags, identifying brands/condition, and spotting flaws.
- *
- * Request body:
- * { "groups": [ { "images": [{ "data": "<base64>", "mediaType": "image/jpeg" }, ...] }, ... ] }
- *
- * Response:
- * { "results": [ { itemType, brand, color, size, condition, flaws, suggestedTitle }, ... ] }
- * If a group fails after retries, its entry will have an "error" field instead.
- */
+import OpenAI from "openai";
 
 const PROMPT = `You are helping a reseller list a clothing item on eBay.
 Look at these photos (front/back, measurements, and any flaw close-ups) and
@@ -41,66 +25,45 @@ function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function callOpenAi(
-  apiKey: string,
+async function analyzeGroupWithRetry(
+  client: OpenAI,
   images: { data: string; mediaType: string }[]
 ) {
-  const imageContent = images.map((img) => ({
-    type: "image_url" as const,
+  const imageContent: OpenAI.Chat.ChatCompletionContentPart[] = images.map((img) => ({
+    type: "image_url",
     image_url: {
       url: `data:${img.mediaType};base64,${img.data}`,
-      detail: "low" as const,
+      detail: "low",
     },
   }));
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      max_tokens: 500,
-      messages: [
-        {
-          role: "user",
-          content: [{ type: "text", text: PROMPT }, ...imageContent],
-        },
-      ],
-    }),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    const isRateLimit = errText.includes("rate_limit_exceeded");
-    const error = new Error(`OpenAI API error: ${errText}`);
-    (error as Error & { isRateLimit?: boolean }).isRateLimit = isRateLimit;
-    throw error;
-  }
-
-  const data = await response.json();
-  const rawText: string = data.choices?.[0]?.message?.content ?? "";
-  const cleaned = rawText.replace(/```json|```/g, "").trim();
-
-  return JSON.parse(cleaned);
-}
-
-async function analyzeGroupWithRetry(
-  apiKey: string,
-  images: { data: string; mediaType: string }[]
-) {
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      return await callOpenAi(apiKey, images);
+      const response = await client.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 500,
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "text", text: PROMPT }, ...imageContent],
+          },
+        ],
+      });
+
+      const rawText = response.choices[0]?.message?.content ?? "";
+      const cleaned = rawText.replace(/```json|```/g, "").trim();
+      return JSON.parse(cleaned);
     } catch (err) {
       lastError = err as Error;
-      const isRateLimit = (err as Error & { isRateLimit?: boolean }).isRateLimit;
+      const isRateLimit =
+        err instanceof OpenAI.APIError && err.status === 429;
 
       if (attempt < MAX_ATTEMPTS) {
-        const waitTime = isRateLimit ? RATE_LIMIT_RETRY_DELAY_MS : NORMAL_RETRY_DELAY_MS * attempt;
+        const waitTime = isRateLimit
+          ? RATE_LIMIT_RETRY_DELAY_MS
+          : NORMAL_RETRY_DELAY_MS * attempt;
         await delay(waitTime);
       }
     }
@@ -136,10 +99,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const client = new OpenAI({ apiKey, fetch: globalThis.fetch });
   const results = [];
+
   for (let i = 0; i < groups.length; i++) {
     try {
-      const result = await analyzeGroupWithRetry(apiKey, groups[i].images);
+      const result = await analyzeGroupWithRetry(client, groups[i].images);
       results.push(result);
     } catch (err) {
       results.push({ error: (err as Error).message });
