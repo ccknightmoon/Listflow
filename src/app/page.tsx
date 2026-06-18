@@ -12,16 +12,9 @@ export default function SplashPage() {
 
       <div className="flex flex-col gap-3 w-full max-w-xs">
         <Link href="/login" className="btn btn-primary w-full">
-          Get started
-        </Link>
-        <Link href="/dashboard" className="btn w-full">
-          View demo dashboard
+          Sign in
         </Link>
       </div>
-
-      <p className="text-xs text-[var(--text-tertiary)] mt-6">
-        Pro membership · 7-day free trial
-      </p>
     </main>
   );
 }
