@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
         const existing = await getOfferBySku(sku);
         const offers = (existing.data as { offers?: Array<{ offerId: string }> }).offers;
         offerId = offers?.[0]?.offerId;
-        if (!offerId) return NextResponse.json({ error: "Offer already exists but could not retrieve it" }, { status: 500 });
+        if (!offerId) return NextResponse.json({ error: `Offer already exists but could not retrieve it (sku=${sku}, getOffer status=${existing.status}, body=${JSON.stringify(existing.data)})` }, { status: 500 });
       } else {
         const msg = err0?.longMessage ?? err0?.message ?? "Failed to create offer";
         return NextResponse.json({ error: msg }, { status: 400 });
