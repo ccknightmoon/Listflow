@@ -47,10 +47,15 @@ export async function POST(req: NextRequest) {
       const err0 = errData.errors?.[0];
       const isAlreadyExists = err0?.errorId === 25002 || err0?.message?.toLowerCase().includes("already exists");
       if (isAlreadyExists) {
-        const existing = await getOfferBySku(sku);
-        const offers = (existing.data as { offers?: Array<{ offerId: string }> }).offers;
-        offerId = offers?.[0]?.offerId;
-        if (!offerId) return NextResponse.json({ error: `Offer already exists but could not retrieve it (sku=${sku}, getOffer status=${existing.status}, body=${JSON.stringify(existing.data)})` }, { status: 500 });
+        // Try new SKU format first, then fall back to old format (listflow-{uuid-with-hyphens})
+        const skusToTry = [sku, `listflow-${draftId}`];
+        for (const candidateSku of skusToTry) {
+          const existing = await getOfferBySku(candidateSku);
+          const offers = (existing.data as { offers?: Array<{ offerId: string }> }).offers;
+          offerId = offers?.[0]?.offerId;
+          if (offerId) break;
+        }
+        if (!offerId) return NextResponse.json({ error: `Offer already exists but could not retrieve it (tried skus: ${skusToTry.join(", ")})` }, { status: 500 });
       } else {
         const msg = err0?.longMessage ?? err0?.message ?? "Failed to create offer";
         return NextResponse.json({ error: msg }, { status: 400 });
