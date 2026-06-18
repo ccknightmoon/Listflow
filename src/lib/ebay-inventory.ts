@@ -114,6 +114,18 @@ export async function upsertInventoryItem(sku: string, draft: {
   return inventoryRequest("PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, body);
 }
 
+const MERCHANT_LOCATION_KEY = "listflow_us";
+
+export async function ensureMerchantLocation() {
+  // Create a US merchant location; ignore 409 (already exists)
+  await inventoryRequest("POST", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}`, {
+    location: { address: { country: "US" } },
+    locationTypes: ["WAREHOUSE"],
+    merchantLocationStatus: "ENABLED",
+    name: "Listflow Default",
+  });
+}
+
 export async function createOffer(sku: string, price: number, categoryId: string, isHeavy = false) {
   return inventoryRequest("POST", "/sell/inventory/v1/offer", {
     sku,
@@ -121,6 +133,7 @@ export async function createOffer(sku: string, price: number, categoryId: string
     format: "FIXED_PRICE",
     availableQuantity: 1,
     categoryId,
+    merchantLocationKey: MERCHANT_LOCATION_KEY,
     listingPolicies: {
       fulfillmentPolicyId: isHeavy
         ? process.env.EBAY_SHIPPING_HEAVY_ID

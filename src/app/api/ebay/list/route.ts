@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { upsertInventoryItem, createOffer, publishOffer, getCategoryId } from "@/lib/ebay-inventory";
+import { upsertInventoryItem, createOffer, publishOffer, getCategoryId, ensureMerchantLocation } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
 
@@ -29,6 +29,8 @@ export async function POST(req: NextRequest) {
 
     const sku = draft.custom_sku || `listflow${draftId.replace(/-/g, "")}`;
     const categoryId = getCategoryId(draft.title || "");
+
+    await ensureMerchantLocation();
 
     const itemResult = await upsertInventoryItem(sku, draft, categoryId);
     if (itemResult.status >= 400) {
