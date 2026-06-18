@@ -206,6 +206,10 @@ export async function publishOffer(offerId: string) {
   return inventoryRequest("POST", `/sell/inventory/v1/offer/${offerId}/publish`, {});
 }
 
+export async function deleteOffer(offerId: string) {
+  return inventoryRequest("DELETE", `/sell/inventory/v1/offer/${offerId}`, undefined);
+}
+
 export async function getOfferBySku(sku: string) {
   return inventoryRequest("GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
 }

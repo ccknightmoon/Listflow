@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  upsertInventoryItem, createOffer, updateOffer, getOfferBySku, getAllOffers,
+  upsertInventoryItem, createOffer, updateOffer, deleteOffer, getOfferBySku, getAllOffers,
   publishOffer, getCategoryIdForTitle, ensureMerchantLocation, recreateMerchantLocation,
 } from "@/lib/ebay-inventory";
 
@@ -72,12 +72,19 @@ export async function POST(req: NextRequest) {
         if (!offerId) {
           return NextResponse.json({ error: "Offer already exists but could not be retrieved. Please contact eBay support." }, { status: 500 });
         }
-        // If offer is under an old SKU, re-upsert that inventory item so its condition/aspects are current
         if (foundViaSku && foundViaSku !== sku) {
-          await upsertInventoryItem(foundViaSku, draft, categoryId);
+          // Old-SKU offer: delete it so we can create a fresh one linked to the current inventory item
+          await deleteOffer(offerId);
+          const freshResult = await createOffer(sku, draft.suggested_price, categoryId, heavy);
+          offerId = (freshResult.data as { offerId?: string }).offerId;
+          if (freshResult.status >= 400 || !offerId) {
+            const e = (freshResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
+            return NextResponse.json({ error: e?.message ?? "Failed to create offer after deleting old one" }, { status: 400 });
+          }
+        } else {
+          // Same-SKU offer: update price, category, and merchant location
+          await updateOffer(offerId, draft.suggested_price, categoryId, heavy);
         }
-        // Update the recovered offer with current price, category, and merchant location
-        await updateOffer(offerId, draft.suggested_price, categoryId, heavy);
 
       } else if (msg.includes("location")) {
         // Merchant location not found — recreate it and retry once
