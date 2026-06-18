@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { upsertInventoryItem, createOffer, publishOffer, getCategoryId } from "@/lib/ebay-inventory";
+import { upsertInventoryItem, createOffer, getCategoryId } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
 
@@ -14,10 +14,6 @@ export async function POST(req: NextRequest) {
     const { draftId, isHeavy } = await req.json();
     if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
-    if (!process.env.EBAY_OAUTH_REFRESH_TOKEN) {
-      return NextResponse.json({ error: "eBay not connected — go to /api/ebay/connect to authorize" }, { status: 400 });
-    }
-
     const { data: draft, error: dbError } = await supabase
       .from("drafts")
       .select("*")
@@ -25,7 +21,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
-    if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before listing" }, { status: 400 });
+    if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before saving to eBay" }, { status: 400 });
 
     const sku = `listflow-${draftId}`;
     const categoryId = getCategoryId(draft.title || "");
@@ -43,21 +39,7 @@ export async function POST(req: NextRequest) {
     }
 
     const offerId = (offerResult.data as { offerId?: string }).offerId;
-    if (!offerId) return NextResponse.json({ error: "No offer ID returned" }, { status: 500 });
-
-    const publishResult = await publishOffer(offerId);
-    if (publishResult.status >= 400) {
-      const errData = publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> };
-      const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? "Failed to publish listing";
-      return NextResponse.json({ error: msg }, { status: 400 });
-    }
-
-    const listingId = (publishResult.data as { listingId?: string }).listingId;
-    return NextResponse.json({
-      success: true,
-      listingId,
-      url: `https://www.ebay.com/itm/${listingId}`,
-    });
+    return NextResponse.json({ success: true, offerId });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

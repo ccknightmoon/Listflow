@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, FileText, BarChart2, LogOut } from "lucide-react";
+import { Home, FileText, ShoppingBag, LogOut } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 
 const navItems = [
   { href: "/dashboard", icon: Home, label: "Home" },
   { href: "/drafts", icon: FileText, label: "Drafts" },
-  { href: "/membership", icon: BarChart2, label: "Plans" },
+  { href: "/ebay-inventory", icon: ShoppingBag, label: "eBay" },
 ];
 
 export default function BottomNav() {

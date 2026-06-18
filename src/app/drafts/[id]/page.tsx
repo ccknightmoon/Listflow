@@ -36,6 +36,8 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [deleting, setDeleting] = useState(false);
   const [listing, setListing] = useState(false);
   const [listingUrl, setListingUrl] = useState<string | null>(null);
+  const [savingToEbay, setSavingToEbay] = useState(false);
+  const [savedToEbay, setSavedToEbay] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
@@ -94,6 +96,26 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       setError((err as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleSaveToEbay() {
+    setSavingToEbay(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ebay/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: params.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to save to eBay");
+      setSavedToEbay(true);
+      setTimeout(() => setSavedToEbay(false), 3000);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingToEbay(false);
     }
   }
 
@@ -265,22 +287,24 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             View on eBay
           </a>
         ) : (
-          <div className="flex gap-2">
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <button onClick={handleSave} disabled={saving || saved} className="btn flex-1">
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : null}
+                {saving ? "Saving..." : saved ? "Saved!" : "Save changes"}
+              </button>
+              <button onClick={handleList} disabled={listing} className="btn btn-primary flex-1">
+                {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {listing ? "Listing..." : "List on eBay"}
+              </button>
+            </div>
             <button
-              onClick={handleSave}
-              disabled={saving || saved}
-              className="btn flex-1"
+              onClick={handleSaveToEbay}
+              disabled={savingToEbay || savedToEbay}
+              className="btn w-full text-sm"
             >
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : null}
-              {saving ? "Saving..." : saved ? "Saved!" : "Save changes"}
-            </button>
-            <button
-              onClick={handleList}
-              disabled={listing}
-              className="btn btn-primary flex-1"
-            >
-              {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              {listing ? "Listing..." : "List on eBay"}
+              {savingToEbay ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {savingToEbay ? "Saving to eBay..." : savedToEbay ? "Saved to eBay drafts!" : "Save to eBay as draft"}
             </button>
           </div>
         )}
