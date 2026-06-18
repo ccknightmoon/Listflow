@@ -277,22 +277,37 @@ export default function BatchUploadPage() {
     setError(null);
     setStep("analyzing");
 
+    const allResults: AiResult[] = [];
+
     try {
-      const res = await fetch("/api/analyze-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          groups: groups.map((g) => ({ images: groupImagesForRequest(g) })),
-        }),
-      });
+      for (let i = 0; i < groups.length; i++) {
+        const res = await fetch("/api/analyze-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            groups: [{ images: groupImagesForRequest(groups[i]) }],
+          }),
+        });
 
-      const data = await res.json();
+        let data: { results?: AiResult[]; error?: string };
+        try {
+          data = await res.json();
+        } catch {
+          data = { error: `Server error (${res.status})` };
+        }
 
-      if (!res.ok) {
-        throw new Error(data.error || "Analysis failed");
+        if (!res.ok || !data.results) {
+          allResults.push({ itemType: "", brand: "", color: "", size: "", condition: "Good - minor flaws", flaws: "", suggestedTitle: "", error: data.error || "Analysis failed" });
+        } else {
+          allResults.push(data.results[0]);
+        }
+
+        if (i < groups.length - 1) {
+          await delay(1000);
+        }
       }
 
-      setResults(data.results);
+      setResults(allResults);
       setStep("results");
     } catch (err) {
       setError((err as Error).message);

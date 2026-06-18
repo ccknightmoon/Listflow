@@ -21,7 +21,6 @@ shape:
 const MAX_ATTEMPTS = 3;
 const NORMAL_RETRY_DELAY_MS = 1000;
 const RATE_LIMIT_RETRY_DELAY_MS = 15000;
-const DELAY_BETWEEN_ITEMS_MS = 3000;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -107,9 +106,6 @@ export async function POST(req: NextRequest) {
       results.push({ error: (err as Error).message });
     }
 
-    if (i < groups.length - 1) {
-      await delay(DELAY_BETWEEN_ITEMS_MS);
-    }
   }
 
   return NextResponse.json({ results });
