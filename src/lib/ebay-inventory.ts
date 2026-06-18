@@ -24,9 +24,11 @@ export function getCategoryId(title: string): string {
 export async function getCategoryIdForTitle(title: string): Promise<string> {
   const fallback = getCategoryId(title);
   try {
+    // Append "clothing" to bias taxonomy suggestions toward apparel categories
+    const query = `${(title || "").slice(0, 80)} clothing`;
     const result = await inventoryRequest(
       "GET",
-      `/commerce/taxonomy/v1/category_tree/0/get_category_suggestions?q=${encodeURIComponent((title || "").slice(0, 100))}`
+      `/commerce/taxonomy/v1/category_tree/0/get_category_suggestions?q=${encodeURIComponent(query)}`
     );
     if (result.status < 400) {
       type Suggestion = { category: { categoryId: string } };
@@ -38,6 +40,18 @@ export async function getCategoryIdForTitle(title: string): Promise<string> {
     // fall through
   }
   return fallback;
+}
+
+// Condition values for non-clothing categories (fan apparel, collectibles, etc.)
+const CONDITION_FALLBACK: Record<string, string> = {
+  USED_EXCELLENT: "VERY_GOOD",
+  USED_GOOD: "GOOD",
+  USED_ACCEPTABLE: "ACCEPTABLE",
+};
+
+export function getFallbackCondition(draftCondition: string | null): string {
+  const mapped = CONDITION_MAP[draftCondition ?? ""] ?? "USED_GOOD";
+  return CONDITION_FALLBACK[mapped] ?? mapped;
 }
 
 export async function inventoryRequest(
@@ -91,7 +105,7 @@ export async function upsertInventoryItem(sku: string, draft: {
   fit?: string | null;
   pattern?: string | null;
   description?: string | null;
-}, categoryId = "1059") {
+}, categoryId = "1059", conditionOverride?: string) {
   const aspects: Record<string, string[]> = {};
   aspects["Department"] = [getDepartment(draft.title || "")];
   aspects["Size Type"] = ["Regular"];
@@ -115,7 +129,7 @@ export async function upsertInventoryItem(sku: string, draft: {
     draft.flaws ? `Notes: ${draft.flaws}` : null,
   ].filter(Boolean);
 
-  const condition = CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
+  const condition = conditionOverride ?? CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
   const isUsed = !["NEW", "NEW_OTHER"].includes(condition);
 
   const body: Record<string, unknown> = {

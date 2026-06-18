@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   upsertInventoryItem, createOffer, updateOffer, deleteOffer, getOfferBySku, getAllOffers,
-  publishOffer, getCategoryIdForTitle, ensureMerchantLocation, recreateMerchantLocation,
+  publishOffer, getCategoryIdForTitle, getFallbackCondition, ensureMerchantLocation, recreateMerchantLocation,
 } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
@@ -104,11 +104,22 @@ export async function POST(req: NextRequest) {
 
     if (!offerId) return NextResponse.json({ error: "No offer ID returned" }, { status: 500 });
 
-    const publishResult = await publishOffer(offerId);
+    let publishResult = await publishOffer(offerId);
     if (publishResult.status >= 400) {
-      const errData = publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> };
-      const errMsg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? "Failed to publish listing";
-      return NextResponse.json({ error: errMsg }, { status: 400 });
+      const publishErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
+      const errMsg = publishErr?.longMessage ?? publishErr?.message ?? "";
+
+      if (errMsg.toLowerCase().includes("condition")) {
+        // Category requires non-clothing condition values — re-upsert item with fallback and retry
+        const fallbackCond = getFallbackCondition(draft.condition);
+        await upsertInventoryItem(sku, draft, categoryId, fallbackCond);
+        publishResult = await publishOffer(offerId);
+      }
+
+      if (publishResult.status >= 400) {
+        const retryErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
+        return NextResponse.json({ error: retryErr?.longMessage ?? retryErr?.message ?? "Failed to publish listing" }, { status: 400 });
+      }
     }
 
     const listingId = (publishResult.data as { listingId?: string }).listingId;
