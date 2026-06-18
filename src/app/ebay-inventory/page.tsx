@@ -6,7 +6,7 @@ import { ArrowLeft, Loader2, ExternalLink, Upload, Shirt } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 interface Listing {
-  offerId: string;
+  offerId: string | null;
   sku: string;
   status: string;
   listingId?: string;
@@ -38,8 +38,8 @@ export default function EbayInventoryPage() {
     }
   }
 
-  async function handlePublish(offerId: string) {
-    setPublishing(offerId);
+  async function handlePublish(sku: string, offerId: string) {
+    setPublishing(sku);
     try {
       const res = await fetch("/api/ebay/publish", {
         method: "POST",
@@ -120,7 +120,7 @@ export default function EbayInventoryPage() {
           <h2 className="text-sm font-medium text-[var(--text-secondary)] mb-2">eBay Drafts ({drafts.length})</h2>
           <div className="flex flex-col gap-2">
             {drafts.map((l) => (
-              <div key={l.offerId} className="card flex items-center gap-3 p-3">
+              <div key={l.sku} className="card flex items-center gap-3 p-3">
                 {l.thumbnail ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={l.thumbnail} alt={l.title} className="w-10 h-10 rounded-md object-cover flex-shrink-0" />
@@ -131,16 +131,20 @@ export default function EbayInventoryPage() {
                 )}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{l.title}</p>
-                  <p className="text-xs text-[var(--text-secondary)]">${l.price} · Draft</p>
+                  <p className="text-xs text-[var(--text-secondary)]">{l.price ? `$${l.price}` : "No price"} · {l.status === "NO_OFFER" ? "No offer" : "Draft"}</p>
                 </div>
-                <button
-                  onClick={() => handlePublish(l.offerId)}
-                  disabled={publishing === l.offerId}
-                  className="btn btn-primary text-xs px-3 py-1 flex items-center gap-1"
-                >
-                  {publishing === l.offerId ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
-                  {publishing === l.offerId ? "Publishing..." : "Go Live"}
-                </button>
+                {l.offerId ? (
+                  <button
+                    onClick={() => handlePublish(l.sku, l.offerId)}
+                    disabled={publishing === l.sku}
+                    className="btn btn-primary text-xs px-3 py-1 flex items-center gap-1"
+                  >
+                    {publishing === l.sku ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                    {publishing === l.sku ? "Publishing..." : "Go Live"}
+                  </button>
+                ) : (
+                  <span className="text-xs text-[var(--text-tertiary)] px-3">No offer</span>
+                )}
               </div>
             ))}
           </div>
