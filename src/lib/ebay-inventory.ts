@@ -117,13 +117,20 @@ export async function upsertInventoryItem(sku: string, draft: {
 const MERCHANT_LOCATION_KEY = "listflow_us";
 
 export async function ensureMerchantLocation() {
-  await inventoryRequest("POST", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}`, {
-    location: { address: { country: "US" } },
+  const result = await inventoryRequest("POST", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}`, {
+    location: { address: { country: "US", postalCode: "10001" } },
     locationTypes: ["WAREHOUSE"],
     merchantLocationStatus: "ENABLED",
     name: "Listflow Default",
   });
-  // Ignore response — 200 means created, any error (incl. 409 already-exists) is acceptable
+  if (result.status >= 400) {
+    const errData = result.data as { errors?: Array<{ message?: string }> };
+    const msg = (errData.errors?.[0]?.message ?? "").toLowerCase();
+    // 409 / "already exists" is fine — location already set up
+    if (!msg.includes("already") && !msg.includes("exist")) {
+      throw new Error(`Merchant location setup failed (${result.status}): ${errData.errors?.[0]?.message ?? JSON.stringify(result.data)}`);
+    }
+  }
 }
 
 export async function recreateMerchantLocation() {
