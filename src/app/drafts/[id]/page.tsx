@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles } from "lucide-react";
 
 const CONDITIONS = [
   "New with tags",
@@ -25,6 +25,15 @@ interface Draft {
   avg_sold: number | null;
   sell_odds: string | null;
   thumbnail_url: string | null;
+  item_type: string | null;
+  style: string | null;
+  material: string | null;
+  theme: string | null;
+  sleeve_length: string | null;
+  neckline: string | null;
+  fit: string | null;
+  pattern: string | null;
+  description: string | null;
 }
 
 export default function DraftDetailPage({ params }: { params: { id: string } }) {
@@ -38,6 +47,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [listingUrl, setListingUrl] = useState<string | null>(null);
   const [savingToEbay, setSavingToEbay] = useState(false);
   const [savedToEbay, setSavedToEbay] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
@@ -47,6 +57,15 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [condition, setCondition] = useState("");
   const [flaws, setFlaws] = useState("");
   const [price, setPrice] = useState("");
+  const [itemType, setItemType] = useState("");
+  const [style, setStyle] = useState("");
+  const [material, setMaterial] = useState("");
+  const [theme, setTheme] = useState("");
+  const [sleevLength, setSleevLength] = useState("");
+  const [neckline, setNeckline] = useState("");
+  const [fit, setFit] = useState("");
+  const [pattern, setPattern] = useState("");
+  const [description, setDescription] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -63,6 +82,15 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         setCondition(d.condition ?? "");
         setFlaws(d.flaws ?? "");
         setPrice(d.suggested_price != null ? String(d.suggested_price) : "");
+        setItemType(d.item_type ?? "");
+        setStyle(d.style ?? "");
+        setMaterial(d.material ?? "");
+        setTheme(d.theme ?? "");
+        setSleevLength(d.sleeve_length ?? "");
+        setNeckline(d.neckline ?? "");
+        setFit(d.fit ?? "");
+        setPattern(d.pattern ?? "");
+        setDescription(d.description ?? "");
       } catch (err) {
         setError((err as Error).message);
       } finally {
@@ -72,6 +100,33 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
     load();
   }, [params.id]);
 
+  async function handleSuggest() {
+    setSuggesting(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ai/suggest-specifics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, brand, color, size, condition, flaws }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "AI suggestion failed");
+      if (data.item_type) setItemType(data.item_type);
+      if (data.style) setStyle(data.style);
+      if (data.material) setMaterial(data.material);
+      if (data.theme) setTheme(data.theme);
+      if (data.sleeve_length) setSleevLength(data.sleeve_length);
+      if (data.neckline) setNeckline(data.neckline);
+      if (data.fit) setFit(data.fit);
+      if (data.pattern) setPattern(data.pattern);
+      if (data.description) setDescription(data.description);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSuggesting(false);
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaved(false);
@@ -80,13 +135,10 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title,
-          brand,
-          color,
-          size,
-          condition,
-          flaws,
+          title, brand, color, size, condition, flaws,
           suggestedPrice: price ? Number(price) : null,
+          itemType, style, material, theme,
+          sleevLength, neckline, fit, pattern, description,
         }),
       });
       if (!res.ok) throw new Error("Failed to save");
@@ -226,7 +278,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         </div>
       )}
 
-      <div className="flex flex-col gap-3 mb-6">
+      <div className="flex flex-col gap-3 mb-4">
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Title</label>
           <input className="input w-full" value={title} onChange={(e) => setTitle(e.target.value)} />
@@ -271,6 +323,77 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             value={flaws}
             onChange={(e) => setFlaws(e.target.value)}
           />
+        </div>
+      </div>
+
+      {/* AI Suggest Section */}
+      <div className="card p-4 mb-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <p className="text-sm font-medium">eBay Item Specifics</p>
+            <p className="text-xs text-[var(--text-secondary)]">More specifics = better eBay search ranking</p>
+          </div>
+          <button
+            onClick={handleSuggest}
+            disabled={suggesting}
+            className="btn btn-primary flex items-center gap-1.5 text-sm px-3 py-1.5"
+          >
+            {suggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {suggesting ? "Thinking..." : "AI Suggest"}
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Type</label>
+              <input className="input w-full" placeholder="T-Shirt, Hoodie, Jacket..." value={itemType} onChange={(e) => setItemType(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Style</label>
+              <input className="input w-full" placeholder="Pullover, Zip-Up..." value={style} onChange={(e) => setStyle(e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Material</label>
+              <input className="input w-full" placeholder="Cotton, Denim..." value={material} onChange={(e) => setMaterial(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Theme</label>
+              <input className="input w-full" placeholder="Vintage, Band Tee..." value={theme} onChange={(e) => setTheme(e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Sleeve Length</label>
+              <input className="input w-full" placeholder="Short Sleeve..." value={sleevLength} onChange={(e) => setSleevLength(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Neckline</label>
+              <input className="input w-full" placeholder="Crew Neck, V-Neck..." value={neckline} onChange={(e) => setNeckline(e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Fit</label>
+              <input className="input w-full" placeholder="Regular, Slim..." value={fit} onChange={(e) => setFit(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Pattern</label>
+              <input className="input w-full" placeholder="Solid, Graphic..." value={pattern} onChange={(e) => setPattern(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Description</label>
+            <textarea
+              className="input w-full"
+              rows={4}
+              placeholder="eBay listing description..."
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 

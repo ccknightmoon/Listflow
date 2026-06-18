@@ -61,12 +61,29 @@ export async function upsertInventoryItem(sku: string, draft: {
   condition: string | null;
   flaws: string | null;
   thumbnail_url: string | null;
+  item_type?: string | null;
+  style?: string | null;
+  material?: string | null;
+  theme?: string | null;
+  sleeve_length?: string | null;
+  neckline?: string | null;
+  fit?: string | null;
+  pattern?: string | null;
+  description?: string | null;
 }, categoryId = "1059") {
   const aspects: Record<string, string[]> = {};
   aspects["Department"] = [getDepartment(categoryId)];
   if (draft.brand) aspects["Brand"] = [draft.brand];
   if (draft.color) aspects["Color"] = [draft.color];
   if (draft.size) aspects["Size"] = [draft.size];
+  if (draft.item_type) aspects["Type"] = [draft.item_type];
+  if (draft.style) aspects["Style"] = [draft.style];
+  if (draft.material) aspects["Material"] = [draft.material];
+  if (draft.theme) aspects["Theme"] = [draft.theme];
+  if (draft.sleeve_length) aspects["Sleeve Length"] = [draft.sleeve_length];
+  if (draft.neckline) aspects["Neckline"] = [draft.neckline];
+  if (draft.fit) aspects["Fit"] = [draft.fit];
+  if (draft.pattern) aspects["Pattern"] = [draft.pattern];
 
   const descParts = [
     draft.brand ? `Brand: ${draft.brand}` : null,
@@ -84,7 +101,7 @@ export async function upsertInventoryItem(sku: string, draft: {
     condition,
     product: {
       title: (draft.title || "Item").slice(0, 80),
-      description: descParts.join("\n") || "No description.",
+      description: draft.description || descParts.join("\n") || "No description.",
       aspects,
       ...(draft.thumbnail_url?.startsWith("http") ? { imageUrls: [draft.thumbnail_url] } : {}),
     },
