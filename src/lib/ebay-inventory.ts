@@ -21,14 +21,28 @@ export function getCategoryId(title: string): string {
   return "1059";
 }
 
+function garmentTypeQuery(title: string): string {
+  const lower = (title || "").toLowerCase();
+  const isWomens = lower.includes("women") || lower.includes("ladies");
+  const gender = isWomens ? "women's" : "men's";
+
+  const isBottom = /\b(pant|jean|denim|short|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
+  const isOuterwear = /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
+  const isShoe = /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
+
+  if (isShoe)    return `${gender} used shoe footwear`;
+  if (isBottom)  return `${gender} used pants jeans bottoms clothing`;
+  if (isOuterwear) return `${gender} used jacket coat outerwear clothing`;
+  return `${gender} used shirt top clothing`;
+}
+
 export async function getCategoryIdForTitle(title: string): Promise<string> {
   const lower = (title || "").toLowerCase();
   const isWomens = lower.includes("women") || lower.includes("ladies");
   const fallback = isWomens ? "15724" : "1059";
 
-  // Always use a generic clothing query — item-specific titles cause eBay to suggest
-  // non-clothing categories (TV merch, collectibles) that reject used conditions
-  const query = isWomens ? "women's used clothing shirt top" : "men's used clothing shirt top";
+  // Use garment-type-based query to stay in the correct clothing leaf category
+  const query = garmentTypeQuery(title);
   try {
     const result = await inventoryRequest(
       "GET",
