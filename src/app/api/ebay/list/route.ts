@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { upsertInventoryItem, createOffer, publishOffer, getCategoryId, ensureMerchantLocation } from "@/lib/ebay-inventory";
+import { upsertInventoryItem, createOffer, getOfferBySku, publishOffer, getCategoryId, ensureMerchantLocation } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
 
@@ -39,14 +39,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 400 });
     }
 
-    const offerResult = await createOffer(sku, draft.suggested_price, categoryId, isHeavy ?? false);
+    let offerResult = await createOffer(sku, draft.suggested_price, categoryId, isHeavy ?? false);
+    let offerId = (offerResult.data as { offerId?: string }).offerId;
+
     if (offerResult.status >= 400) {
-      const errData = offerResult.data as { errors?: Array<{ message?: string; longMessage?: string }> };
-      const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? "Failed to create offer";
-      return NextResponse.json({ error: msg }, { status: 400 });
+      const errData = offerResult.data as { errors?: Array<{ errorId?: number; message?: string; longMessage?: string }> };
+      const err0 = errData.errors?.[0];
+      const isAlreadyExists = err0?.errorId === 25002 || err0?.message?.toLowerCase().includes("already exists");
+      if (isAlreadyExists) {
+        const existing = await getOfferBySku(sku);
+        const offers = (existing.data as { offers?: Array<{ offerId: string }> }).offers;
+        offerId = offers?.[0]?.offerId;
+        if (!offerId) return NextResponse.json({ error: "Offer already exists but could not retrieve it" }, { status: 500 });
+      } else {
+        const msg = err0?.longMessage ?? err0?.message ?? "Failed to create offer";
+        return NextResponse.json({ error: msg }, { status: 400 });
+      }
     }
 
-    const offerId = (offerResult.data as { offerId?: string }).offerId;
     if (!offerId) return NextResponse.json({ error: "No offer ID returned" }, { status: 500 });
 
     const publishResult = await publishOffer(offerId);
