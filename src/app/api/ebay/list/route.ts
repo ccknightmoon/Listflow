@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
-  upsertInventoryItem, createOffer, updateOffer, deleteOffer, getOfferBySku, getAllOffers,
-  publishOffer, getCategoryIdForTitle, getSafeFallbackCategory,
+  upsertInventoryItem, createOffer, updateOffer, deleteOffer, deleteInventoryItem,
+  getOfferBySku, getAllOffers, publishOffer, getCategoryIdForTitle, getSafeFallbackCategory,
   ensureMerchantLocation, recreateMerchantLocation,
 } from "@/lib/ebay-inventory";
 
@@ -37,15 +37,16 @@ export async function POST(req: NextRequest) {
 
     await ensureMerchantLocation();
 
-    // Delete any stale offers (both SKU formats) before upserting the inventory item.
-    // eBay blocks condition changes on inventory items that have an active published listing,
-    // so we must end those listings first to get a clean slate.
+    // Purge all stale offers and the inventory item before recreating.
+    // eBay blocks condition changes on inventory items with prior offers — deleting everything
+    // gives us a guaranteed clean slate with the correct condition and category.
     for (const candidateSku of [sku, `listflow-${draftId}`]) {
       const existingRes = await getOfferBySku(candidateSku);
       const existingOffers = (existingRes.data as { offers?: Array<{ offerId: string }> }).offers ?? [];
       for (const existing of existingOffers) {
         await deleteOffer(existing.offerId);
       }
+      await deleteInventoryItem(candidateSku);
     }
 
     const itemResult = await upsertInventoryItem(sku, draft, categoryId);

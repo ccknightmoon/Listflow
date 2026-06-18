@@ -249,6 +249,10 @@ export async function deleteOffer(offerId: string) {
   return inventoryRequest("DELETE", `/sell/inventory/v1/offer/${offerId}`, undefined);
 }
 
+export async function deleteInventoryItem(sku: string) {
+  return inventoryRequest("DELETE", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, undefined);
+}
+
 export async function getOfferBySku(sku: string) {
   return inventoryRequest("GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
 }
