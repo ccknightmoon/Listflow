@@ -20,22 +20,23 @@ export async function GET() {
       product?: { title?: string; imageUrls?: string[] };
     }>;
 
-    const itemMap = new Map(items.map((i) => [i.sku, i]));
+    const offerMap = new Map(offers.map((o) => [o.sku, o]));
 
-    const combined = offers.map((offer) => {
-      const item = itemMap.get(offer.sku);
+    // Show all inventory items; join offer data where available
+    const combined = items.map((item) => {
+      const offer = offerMap.get(item.sku);
       return {
-        offerId: offer.offerId,
-        sku: offer.sku,
-        status: offer.status,
-        listingId: offer.listing?.listingId,
-        price: offer.pricingSummary?.price.value,
-        title: item?.product?.title ?? offer.sku,
-        thumbnail: item?.product?.imageUrls?.[0] ?? null,
+        offerId: offer?.offerId ?? null,
+        sku: item.sku,
+        status: offer?.status ?? "NO_OFFER",
+        listingId: offer?.listing?.listingId,
+        price: offer?.pricingSummary?.price.value,
+        title: item.product?.title ?? item.sku,
+        thumbnail: item.product?.imageUrls?.[0] ?? null,
       };
     });
 
-    return NextResponse.json({ listings: combined, _debug: { offersRaw: offersRes.data, itemsRaw: itemsRes.data } });
+    return NextResponse.json({ listings: combined });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

@@ -25,6 +25,7 @@ interface Draft {
   avg_sold: number | null;
   sell_odds: string | null;
   thumbnail_url: string | null;
+  custom_sku: string | null;
   item_type: string | null;
   style: string | null;
   material: string | null;
@@ -57,6 +58,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [condition, setCondition] = useState("");
   const [flaws, setFlaws] = useState("");
   const [price, setPrice] = useState("");
+  const [customSku, setCustomSku] = useState("");
   const [itemType, setItemType] = useState("");
   const [style, setStyle] = useState("");
   const [material, setMaterial] = useState("");
@@ -82,6 +84,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         setCondition(d.condition ?? "");
         setFlaws(d.flaws ?? "");
         setPrice(d.suggested_price != null ? String(d.suggested_price) : "");
+        setCustomSku(d.custom_sku ?? "");
         setItemType(d.item_type ?? "");
         setStyle(d.style ?? "");
         setMaterial(d.material ?? "");
@@ -137,7 +140,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         body: JSON.stringify({
           title, brand, color, size, condition, flaws,
           suggestedPrice: price ? Number(price) : null,
-          itemType, style, material, theme,
+          customSku, itemType, style, material, theme,
           sleevLength, neckline, fit, pattern, description,
         }),
       });
@@ -308,6 +311,15 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
               onChange={(e) => setPrice(e.target.value)}
             />
           </div>
+        </div>
+        <div>
+          <label className="text-xs text-[var(--text-secondary)] mb-1 block">SKU (optional — alphanumeric only)</label>
+          <input
+            className="input w-full"
+            placeholder="e.g. HDSHIRT001"
+            value={customSku}
+            onChange={(e) => setCustomSku(e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 50))}
+          />
         </div>
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Condition</label>

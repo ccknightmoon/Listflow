@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
     if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before saving to eBay" }, { status: 400 });
 
-    const sku = `listflow-${draftId}`;
+    const sku = draft.custom_sku || `listflow${draftId.replace(/-/g, "")}`;
     const categoryId = getCategoryId(draft.title || "");
 
     const itemResult = await upsertInventoryItem(sku, draft, categoryId);

@@ -35,6 +35,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       condition: body.condition ?? null,
       flaws: body.flaws ?? null,
       suggested_price: body.suggestedPrice ?? null,
+      custom_sku: body.customSku ?? null,
       item_type: body.itemType ?? null,
       style: body.style ?? null,
       material: body.material ?? null,
