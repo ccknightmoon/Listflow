@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck } from "lucide-react";
 
 const CONDITIONS = [
   "New with tags",
@@ -35,6 +35,7 @@ interface Draft {
   fit: string | null;
   pattern: string | null;
   description: string | null;
+  ebay_listing_id: string | null;
 }
 
 export default function DraftDetailPage({ params }: { params: { id: string } }) {
@@ -46,8 +47,6 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [deleting, setDeleting] = useState(false);
   const [listing, setListing] = useState(false);
   const [listingUrl, setListingUrl] = useState<string | null>(null);
-  const [savingToEbay, setSavingToEbay] = useState(false);
-  const [savedToEbay, setSavedToEbay] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,6 +93,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         setFit(d.fit ?? "");
         setPattern(d.pattern ?? "");
         setDescription(d.description ?? "");
+        if (d.ebay_listing_id) setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
       } catch (err) {
         setError((err as Error).message);
       } finally {
@@ -151,26 +151,6 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       setError((err as Error).message);
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function handleSaveToEbay() {
-    setSavingToEbay(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/ebay/draft", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId: params.id }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to save to eBay");
-      setSavedToEbay(true);
-      setTimeout(() => setSavedToEbay(false), 3000);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSavingToEbay(false);
     }
   }
 
@@ -411,38 +391,31 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
 
       <div className="fixed bottom-0 left-0 right-0 px-5 pb-6 pt-3 max-w-md mx-auto"
         style={{ background: "var(--bg-surface)" }}>
-        {listingUrl ? (
-          <a
-            href={listingUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn-primary w-full flex items-center justify-center gap-2"
-          >
-            <ExternalLink className="w-4 h-4" />
-            View on eBay
-          </a>
-        ) : (
-          <div className="flex flex-col gap-2">
-            <div className="flex gap-2">
-              <button onClick={handleSave} disabled={saving || saved} className="btn flex-1">
-                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : null}
-                {saving ? "Saving..." : saved ? "Saved!" : "Save changes"}
-              </button>
-              <button onClick={handleList} disabled={listing} className="btn btn-primary flex-1">
-                {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {listing ? "Listing..." : "List on eBay"}
-              </button>
-            </div>
-            <button
-              onClick={handleSaveToEbay}
-              disabled={savingToEbay || savedToEbay}
-              className="btn w-full text-sm"
+        <div className="flex flex-col gap-2">
+          {listingUrl && (
+            <a
+              href={listingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="btn w-full flex items-center justify-center gap-2 text-sm"
+              style={{ color: "#3B6D11" }}
             >
-              {savingToEbay ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-              {savingToEbay ? "Saving to eBay..." : savedToEbay ? "Saved to eBay drafts!" : "Save to eBay as draft"}
+              <BadgeCheck className="w-4 h-4" />
+              Live on eBay — tap to view
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+          <div className="flex gap-2">
+            <button onClick={handleSave} disabled={saving || saved} className="btn flex-1">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : null}
+              {saving ? "Saving..." : saved ? "Saved!" : "Save changes"}
+            </button>
+            <button onClick={handleList} disabled={listing} className="btn btn-primary flex-1">
+              {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {listing ? "Listing..." : listingUrl ? "Relist on eBay" : "List on eBay"}
             </button>
           </div>
-        )}
+        </div>
       </div>
     </main>
   );

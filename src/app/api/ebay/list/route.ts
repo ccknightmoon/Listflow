@@ -55,6 +55,12 @@ export async function POST(req: NextRequest) {
     }
 
     const listingId = (publishResult.data as { listingId?: string }).listingId;
+
+    // Save listing ID back to draft so we can show Live status
+    if (listingId) {
+      await supabase.from("drafts").update({ ebay_listing_id: listingId }).eq("id", draftId);
+    }
+
     return NextResponse.json({
       success: true,
       listingId,

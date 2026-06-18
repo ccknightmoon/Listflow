@@ -45,6 +45,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       fit: body.fit ?? null,
       pattern: body.pattern ?? null,
       description: body.description ?? null,
+      ...(body.ebayListingId !== undefined && { ebay_listing_id: body.ebayListingId }),
     })
     .eq("id", params.id)
     .select()

@@ -12,6 +12,7 @@ interface Draft {
   suggested_price: number | null;
   sell_odds: string | null;
   thumbnail_url: string | null;
+  ebay_listing_id: string | null;
 }
 
 type ListStatus = "idle" | "listing" | "done";
@@ -191,9 +192,17 @@ export default function DraftsPage() {
                   )}
 
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{d.title ?? "Untitled item"}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium truncate">{d.title ?? "Untitled item"}</p>
+                      {d.ebay_listing_id && (
+                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0"
+                          style={{ background: "#E8F5E2", color: "#3B6D11" }}>
+                          Live
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-[var(--text-secondary)]">
-                      {d.suggested_price != null ? `Suggested $${d.suggested_price}` : ""}
+                      {d.suggested_price != null ? `$${d.suggested_price}` : ""}
                       {d.sell_odds ? ` · ${d.sell_odds} sell odds` : ""}
                     </p>
                   </div>

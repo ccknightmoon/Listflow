@@ -8,7 +8,7 @@ import { createBrowserClient } from "@supabase/ssr";
 const navItems = [
   { href: "/dashboard", icon: Home, label: "Home" },
   { href: "/drafts", icon: FileText, label: "Drafts" },
-  { href: "/ebay-inventory", icon: ShoppingBag, label: "eBay" },
+  { href: "/ebay-inventory", icon: ShoppingBag, label: "Listed" },
 ];
 
 export default function BottomNav() {
