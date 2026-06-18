@@ -86,7 +86,7 @@ export async function upsertInventoryItem(sku: string, draft: {
       title: (draft.title || "Item").slice(0, 80),
       description: descParts.join("\n") || "No description.",
       aspects,
-      ...(draft.thumbnail_url ? { imageUrls: [draft.thumbnail_url] } : {}),
+      ...(draft.thumbnail_url?.startsWith("http") ? { imageUrls: [draft.thumbnail_url] } : {}),
     },
   };
 
