@@ -93,8 +93,8 @@ export async function upsertInventoryItem(sku: string, draft: {
     draft.flaws ? `Notes: ${draft.flaws}` : null,
   ].filter(Boolean);
 
-  const condition = CONDITION_MAP[draft.condition ?? ""] ?? "VERY_GOOD";
-  const isUsed = !["NEW", "LIKE_NEW"].includes(condition);
+  const condition = CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
+  const isUsed = !["NEW", "NEW_OTHER"].includes(condition);
 
   const body: Record<string, unknown> = {
     availability: { shipToLocationAvailability: { quantity: 1 } },
@@ -117,12 +117,38 @@ export async function upsertInventoryItem(sku: string, draft: {
 const MERCHANT_LOCATION_KEY = "listflow_us";
 
 export async function ensureMerchantLocation() {
-  // Create a US merchant location; ignore 409 (already exists)
   await inventoryRequest("POST", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}`, {
     location: { address: { country: "US" } },
     locationTypes: ["WAREHOUSE"],
     merchantLocationStatus: "ENABLED",
     name: "Listflow Default",
+  });
+  // Ignore response — 200 means created, any error (incl. 409 already-exists) is acceptable
+}
+
+export async function recreateMerchantLocation() {
+  // Disable then delete (both may fail if location doesn't exist — ignore)
+  await inventoryRequest("POST", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}/disable`, undefined);
+  await inventoryRequest("DELETE", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}`, undefined);
+  // Create fresh
+  await ensureMerchantLocation();
+}
+
+export async function updateOffer(offerId: string, price: number, categoryId: string, isHeavy: boolean) {
+  return inventoryRequest("PUT", `/sell/inventory/v1/offer/${offerId}`, {
+    availableQuantity: 1,
+    categoryId,
+    merchantLocationKey: MERCHANT_LOCATION_KEY,
+    listingPolicies: {
+      fulfillmentPolicyId: isHeavy
+        ? process.env.EBAY_SHIPPING_HEAVY_ID
+        : process.env.EBAY_SHIPPING_FREE_ID,
+      returnPolicyId: process.env.EBAY_RETURN_POLICY_ID,
+    },
+    pricingSummary: {
+      price: { value: price.toFixed(2), currency: "USD" },
+    },
+    listingDuration: "GTC",
   });
 }
 

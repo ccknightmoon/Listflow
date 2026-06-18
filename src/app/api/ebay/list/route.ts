@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { upsertInventoryItem, createOffer, getOfferBySku, getAllOffers, publishOffer, getCategoryId, ensureMerchantLocation } from "@/lib/ebay-inventory";
+import {
+  upsertInventoryItem, createOffer, updateOffer, getOfferBySku, getAllOffers,
+  publishOffer, getCategoryId, ensureMerchantLocation, recreateMerchantLocation,
+} from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
 
@@ -29,6 +32,7 @@ export async function POST(req: NextRequest) {
 
     const sku = draft.custom_sku || `listflow${draftId.replace(/-/g, "")}`;
     const categoryId = getCategoryId(draft.title || "");
+    const heavy = isHeavy ?? false;
 
     await ensureMerchantLocation();
 
@@ -39,32 +43,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: msg }, { status: 400 });
     }
 
-    let offerResult = await createOffer(sku, draft.suggested_price, categoryId, isHeavy ?? false);
-    let offerId = (offerResult.data as { offerId?: string }).offerId;
+    let offerId: string | undefined;
+    const offerResult = await createOffer(sku, draft.suggested_price, categoryId, heavy);
+    offerId = (offerResult.data as { offerId?: string }).offerId;
 
     if (offerResult.status >= 400) {
       const errData = offerResult.data as { errors?: Array<{ errorId?: number; message?: string; longMessage?: string }> };
       const err0 = errData.errors?.[0];
-      const isAlreadyExists = err0?.errorId === 25002 || err0?.message?.toLowerCase().includes("already exists");
-      if (isAlreadyExists) {
-        // Try new SKU, old SKU, then scan all offers as last resort
+      const msg = (err0?.message ?? "").toLowerCase();
+
+      if (msg.includes("already exists")) {
+        // Offer already exists — find it by trying both SKU formats, then scanning all offers
         const skusToTry = [sku, `listflow-${draftId}`];
         for (const candidateSku of skusToTry) {
-          const existing = await getOfferBySku(candidateSku);
-          const offers = (existing.data as { offers?: Array<{ offerId: string }> }).offers;
+          const res = await getOfferBySku(candidateSku);
+          const offers = (res.data as { offers?: Array<{ offerId: string }> }).offers;
           offerId = offers?.[0]?.offerId;
           if (offerId) break;
         }
         if (!offerId) {
-          const allResult = await getAllOffers();
-          const allOffers = (allResult.data as { offers?: Array<{ offerId: string; sku?: string }> }).offers ?? [];
-          const match = allOffers.find(o => skusToTry.includes(o.sku ?? ""));
-          offerId = match?.offerId;
+          const allRes = await getAllOffers();
+          const allOffers = (allRes.data as { offers?: Array<{ offerId: string; sku?: string }> }).offers ?? [];
+          offerId = allOffers.find(o => skusToTry.includes(o.sku ?? ""))?.offerId;
         }
-        if (!offerId) return NextResponse.json({ error: `createOffer error (id=${err0?.errorId}): ${err0?.message}. Could not find offer by SKUs: ${skusToTry.join(", ")}` }, { status: 500 });
+        if (!offerId) {
+          return NextResponse.json({ error: "Offer already exists but could not be retrieved. Please contact eBay support." }, { status: 500 });
+        }
+        // Update the recovered offer with current price and merchant location
+        await updateOffer(offerId, draft.suggested_price, categoryId, heavy);
+
+      } else if (msg.includes("location")) {
+        // Merchant location not found — recreate it and retry once
+        await recreateMerchantLocation();
+        const retryResult = await createOffer(sku, draft.suggested_price, categoryId, heavy);
+        offerId = (retryResult.data as { offerId?: string }).offerId;
+        if (retryResult.status >= 400 || !offerId) {
+          const retryErr = (retryResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
+          return NextResponse.json({ error: `Location fix failed: ${retryErr?.message ?? JSON.stringify(retryResult.data)}` }, { status: 400 });
+        }
+
       } else {
-        const msg = err0?.longMessage ?? err0?.message ?? "Failed to create offer";
-        return NextResponse.json({ error: msg }, { status: 400 });
+        const errMsg = err0?.longMessage ?? err0?.message ?? "Failed to create offer";
+        return NextResponse.json({ error: errMsg }, { status: 400 });
       }
     }
 
@@ -73,13 +93,11 @@ export async function POST(req: NextRequest) {
     const publishResult = await publishOffer(offerId);
     if (publishResult.status >= 400) {
       const errData = publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> };
-      const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? "Failed to publish listing";
-      return NextResponse.json({ error: msg }, { status: 400 });
+      const errMsg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? "Failed to publish listing";
+      return NextResponse.json({ error: errMsg }, { status: 400 });
     }
 
     const listingId = (publishResult.data as { listingId?: string }).listingId;
-
-    // Save listing ID back to draft so we can show Live status
     if (listingId) {
       await supabase.from("drafts").update({ ebay_listing_id: listingId }).eq("id", draftId);
     }
