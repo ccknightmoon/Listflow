@@ -32,7 +32,9 @@ export async function POST(req: NextRequest) {
 
     const itemResult = await upsertInventoryItem(sku, draft);
     if (itemResult.status >= 400) {
-      return NextResponse.json({ error: (itemResult.data as Record<string, unknown>).message ?? "Failed to create inventory item" }, { status: 400 });
+      const errData = itemResult.data as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
+      const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(itemResult.data);
+      return NextResponse.json({ error: msg }, { status: 400 });
     }
 
     const offerResult = await createOffer(sku, draft.suggested_price, categoryId, isHeavy ?? false);
