@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   upsertInventoryItem, createOffer, updateOffer, deleteOffer, getOfferBySku, getAllOffers,
-  publishOffer, getCategoryIdForTitle, ensureMerchantLocation, recreateMerchantLocation,
+  publishOffer, getCategoryIdForTitle, getSafeFallbackCategory,
+  ensureMerchantLocation, recreateMerchantLocation,
 } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
@@ -110,9 +111,10 @@ export async function POST(req: NextRequest) {
       const errMsg = publishErr?.longMessage ?? publishErr?.message ?? "";
 
       if (errMsg.toLowerCase().includes("condition")) {
-        // categoryId is immutable on an existing offer — delete and recreate with safe clothing category
+        // categoryId is immutable on an existing offer — delete and recreate with safe clothing category.
+        // Use hardcoded safe IDs (not taxonomy API) to guarantee a category that accepts all used conditions.
         await deleteOffer(offerId);
-        const safeCategory = await getCategoryIdForTitle(draft.title || "");
+        const safeCategory = getSafeFallbackCategory(draft.title || "");
         await upsertInventoryItem(sku, draft, safeCategory, "USED_GOOD");
         const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, heavy);
         offerId = (freshOffer.data as { offerId?: string }).offerId;

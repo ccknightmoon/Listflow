@@ -30,18 +30,37 @@ function garmentTypeQuery(title: string): string {
   const isOuterwear = /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
   const isShoe = /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
 
-  if (isShoe)    return `${gender} used shoe footwear`;
-  if (isBottom)  return `${gender} used pants jeans bottoms clothing`;
+  if (isShoe)      return `${gender} used shoe footwear`;
+  if (isBottom)    return `${gender} used pants jeans bottoms clothing`;
   if (isOuterwear) return `${gender} used jacket coat outerwear clothing`;
   return `${gender} used shirt top clothing`;
 }
 
-export async function getCategoryIdForTitle(title: string): Promise<string> {
+// Hardcoded known-good eBay leaf categories that accept all standard used conditions.
+// Used as a guaranteed fallback when the taxonomy API returns an unusable category
+// (e.g. Fan Apparel/Collectibles, which rejects USED_GOOD for themed shirts).
+export function getSafeFallbackCategory(title: string): string {
   const lower = (title || "").toLowerCase();
   const isWomens = lower.includes("women") || lower.includes("ladies");
-  const fallback = isWomens ? "15724" : "1059";
+  const isBottom = /\b(pant|jean|denim|short|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
+  const isOuterwear = /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
+  const isShoe = /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
 
-  // Use garment-type-based query to stay in the correct clothing leaf category
+  if (isWomens) {
+    if (isShoe)      return "45333"; // Women's Shoes
+    if (isBottom)    return "11554"; // Women's Pants
+    if (isOuterwear) return "45672"; // Women's Jackets & Coats
+    return "53159";                  // Women's Tops & Blouses
+  }
+  if (isShoe)      return "93427";   // Men's Shoes
+  if (isBottom)    return "57989";   // Men's Pants
+  if (isOuterwear) return "57988";   // Men's Coats & Jackets
+  return "15687";                    // Men's T-Shirts
+}
+
+export async function getCategoryIdForTitle(title: string): Promise<string> {
+  // Use garment-type-based query to stay in the correct clothing leaf category.
+  // Falls back to hardcoded safe IDs — never falls back to parent-only categories.
   const query = garmentTypeQuery(title);
   try {
     const result = await inventoryRequest(
@@ -55,9 +74,9 @@ export async function getCategoryIdForTitle(title: string): Promise<string> {
       if (id) return id;
     }
   } catch {
-    // fall through to hardcoded fallback
+    // fall through
   }
-  return fallback;
+  return getSafeFallbackCategory(title);
 }
 
 export async function inventoryRequest(
