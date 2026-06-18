@@ -55,7 +55,7 @@ export function getSafeFallbackCategory(title: string): string {
   if (isShoe)      return "93427";   // Men's Shoes
   if (isBottom)    return "57989";   // Men's Pants
   if (isOuterwear) return "57988";   // Men's Coats & Jackets
-  return "15687";                    // Men's T-Shirts
+  return "57990";                    // Men's Casual Shirts (15687 is Fan Graphic Tees — may restrict used conditions)
 }
 
 export async function getCategoryIdForTitle(title: string): Promise<string> {

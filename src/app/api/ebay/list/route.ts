@@ -3,7 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import {
   upsertInventoryItem, createOffer, updateOffer, deleteOffer, deleteInventoryItem,
   getOfferBySku, getAllOffers, publishOffer, getCategoryIdForTitle, getSafeFallbackCategory,
-  ensureMerchantLocation, recreateMerchantLocation,
+  ensureMerchantLocation, recreateMerchantLocation, CONDITION_MAP,
 } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
@@ -124,21 +124,26 @@ export async function POST(req: NextRequest) {
 
       if (errMsg.toLowerCase().includes("condition")) {
         // categoryId is immutable on an existing offer — delete and recreate with safe clothing category.
-        // Use hardcoded safe IDs (not taxonomy API) to guarantee a category that accepts all used conditions.
+        // 15687 (fan graphic tees path) may restrict used conditions; 57990 (Men's Casual Shirts) is a safe alternative.
+        // Try each used condition in order so that at least one succeeds if the category accepts any used grade.
         await deleteOffer(offerId);
         const safeCategory = getSafeFallbackCategory(draft.title || "");
-        const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, "USED_GOOD");
-        if (upsertResult.status >= 400) {
-          const ue = (upsertResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
-          return NextResponse.json({ error: `Inventory update failed (cat:${safeCategory}): ${ue?.message ?? JSON.stringify(upsertResult.data)}` }, { status: 400 });
+        const originalCondition = CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
+        const conditionsToTry = [originalCondition, "USED_EXCELLENT", "USED_ACCEPTABLE"].filter(
+          (c, i, arr) => arr.indexOf(c) === i
+        );
+
+        for (const tryCondition of conditionsToTry) {
+          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition);
+          if (upsertResult.status >= 400) continue;
+          const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, heavy);
+          const freshOfferId = (freshOffer.data as { offerId?: string }).offerId;
+          if (freshOffer.status >= 400 || !freshOfferId) continue;
+          publishResult = await publishOffer(freshOfferId);
+          offerId = freshOfferId;
+          if (publishResult.status < 400) break;
+          await deleteOffer(freshOfferId);
         }
-        const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, heavy);
-        offerId = (freshOffer.data as { offerId?: string }).offerId;
-        if (freshOffer.status >= 400 || !offerId) {
-          const e = (freshOffer.data as { errors?: Array<{ message?: string }> }).errors?.[0];
-          return NextResponse.json({ error: `Offer create failed (cat:${safeCategory}): ${e?.message ?? JSON.stringify(freshOffer.data)}` }, { status: 400 });
-        }
-        publishResult = await publishOffer(offerId);
       }
 
       if (publishResult.status >= 400) {
