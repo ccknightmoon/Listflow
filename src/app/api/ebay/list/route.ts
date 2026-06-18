@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { upsertInventoryItem, createOffer, getOfferBySku, publishOffer, getCategoryId, ensureMerchantLocation } from "@/lib/ebay-inventory";
+import { upsertInventoryItem, createOffer, getOfferBySku, getAllOffers, publishOffer, getCategoryId, ensureMerchantLocation } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
 
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
       const err0 = errData.errors?.[0];
       const isAlreadyExists = err0?.errorId === 25002 || err0?.message?.toLowerCase().includes("already exists");
       if (isAlreadyExists) {
-        // Try new SKU format first, then fall back to old format (listflow-{uuid-with-hyphens})
+        // Try new SKU, old SKU, then scan all offers as last resort
         const skusToTry = [sku, `listflow-${draftId}`];
         for (const candidateSku of skusToTry) {
           const existing = await getOfferBySku(candidateSku);
@@ -55,7 +55,13 @@ export async function POST(req: NextRequest) {
           offerId = offers?.[0]?.offerId;
           if (offerId) break;
         }
-        if (!offerId) return NextResponse.json({ error: `Offer already exists but could not retrieve it (tried skus: ${skusToTry.join(", ")})` }, { status: 500 });
+        if (!offerId) {
+          const allResult = await getAllOffers();
+          const allOffers = (allResult.data as { offers?: Array<{ offerId: string; sku?: string }> }).offers ?? [];
+          const match = allOffers.find(o => skusToTry.includes(o.sku ?? ""));
+          offerId = match?.offerId;
+        }
+        if (!offerId) return NextResponse.json({ error: `createOffer error (id=${err0?.errorId}): ${err0?.message}. Could not find offer by SKUs: ${skusToTry.join(", ")}` }, { status: 500 });
       } else {
         const msg = err0?.longMessage ?? err0?.message ?? "Failed to create offer";
         return NextResponse.json({ error: msg }, { status: 400 });
