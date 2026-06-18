@@ -110,10 +110,16 @@ export async function POST(req: NextRequest) {
       const errMsg = publishErr?.longMessage ?? publishErr?.message ?? "";
 
       if (errMsg.toLowerCase().includes("condition")) {
-        // Category still invalid — re-fetch a fresh clothing category and retry with USED_GOOD
+        // categoryId is immutable on an existing offer — delete and recreate with safe clothing category
+        await deleteOffer(offerId);
         const safeCategory = await getCategoryIdForTitle(draft.title || "");
         await upsertInventoryItem(sku, draft, safeCategory, "USED_GOOD");
-        await updateOffer(offerId, draft.suggested_price, safeCategory, heavy);
+        const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, heavy);
+        offerId = (freshOffer.data as { offerId?: string }).offerId;
+        if (freshOffer.status >= 400 || !offerId) {
+          const e = (freshOffer.data as { errors?: Array<{ message?: string }> }).errors?.[0];
+          return NextResponse.json({ error: e?.message ?? "Could not recreate offer with valid clothing category" }, { status: 400 });
+        }
         publishResult = await publishOffer(offerId);
       }
 
