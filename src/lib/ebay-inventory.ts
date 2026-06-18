@@ -94,6 +94,7 @@ export async function upsertInventoryItem(sku: string, draft: {
 }, categoryId = "1059") {
   const aspects: Record<string, string[]> = {};
   aspects["Department"] = [getDepartment(draft.title || "")];
+  aspects["Size Type"] = ["Regular"];
   if (draft.brand) aspects["Brand"] = [draft.brand];
   if (draft.color) aspects["Color"] = [draft.color];
   if (draft.size) aspects["Size"] = [draft.size];
