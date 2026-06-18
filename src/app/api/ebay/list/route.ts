@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   upsertInventoryItem, createOffer, updateOffer, getOfferBySku, getAllOffers,
-  publishOffer, getCategoryId, ensureMerchantLocation, recreateMerchantLocation,
+  publishOffer, getCategoryIdForTitle, ensureMerchantLocation, recreateMerchantLocation,
 } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
     if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before listing" }, { status: 400 });
 
     const sku = draft.custom_sku || `listflow${draftId.replace(/-/g, "")}`;
-    const categoryId = getCategoryId(draft.title || "");
+    const categoryId = await getCategoryIdForTitle(draft.title || "");
     const heavy = isHeavy ?? false;
 
     await ensureMerchantLocation();

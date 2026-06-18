@@ -9,14 +9,35 @@ export const CONDITION_MAP: Record<string, string> = {
   "Fair - notable flaws": "USED_ACCEPTABLE",
 };
 
+export function getDepartment(title: string): string {
+  const lower = (title || "").toLowerCase();
+  return (lower.includes("women") || lower.includes("ladies")) ? "Women" : "Men";
+}
+
+// Kept for callers that need a sync fallback (not leaf-safe — prefer getCategoryIdForTitle)
 export function getCategoryId(title: string): string {
   const lower = (title || "").toLowerCase();
   if (lower.includes("women") || lower.includes("ladies")) return "15724";
   return "1059";
 }
 
-export function getDepartment(categoryId: string): string {
-  return categoryId === "15724" ? "Women" : "Men";
+export async function getCategoryIdForTitle(title: string): Promise<string> {
+  const fallback = getCategoryId(title);
+  try {
+    const result = await inventoryRequest(
+      "GET",
+      `/commerce/taxonomy/v1/category_tree/0/get_category_suggestions?q=${encodeURIComponent((title || "").slice(0, 100))}`
+    );
+    if (result.status < 400) {
+      type Suggestion = { category: { categoryId: string } };
+      const suggestions = (result.data as { categorySuggestions?: Suggestion[] }).categorySuggestions;
+      const id = suggestions?.[0]?.category?.categoryId;
+      if (id) return id;
+    }
+  } catch {
+    // fall through
+  }
+  return fallback;
 }
 
 export async function inventoryRequest(
@@ -72,7 +93,7 @@ export async function upsertInventoryItem(sku: string, draft: {
   description?: string | null;
 }, categoryId = "1059") {
   const aspects: Record<string, string[]> = {};
-  aspects["Department"] = [getDepartment(categoryId)];
+  aspects["Department"] = [getDepartment(draft.title || "")];
   if (draft.brand) aspects["Brand"] = [draft.brand];
   if (draft.color) aspects["Color"] = [draft.color];
   if (draft.size) aspects["Size"] = [draft.size];
