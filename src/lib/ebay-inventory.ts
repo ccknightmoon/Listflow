@@ -22,10 +22,14 @@ export function getCategoryId(title: string): string {
 }
 
 export async function getCategoryIdForTitle(title: string): Promise<string> {
-  const fallback = getCategoryId(title);
+  const lower = (title || "").toLowerCase();
+  const isWomens = lower.includes("women") || lower.includes("ladies");
+  const fallback = isWomens ? "15724" : "1059";
+
+  // Always use a generic clothing query — item-specific titles cause eBay to suggest
+  // non-clothing categories (TV merch, collectibles) that reject used conditions
+  const query = isWomens ? "women's used clothing shirt top" : "men's used clothing shirt top";
   try {
-    // Append "clothing" to bias taxonomy suggestions toward apparel categories
-    const query = `${(title || "").slice(0, 80)} clothing`;
     const result = await inventoryRequest(
       "GET",
       `/commerce/taxonomy/v1/category_tree/0/get_category_suggestions?q=${encodeURIComponent(query)}`
@@ -37,14 +41,9 @@ export async function getCategoryIdForTitle(title: string): Promise<string> {
       if (id) return id;
     }
   } catch {
-    // fall through
+    // fall through to hardcoded fallback
   }
   return fallback;
-}
-
-export function getSafeClothingCategory(title: string): Promise<string> {
-  const gender = (title || "").toLowerCase().includes("women") ? "women's" : "men's";
-  return getCategoryIdForTitle(`${gender} t-shirt`);
 }
 
 export async function inventoryRequest(

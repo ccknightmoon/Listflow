@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import {
   upsertInventoryItem, createOffer, updateOffer, deleteOffer, getOfferBySku, getAllOffers,
-  publishOffer, getCategoryIdForTitle, getSafeClothingCategory, ensureMerchantLocation, recreateMerchantLocation,
+  publishOffer, getCategoryIdForTitle, ensureMerchantLocation, recreateMerchantLocation,
 } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
@@ -110,9 +110,8 @@ export async function POST(req: NextRequest) {
       const errMsg = publishErr?.longMessage ?? publishErr?.message ?? "";
 
       if (errMsg.toLowerCase().includes("condition")) {
-        // Taxonomy category doesn't accept used clothing conditions — switch to a safe
-        // generic clothing leaf category and use USED_GOOD (always valid for used clothing)
-        const safeCategory = await getSafeClothingCategory(draft.title || "");
+        // Category still invalid — re-fetch a fresh clothing category and retry with USED_GOOD
+        const safeCategory = await getCategoryIdForTitle(draft.title || "");
         await upsertInventoryItem(sku, draft, safeCategory, "USED_GOOD");
         await updateOffer(offerId, draft.suggested_price, safeCategory, heavy);
         publishResult = await publishOffer(offerId);
