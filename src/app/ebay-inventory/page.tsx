@@ -6,11 +6,11 @@ import { ArrowLeft, Loader2, ExternalLink, Shirt, ChevronRight } from "lucide-re
 import BottomNav from "@/components/BottomNav";
 
 interface Listing {
-  offerId: string | null;
+  draftId?: string;
   sku: string;
   status: string;
   listingId?: string;
-  price?: string;
+  price?: string | null;
   title: string;
   thumbnail: string | null;
 }
@@ -77,7 +77,7 @@ export default function EbayInventoryPage() {
           <p className="text-xs text-[var(--text-secondary)] mb-3">{active.length} active listing{active.length !== 1 ? "s" : ""}</p>
           <div className="flex flex-col gap-2">
             {active.map((l) => {
-              const draftId = skuToDraftId(l.sku);
+              const draftId = l.draftId ?? skuToDraftId(l.sku);
               return (
                 <div key={l.sku} className="card flex items-center gap-3 p-3">
                   {l.thumbnail ? (

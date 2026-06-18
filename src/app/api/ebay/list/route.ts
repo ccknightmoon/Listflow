@@ -55,21 +55,28 @@ export async function POST(req: NextRequest) {
       if (msg.includes("already exists")) {
         // Offer already exists — find it by trying both SKU formats, then scanning all offers
         const skusToTry = [sku, `listflow-${draftId}`];
+        let foundViaSku: string | undefined;
         for (const candidateSku of skusToTry) {
           const res = await getOfferBySku(candidateSku);
           const offers = (res.data as { offers?: Array<{ offerId: string }> }).offers;
           offerId = offers?.[0]?.offerId;
-          if (offerId) break;
+          if (offerId) { foundViaSku = candidateSku; break; }
         }
         if (!offerId) {
           const allRes = await getAllOffers();
           const allOffers = (allRes.data as { offers?: Array<{ offerId: string; sku?: string }> }).offers ?? [];
-          offerId = allOffers.find(o => skusToTry.includes(o.sku ?? ""))?.offerId;
+          const match = allOffers.find(o => skusToTry.includes(o.sku ?? ""));
+          offerId = match?.offerId;
+          foundViaSku = match?.sku;
         }
         if (!offerId) {
           return NextResponse.json({ error: "Offer already exists but could not be retrieved. Please contact eBay support." }, { status: 500 });
         }
-        // Update the recovered offer with current price and merchant location
+        // If offer is under an old SKU, re-upsert that inventory item so its condition/aspects are current
+        if (foundViaSku && foundViaSku !== sku) {
+          await upsertInventoryItem(foundViaSku, draft, categoryId);
+        }
+        // Update the recovered offer with current price, category, and merchant location
         await updateOffer(offerId, draft.suggested_price, categoryId, heavy);
 
       } else if (msg.includes("location")) {

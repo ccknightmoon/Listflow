@@ -1,42 +1,34 @@
 import { NextResponse } from "next/server";
-import { getAllOffers, getAllInventoryItems } from "@/lib/ebay-inventory";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+);
+
 export async function GET() {
   try {
-    const [offersRes, itemsRes] = await Promise.all([getAllOffers(), getAllInventoryItems()]);
+    const { data: drafts, error } = await supabase
+      .from("drafts")
+      .select("id, title, suggested_price, thumbnail_url, ebay_listing_id")
+      .not("ebay_listing_id", "is", null)
+      .order("id", { ascending: false });
 
-    const offers = ((offersRes.data as { offers?: unknown[] }).offers ?? []) as Array<{
-      offerId: string;
-      sku: string;
-      status: string;
-      listing?: { listingId: string };
-      pricingSummary?: { price: { value: string } };
-    }>;
+    if (error) throw new Error(error.message);
 
-    const items = ((itemsRes.data as { inventoryItems?: unknown[] }).inventoryItems ?? []) as Array<{
-      sku: string;
-      product?: { title?: string; imageUrls?: string[] };
-    }>;
+    const listings = (drafts ?? []).map((d) => ({
+      draftId: d.id,
+      sku: `listflow${(d.id as string).replace(/-/g, "")}`,
+      status: "PUBLISHED",
+      listingId: d.ebay_listing_id as string,
+      price: d.suggested_price?.toString() ?? null,
+      title: (d.title as string) ?? d.id,
+      thumbnail: (d.thumbnail_url as string) ?? null,
+    }));
 
-    const offerMap = new Map(offers.map((o) => [o.sku, o]));
-
-    // Show all inventory items; join offer data where available
-    const combined = items.map((item) => {
-      const offer = offerMap.get(item.sku);
-      return {
-        offerId: offer?.offerId ?? null,
-        sku: item.sku,
-        status: offer?.status ?? "NO_OFFER",
-        listingId: offer?.listing?.listingId,
-        price: offer?.pricingSummary?.price.value,
-        title: item.product?.title ?? item.sku,
-        thumbnail: item.product?.imageUrls?.[0] ?? null,
-      };
-    });
-
-    return NextResponse.json({ listings: combined });
+    return NextResponse.json({ listings });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
