@@ -31,6 +31,7 @@ export async function inventoryRequest(
     const headers: Record<string, string | number> = {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
+      "Content-Language": "en-US",
       Accept: "application/json",
     };
     if (body) headers["Content-Length"] = buf.length;
