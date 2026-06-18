@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { upsertInventoryItem, createOffer, getCategoryId } from "@/lib/ebay-inventory";
+import { upsertInventoryItem, createOffer, getCategoryId, inventoryRequest } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
 
@@ -31,14 +31,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: JSON.stringify(itemResult.data) }, { status: 400 });
     }
 
-    const offerResult = await createOffer(sku, draft.suggested_price, categoryId, isHeavy ?? false);
-    if (offerResult.status >= 400) {
-      const errData = offerResult.data as { errors?: Array<{ message?: string; longMessage?: string }> };
-      const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? "Failed to create offer";
-      return NextResponse.json({ error: msg }, { status: 400 });
-    }
+    let offerResult = await createOffer(sku, draft.suggested_price, categoryId, isHeavy ?? false);
+    let offerId = (offerResult.data as { offerId?: string }).offerId;
 
-    const offerId = (offerResult.data as { offerId?: string }).offerId;
+    if (offerResult.status >= 400) {
+      const errData = offerResult.data as { errors?: Array<{ errorId?: number; message?: string }> };
+      const isAlreadyExists = errData.errors?.some((e) => e.errorId === 25002 || e.message?.toLowerCase().includes("already exists"));
+      if (isAlreadyExists) {
+        const existingResult = await inventoryRequest("GET", `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
+        const offers = (existingResult.data as { offers?: Array<{ offerId?: string }> }).offers;
+        offerId = offers?.[0]?.offerId;
+        if (!offerId) return NextResponse.json({ error: "Offer already exists but could not retrieve it" }, { status: 400 });
+      } else {
+        const msg = errData.errors?.[0]?.message ?? "Failed to create offer";
+        return NextResponse.json({ error: msg }, { status: 400 });
+      }
+    }
     return NextResponse.json({ success: true, offerId });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
