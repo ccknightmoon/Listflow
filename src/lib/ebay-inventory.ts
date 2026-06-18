@@ -113,6 +113,10 @@ export async function inventoryRequest(
   });
 }
 
+function isAspect(v: string | null | undefined): v is string {
+  return typeof v === "string" && v !== "null" && v.trim() !== "";
+}
+
 export async function upsertInventoryItem(sku: string, draft: {
   title: string | null;
   brand: string | null;
@@ -134,17 +138,17 @@ export async function upsertInventoryItem(sku: string, draft: {
   const aspects: Record<string, string[]> = {};
   aspects["Department"] = [getDepartment(draft.title || "")];
   aspects["Size Type"] = ["Regular"];
-  if (draft.brand) aspects["Brand"] = [draft.brand];
-  if (draft.color) aspects["Color"] = [draft.color];
-  if (draft.size) aspects["Size"] = [draft.size];
-  if (draft.item_type) aspects["Type"] = [draft.item_type];
-  if (draft.style) aspects["Style"] = [draft.style];
-  if (draft.material) aspects["Material"] = [draft.material];
-  if (draft.theme) aspects["Theme"] = [draft.theme];
-  if (draft.sleeve_length) aspects["Sleeve Length"] = [draft.sleeve_length];
-  if (draft.neckline) aspects["Neckline"] = [draft.neckline];
-  if (draft.fit) aspects["Fit"] = [draft.fit];
-  if (draft.pattern) aspects["Pattern"] = [draft.pattern];
+  if (isAspect(draft.brand)) aspects["Brand"] = [draft.brand];
+  if (isAspect(draft.color)) aspects["Color"] = [draft.color];
+  if (isAspect(draft.size)) aspects["Size"] = [draft.size];
+  if (isAspect(draft.item_type)) aspects["Type"] = [draft.item_type];
+  if (isAspect(draft.style)) aspects["Style"] = [draft.style];
+  if (isAspect(draft.material)) aspects["Material"] = [draft.material];
+  if (isAspect(draft.theme)) aspects["Theme"] = [draft.theme];
+  if (isAspect(draft.sleeve_length)) aspects["Sleeve Length"] = [draft.sleeve_length];
+  if (isAspect(draft.neckline)) aspects["Neckline"] = [draft.neckline];
+  if (isAspect(draft.fit)) aspects["Fit"] = [draft.fit];
+  if (isAspect(draft.pattern)) aspects["Pattern"] = [draft.pattern];
 
   const descParts = [
     draft.brand ? `Brand: ${draft.brand}` : null,

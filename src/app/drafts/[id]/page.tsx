@@ -70,29 +70,31 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
 
   useEffect(() => {
     async function load() {
+      // Convert null or the string "null" (from old AI responses) to empty string
+      const str = (v: string | null | undefined) => (v == null || v === "null" ? "" : v);
       try {
         const res = await fetch(`/api/drafts/${params.id}`);
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Not found");
         const d: Draft = data.draft;
         setDraft(d);
-        setTitle(d.title ?? "");
-        setBrand(d.brand ?? "");
-        setColor(d.color ?? "");
-        setSize(d.size ?? "");
-        setCondition(d.condition ?? "");
-        setFlaws(d.flaws ?? "");
+        setTitle(str(d.title));
+        setBrand(str(d.brand));
+        setColor(str(d.color));
+        setSize(str(d.size));
+        setCondition(str(d.condition));
+        setFlaws(str(d.flaws));
         setPrice(d.suggested_price != null ? String(d.suggested_price) : "");
-        setCustomSku(d.custom_sku ?? "");
-        setItemType(d.item_type ?? "");
-        setStyle(d.style ?? "");
-        setMaterial(d.material ?? "");
-        setTheme(d.theme ?? "");
-        setSleevLength(d.sleeve_length ?? "");
-        setNeckline(d.neckline ?? "");
-        setFit(d.fit ?? "");
-        setPattern(d.pattern ?? "");
-        setDescription(d.description ?? "");
+        setCustomSku(str(d.custom_sku));
+        setItemType(str(d.item_type));
+        setStyle(str(d.style));
+        setMaterial(str(d.material));
+        setTheme(str(d.theme));
+        setSleevLength(str(d.sleeve_length));
+        setNeckline(str(d.neckline));
+        setFit(str(d.fit));
+        setPattern(str(d.pattern));
+        setDescription(str(d.description));
         if (d.ebay_listing_id) setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
       } catch (err) {
         setError((err as Error).message);
@@ -114,15 +116,16 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "AI suggestion failed");
-      if (data.item_type) setItemType(data.item_type);
-      if (data.style) setStyle(data.style);
-      if (data.material) setMaterial(data.material);
-      if (data.theme) setTheme(data.theme);
-      if (data.sleeve_length) setSleevLength(data.sleeve_length);
-      if (data.neckline) setNeckline(data.neckline);
-      if (data.fit) setFit(data.fit);
-      if (data.pattern) setPattern(data.pattern);
-      if (data.description) setDescription(data.description);
+      const ok = (v: unknown) => v && v !== "null";
+      if (ok(data.item_type)) setItemType(data.item_type);
+      if (ok(data.style)) setStyle(data.style);
+      if (ok(data.material)) setMaterial(data.material);
+      if (ok(data.theme)) setTheme(data.theme);
+      if (ok(data.sleeve_length)) setSleevLength(data.sleeve_length);
+      if (ok(data.neckline)) setNeckline(data.neckline);
+      if (ok(data.fit)) setFit(data.fit);
+      if (ok(data.pattern)) setPattern(data.pattern);
+      if (ok(data.description)) setDescription(data.description);
     } catch (err) {
       setError((err as Error).message);
     } finally {

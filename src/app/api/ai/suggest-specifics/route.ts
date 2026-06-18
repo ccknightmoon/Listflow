@@ -37,7 +37,11 @@ Return JSON with these keys:
       max_tokens: 500,
     }) as { choices: Array<{ message: { content: string } }> };
 
-    const result = JSON.parse(response.choices[0].message.content);
+    const raw = JSON.parse(response.choices[0].message.content);
+    // Strip the string "null" that GPT sometimes returns instead of JSON null
+    const result = Object.fromEntries(
+      Object.entries(raw).map(([k, v]) => [k, (v === "null" || v === "") ? null : v])
+    );
     return NextResponse.json(result);
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
