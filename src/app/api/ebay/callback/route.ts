@@ -29,8 +29,8 @@ export async function GET(req: NextRequest) {
 </style>
 </head>
 <body>
-  <h2>✓ eBay authorized!</h2>
-  <p>One last step — copy the token below and add it to Vercel:</p>
+  <h2>eBay authorized!</h2>
+  <p>One last step - copy the token below and add it to Vercel:</p>
   <div class="step">
     <strong>1.</strong> Copy this refresh token:
     <div class="token">${tokens.refresh_token}</div>
