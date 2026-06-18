@@ -3,10 +3,10 @@ import { getAccessToken } from "./ebay-oauth";
 
 export const CONDITION_MAP: Record<string, string> = {
   "New with tags": "NEW",
-  "New without tags": "LIKE_NEW",
-  "Excellent used": "VERY_GOOD",
-  "Good - minor flaws": "GOOD",
-  "Fair - notable flaws": "ACCEPTABLE",
+  "New without tags": "NEW_OTHER",
+  "Excellent used": "USED_EXCELLENT",
+  "Good - minor flaws": "USED_GOOD",
+  "Fair - notable flaws": "USED_ACCEPTABLE",
 };
 
 export function getCategoryId(title: string): string {
