@@ -135,7 +135,7 @@ export default function EbayInventoryPage() {
                 </div>
                 {l.offerId ? (
                   <button
-                    onClick={() => handlePublish(l.sku, l.offerId)}
+                    onClick={() => handlePublish(l.sku, l.offerId!)}
                     disabled={publishing === l.sku}
                     className="btn btn-primary text-xs px-3 py-1 flex items-center gap-1"
                   >
