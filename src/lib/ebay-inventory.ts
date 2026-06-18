@@ -42,16 +42,9 @@ export async function getCategoryIdForTitle(title: string): Promise<string> {
   return fallback;
 }
 
-// Condition values for non-clothing categories (fan apparel, collectibles, etc.)
-const CONDITION_FALLBACK: Record<string, string> = {
-  USED_EXCELLENT: "VERY_GOOD",
-  USED_GOOD: "GOOD",
-  USED_ACCEPTABLE: "ACCEPTABLE",
-};
-
-export function getFallbackCondition(draftCondition: string | null): string {
-  const mapped = CONDITION_MAP[draftCondition ?? ""] ?? "USED_GOOD";
-  return CONDITION_FALLBACK[mapped] ?? mapped;
+export function getSafeClothingCategory(title: string): Promise<string> {
+  const gender = (title || "").toLowerCase().includes("women") ? "women's" : "men's";
+  return getCategoryIdForTitle(`${gender} t-shirt`);
 }
 
 export async function inventoryRequest(
