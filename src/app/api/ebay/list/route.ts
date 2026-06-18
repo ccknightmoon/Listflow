@@ -31,7 +31,12 @@ export async function POST(req: NextRequest) {
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
     if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before listing" }, { status: 400 });
 
-    const sku = draft.custom_sku || `listflow${draftId.replace(/-/g, "")}`;
+    const autoSku = String(parseInt(draftId.replace(/-/g, "").slice(0, 8), 16) % 1000000);
+    const sku = draft.custom_sku || autoSku;
+    // Legacy SKU formats used before the numeric format was introduced
+    const legacyFullSku = `listflow${draftId.replace(/-/g, "")}`;
+    const legacyShortSku = `listflow${draftId.replace(/-/g, "").slice(0, 8)}`;
+    const legacyHyphenSku = `listflow-${draftId}`;
     const categoryId = await getCategoryIdForTitle(draft.title || "");
     const heavy = isHeavy ?? false;
 
@@ -40,7 +45,8 @@ export async function POST(req: NextRequest) {
     // Purge all stale offers and the inventory item before recreating.
     // eBay blocks condition changes on inventory items with prior offers — deleting everything
     // gives us a guaranteed clean slate with the correct condition and category.
-    for (const candidateSku of [sku, `listflow-${draftId}`]) {
+    const skusToClean = [...new Set([sku, legacyFullSku, legacyShortSku, legacyHyphenSku])];
+    for (const candidateSku of skusToClean) {
       const existingRes = await getOfferBySku(candidateSku);
       const existingOffers = (existingRes.data as { offers?: Array<{ offerId: string }> }).offers ?? [];
       for (const existing of existingOffers) {
