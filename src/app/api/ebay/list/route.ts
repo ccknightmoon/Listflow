@@ -37,6 +37,17 @@ export async function POST(req: NextRequest) {
 
     await ensureMerchantLocation();
 
+    // Delete any stale offers (both SKU formats) before upserting the inventory item.
+    // eBay blocks condition changes on inventory items that have an active published listing,
+    // so we must end those listings first to get a clean slate.
+    for (const candidateSku of [sku, `listflow-${draftId}`]) {
+      const existingRes = await getOfferBySku(candidateSku);
+      const existingOffers = (existingRes.data as { offers?: Array<{ offerId: string }> }).offers ?? [];
+      for (const existing of existingOffers) {
+        await deleteOffer(existing.offerId);
+      }
+    }
+
     const itemResult = await upsertInventoryItem(sku, draft, categoryId);
     if (itemResult.status >= 400) {
       const errData = itemResult.data as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
@@ -115,19 +126,25 @@ export async function POST(req: NextRequest) {
         // Use hardcoded safe IDs (not taxonomy API) to guarantee a category that accepts all used conditions.
         await deleteOffer(offerId);
         const safeCategory = getSafeFallbackCategory(draft.title || "");
-        await upsertInventoryItem(sku, draft, safeCategory, "USED_GOOD");
+        const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, "USED_GOOD");
+        if (upsertResult.status >= 400) {
+          const ue = (upsertResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
+          return NextResponse.json({ error: `Inventory update failed (cat:${safeCategory}): ${ue?.message ?? JSON.stringify(upsertResult.data)}` }, { status: 400 });
+        }
         const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, heavy);
         offerId = (freshOffer.data as { offerId?: string }).offerId;
         if (freshOffer.status >= 400 || !offerId) {
           const e = (freshOffer.data as { errors?: Array<{ message?: string }> }).errors?.[0];
-          return NextResponse.json({ error: e?.message ?? "Could not recreate offer with valid clothing category" }, { status: 400 });
+          return NextResponse.json({ error: `Offer create failed (cat:${safeCategory}): ${e?.message ?? JSON.stringify(freshOffer.data)}` }, { status: 400 });
         }
         publishResult = await publishOffer(offerId);
       }
 
       if (publishResult.status >= 400) {
         const retryErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
-        return NextResponse.json({ error: retryErr?.longMessage ?? retryErr?.message ?? "Failed to publish listing" }, { status: 400 });
+        const initialCat = categoryId;
+        const safecat = getSafeFallbackCategory(draft.title || "");
+        return NextResponse.json({ error: `${retryErr?.longMessage ?? retryErr?.message ?? "Failed to publish listing"} [initial cat:${initialCat}, safe cat:${safecat}]` }, { status: 400 });
       }
     }
 
