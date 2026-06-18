@@ -15,6 +15,10 @@ export function getCategoryId(title: string): string {
   return "1059";
 }
 
+export function getDepartment(categoryId: string): string {
+  return categoryId === "15724" ? "Women" : "Men";
+}
+
 export async function inventoryRequest(
   method: string,
   path: string,
@@ -56,8 +60,9 @@ export async function upsertInventoryItem(sku: string, draft: {
   condition: string | null;
   flaws: string | null;
   thumbnail_url: string | null;
-}) {
+}, categoryId = "1059") {
   const aspects: Record<string, string[]> = {};
+  aspects["Department"] = [getDepartment(categoryId)];
   if (draft.brand) aspects["Brand"] = [draft.brand];
   if (draft.color) aspects["Color"] = [draft.color];
   if (draft.size) aspects["Size"] = [draft.size];
@@ -70,16 +75,25 @@ export async function upsertInventoryItem(sku: string, draft: {
     draft.flaws ? `Notes: ${draft.flaws}` : null,
   ].filter(Boolean);
 
-  return inventoryRequest("PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, {
+  const condition = CONDITION_MAP[draft.condition ?? ""] ?? "VERY_GOOD";
+  const isUsed = !["NEW", "LIKE_NEW"].includes(condition);
+
+  const body: Record<string, unknown> = {
     availability: { shipToLocationAvailability: { quantity: 1 } },
-    condition: CONDITION_MAP[draft.condition ?? ""] ?? "VERY_GOOD",
+    condition,
     product: {
       title: (draft.title || "Item").slice(0, 80),
       description: descParts.join("\n") || "No description.",
       aspects,
-      imageUrls: draft.thumbnail_url ? [draft.thumbnail_url] : [],
+      ...(draft.thumbnail_url ? { imageUrls: [draft.thumbnail_url] } : {}),
     },
-  });
+  };
+
+  if (isUsed && draft.flaws) {
+    body.conditionDescription = draft.flaws.slice(0, 1000);
+  }
+
+  return inventoryRequest("PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, body);
 }
 
 export async function createOffer(sku: string, price: number, categoryId: string, isHeavy = false) {

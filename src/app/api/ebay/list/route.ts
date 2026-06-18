@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const sku = `listflow-${draftId}`;
     const categoryId = getCategoryId(draft.title || "");
 
-    const itemResult = await upsertInventoryItem(sku, draft);
+    const itemResult = await upsertInventoryItem(sku, draft, categoryId);
     if (itemResult.status >= 400) {
       const errData = itemResult.data as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
       const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(itemResult.data);
