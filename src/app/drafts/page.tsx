@@ -82,9 +82,21 @@ export default function DraftsPage() {
     setListProgress(0);
 
     for (let i = 0; i < ids.length; i++) {
-      // eBay listing will be wired here — placeholder for now
-      await new Promise((r) => setTimeout(r, 600));
+      try {
+        const res = await fetch("/api/ebay/list", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ draftId: ids[i] }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          setError(`Item ${i + 1} failed: ${data.error ?? "Unknown error"}`);
+        }
+      } catch {
+        setError(`Item ${i + 1} failed: network error`);
+      }
       setListProgress(i + 1);
+      if (i < ids.length - 1) await new Promise((r) => setTimeout(r, 1000));
     }
 
     setListStatus("done");

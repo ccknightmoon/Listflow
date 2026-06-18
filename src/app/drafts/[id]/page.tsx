@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink } from "lucide-react";
 
 const CONDITIONS = [
   "New with tags",
@@ -34,6 +34,8 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [listing, setListing] = useState(false);
+  const [listingUrl, setListingUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [title, setTitle] = useState("");
@@ -92,6 +94,25 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       setError((err as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleList() {
+    setListing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/ebay/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: params.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to list");
+      setListingUrl(data.url);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setListing(false);
     }
   }
 
@@ -233,20 +254,36 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
 
       <div className="fixed bottom-0 left-0 right-0 px-5 pb-6 pt-3 max-w-md mx-auto"
         style={{ background: "var(--bg-surface)" }}>
-        <div className="flex gap-2">
-          <button
-            onClick={handleSave}
-            disabled={saving || saved}
-            className="btn flex-1"
+        {listingUrl ? (
+          <a
+            href={listingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-primary w-full flex items-center justify-center gap-2"
           >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : null}
-            {saving ? "Saving..." : saved ? "Saved!" : "Save changes"}
-          </button>
-          <button className="btn btn-primary flex-1">
-            <Upload className="w-4 h-4" />
-            List on eBay
-          </button>
-        </div>
+            <ExternalLink className="w-4 h-4" />
+            View on eBay
+          </a>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={handleSave}
+              disabled={saving || saved}
+              className="btn flex-1"
+            >
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : saved ? <Check className="w-4 h-4" /> : null}
+              {saving ? "Saving..." : saved ? "Saved!" : "Save changes"}
+            </button>
+            <button
+              onClick={handleList}
+              disabled={listing}
+              className="btn btn-primary flex-1"
+            >
+              {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+              {listing ? "Listing..." : "List on eBay"}
+            </button>
+          </div>
+        )}
       </div>
     </main>
   );
