@@ -35,7 +35,7 @@ export async function GET() {
       };
     });
 
-    return NextResponse.json({ listings: combined });
+    return NextResponse.json({ listings: combined, _debug: { offersRaw: offersRes.data, itemsRaw: itemsRes.data } });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
