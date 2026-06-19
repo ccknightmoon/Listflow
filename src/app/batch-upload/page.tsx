@@ -117,6 +117,7 @@ export default function BatchUploadPage() {
   const [groups, setGroups] = useState<number[][]>([]);
   const [results, setResults] = useState<AiResult[]>([]);
   const [retrying, setRetrying] = useState<Record<number, boolean>>({});
+  const [retryingPricing, setRetryingPricing] = useState<Record<number, boolean>>({});
   const [saveStatus, setSaveStatus] = useState<Record<number, SaveStatus>>({});
   const [savingAll, setSavingAll] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -347,6 +348,45 @@ export default function BatchUploadPage() {
         })
         .catch(() => {});
     });
+  }
+
+  function handleRetryPricing(index: number) {
+    setRetryingPricing((prev) => ({ ...prev, [index]: true }));
+    setResults((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], pricing: undefined };
+      return next;
+    });
+    const result = results[index];
+    const firstPhotoIdx = (groups[index] ?? [])[0];
+    const image = firstPhotoIdx !== undefined ? photos[firstPhotoIdx]?.data : undefined;
+    fetch("/api/pricing/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: result.suggestedTitle, brand: result.brand, condition: result.condition, image }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((pricing: PriceSuggestion | null) => {
+        setResults((prev) => {
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            pricing: pricing ?? { noData: true, suggestedPrice: 0, avgSold: 0, activeRangeLow: 0, activeRangeHigh: 0, sellOdds: "Low", comparableSoldCount: 0, comparableActiveCount: 0 },
+          };
+          return next;
+        });
+      })
+      .catch(() => {
+        setResults((prev) => {
+          const next = [...prev];
+          next[index] = {
+            ...next[index],
+            pricing: { noData: true, suggestedPrice: 0, avgSold: 0, activeRangeLow: 0, activeRangeHigh: 0, sellOdds: "Low", comparableSoldCount: 0, comparableActiveCount: 0 },
+          };
+          return next;
+        });
+      })
+      .finally(() => setRetryingPricing((prev) => ({ ...prev, [index]: false })));
   }
 
   async function handleRetry(index: number) {
@@ -747,7 +787,21 @@ export default function BatchUploadPage() {
                       </p>
                     )}
                     {pricingNoData && (
-                      <p className="text-xs text-[var(--text-tertiary)]">est.</p>
+                      <>
+                        <p className="text-xs text-[var(--text-tertiary)]">est.</p>
+                        <button
+                          onClick={() => handleRetryPricing(i)}
+                          disabled={retryingPricing[i]}
+                          className="flex items-center gap-1 text-xs text-brand-600 ml-1"
+                        >
+                          {retryingPricing[i] ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <RotateCw className="w-3 h-3" />
+                          )}
+                          {retryingPricing[i] ? "Fetching..." : "Retry price"}
+                        </button>
+                      </>
                     )}
                   </div>
 
