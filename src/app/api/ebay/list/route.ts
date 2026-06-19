@@ -125,6 +125,8 @@ export async function POST(req: NextRequest) {
 
     if (!offerId) return NextResponse.json({ error: "No offer ID returned" }, { status: 500 });
 
+    // Brief pause so eBay's inventory service indexes the item before publishing
+    await new Promise((r) => setTimeout(r, 1500));
     let publishResult = await publishOffer(offerId);
     if (publishResult.status >= 400) {
       const publishErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
@@ -136,7 +138,10 @@ export async function POST(req: NextRequest) {
         errLower.includes("item specific") ||
         errLower.includes("missing") ||
         errLower.includes("inseam") ||
-        errLower.includes("required");
+        errLower.includes("required") ||
+        errLower.includes("not found") ||
+        errLower.includes("product not found") ||
+        errLower.includes("cannot publish");
 
       if (needsCategoryFallback) {
         // categoryId is immutable on an existing offer — delete and recreate with safe clothing category.
@@ -151,6 +156,8 @@ export async function POST(req: NextRequest) {
         for (const tryCondition of conditionsToTry) {
           const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition);
           if (upsertResult.status >= 400) continue;
+          // Brief pause so eBay's inventory service indexes the item before we try to publish
+          await new Promise((r) => setTimeout(r, 1500));
           const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, heavy);
           const freshOfferId = (freshOffer.data as { offerId?: string }).offerId;
           if (freshOffer.status >= 400 || !freshOfferId) continue;
