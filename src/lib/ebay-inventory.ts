@@ -291,13 +291,11 @@ export async function getAllInventoryItems() {
   return inventoryRequest("GET", "/sell/inventory/v1/inventory_item?limit=200&offset=0");
 }
 
-// Uses Trading API EndItem to end a live listing directly by its eBay item ID.
-// More reliable than SKU-based offer deletion because we always have the listing ID.
-export async function endItemByListingId(listingId: string): Promise<{ success: boolean; error?: string }> {
+// Makes a Trading API XML call. Returns raw XML response string.
+export async function tradingRequest(callName: string, xmlBody: string): Promise<string> {
   const token = await getAccessToken();
-  return new Promise((resolve) => {
-    const body = `<?xml version="1.0" encoding="utf-8"?><EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><EndingReason>NotAvailable</EndingReason><ItemID>${listingId}</ItemID></EndItemRequest>`;
-    const buf = Buffer.from(body, "utf-8");
+  return new Promise((resolve, reject) => {
+    const buf = Buffer.from(xmlBody, "utf-8");
     const req = https.request(
       {
         hostname: "api.ebay.com",
@@ -306,7 +304,7 @@ export async function endItemByListingId(listingId: string): Promise<{ success: 
         headers: {
           "X-EBAY-API-SITEID": "0",
           "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
-          "X-EBAY-API-CALL-NAME": "EndItem",
+          "X-EBAY-API-CALL-NAME": callName,
           "X-EBAY-API-IAF-TOKEN": token,
           "Content-Type": "text/xml",
           "Content-Length": buf.length,
@@ -315,19 +313,30 @@ export async function endItemByListingId(listingId: string): Promise<{ success: 
       (res) => {
         let raw = "";
         res.on("data", (c: Buffer) => { raw += c.toString(); });
-        res.on("end", () => {
-          if (raw.includes("<Ack>Success</Ack>") || raw.includes("<Ack>Warning</Ack>")) {
-            resolve({ success: true });
-          } else {
-            const match = raw.match(/<LongMessage>(.*?)<\/LongMessage>/);
-            const shortMatch = raw.match(/<ShortMessage>(.*?)<\/ShortMessage>/);
-            resolve({ success: false, error: match?.[1] ?? shortMatch?.[1] ?? raw.slice(0, 300) });
-          }
-        });
+        res.on("end", () => resolve(raw));
       }
     );
-    req.on("error", (e: Error) => resolve({ success: false, error: e.message }));
+    req.on("error", reject);
     req.write(buf);
     req.end();
   });
+}
+
+// Uses Trading API EndItem to end a live listing directly by its eBay item ID.
+// More reliable than SKU-based offer deletion because we always have the listing ID.
+export async function endItemByListingId(listingId: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const raw = await tradingRequest(
+      "EndItem",
+      `<?xml version="1.0" encoding="utf-8"?><EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><EndingReason>NotAvailable</EndingReason><ItemID>${listingId}</ItemID></EndItemRequest>`
+    );
+    if (raw.includes("<Ack>Success</Ack>") || raw.includes("<Ack>Warning</Ack>")) {
+      return { success: true };
+    }
+    const match = raw.match(/<LongMessage>(.*?)<\/LongMessage>/);
+    const shortMatch = raw.match(/<ShortMessage>(.*?)<\/ShortMessage>/);
+    return { success: false, error: match?.[1] ?? shortMatch?.[1] ?? raw.slice(0, 300) };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
 }
