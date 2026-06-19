@@ -367,8 +367,9 @@ export default function BatchUploadPage() {
       if (thumb) {
         try {
           thumbnailUrl = await uploadThumbnail(thumb);
-        } catch {
-          // non-fatal — draft saves without thumbnail
+        } catch (thumbErr) {
+          console.error("Thumbnail upload failed:", (thumbErr as Error).message);
+          // non-fatal — draft saves without thumbnail but we log the error
         }
       }
 

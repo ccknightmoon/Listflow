@@ -169,8 +169,9 @@ export default function NewListingPage() {
       if (thumb) {
         try {
           thumbnailUrl = await uploadThumbnail(thumb);
-        } catch {
-          // non-fatal
+        } catch (thumbErr) {
+          console.error("Thumbnail upload failed:", (thumbErr as Error).message);
+          // non-fatal — draft saves without thumbnail
         }
       }
 
