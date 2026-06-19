@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -109,6 +110,7 @@ function resizeImage(file: File): Promise<{ dataUrl: string; mediaType: string }
 }
 
 export default function BatchUploadPage() {
+  const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
   const [photos, setPhotos] = useState<SlotImage[]>([]);
   const [groups, setGroups] = useState<number[][]>([]);
@@ -160,6 +162,8 @@ export default function BatchUploadPage() {
       await handleSaveDraft(i);
     }
     setSavingAll(false);
+    // Brief pause so user sees "All saved", then go to Drafts
+    setTimeout(() => router.push("/drafts"), 1200);
   }
 
   async function handleGroupPhotos() {
