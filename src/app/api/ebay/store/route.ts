@@ -24,7 +24,7 @@ export async function GET() {
     );
 
     if (!xml.includes("<Ack>Success</Ack>") && !xml.includes("<Ack>Warning</Ack>")) {
-      const errMsg = extract(xml, "LongMessage") || extract(xml, "ShortMessage") || "Failed to fetch eBay listings";
+      const errMsg = extract(xml, "LongMessage") || extract(xml, "ShortMessage") || xml.slice(0, 500) || "Failed to fetch eBay listings";
       return NextResponse.json({ error: errMsg }, { status: 400 });
     }
 
