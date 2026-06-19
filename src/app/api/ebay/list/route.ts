@@ -15,7 +15,7 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const { draftId, isHeavy } = await req.json();
+    const { draftId, isHeavy, customSku: requestCustomSku } = await req.json();
     if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
     if (!process.env.EBAY_OAUTH_REFRESH_TOKEN) {
@@ -32,7 +32,8 @@ export async function POST(req: NextRequest) {
     if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before listing" }, { status: 400 });
 
     const autoSku = String(parseInt(draftId.replace(/-/g, "").slice(0, 8), 16) % 1000000);
-    const sku = draft.custom_sku || autoSku;
+    // Prefer SKU passed directly in request (avoids DB save/read timing issues), then DB value, then auto
+    const sku = requestCustomSku || draft.custom_sku || autoSku;
     // Legacy SKU formats used before the numeric format was introduced
     const legacyFullSku = `listflow${draftId.replace(/-/g, "")}`;
     const legacyShortSku = `listflow${draftId.replace(/-/g, "").slice(0, 8)}`;

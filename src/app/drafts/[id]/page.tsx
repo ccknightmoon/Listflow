@@ -176,7 +176,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       const res = await fetch("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId: params.id }),
+        body: JSON.stringify({ draftId: params.id, customSku: customSku || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to list");
