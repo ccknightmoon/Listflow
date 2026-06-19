@@ -5,12 +5,15 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
+type SortKey = "newest" | "oldest" | "price-asc" | "price-desc";
+
 interface StoreListing {
   listingId: string;
   title: string;
   price: number | null;
   thumbnail: string | null;
   sku: string | null;
+  startTime: string | null;
 }
 
 export default function StorePage() {
@@ -19,6 +22,7 @@ export default function StorePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<SortKey>("newest");
 
   useEffect(() => { loadStore(); }, []);
 
@@ -61,13 +65,24 @@ export default function StorePage() {
     }
   }
 
+  const sorted = [...listings].sort((a, b) => {
+    if (sort === "newest" || sort === "oldest") {
+      const ta = a.startTime ? new Date(a.startTime).getTime() : 0;
+      const tb = b.startTime ? new Date(b.startTime).getTime() : 0;
+      return sort === "newest" ? tb - ta : ta - tb;
+    }
+    const pa = a.price ?? 0;
+    const pb = b.price ?? 0;
+    return sort === "price-asc" ? pa - pb : pb - pa;
+  });
+
   return (
     <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-4">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <div>
+        <div className="flex-1 min-w-0">
           <h1 className="text-xl font-medium">
             {loading ? "Store" : `Store (${listings.length}${total > listings.length ? ` of ${total}` : ""})`}
           </h1>
@@ -76,6 +91,21 @@ export default function StorePage() {
           )}
         </div>
       </div>
+
+      {!loading && listings.length > 0 && (
+        <div className="mb-4">
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="price-asc">Price: low to high</option>
+            <option value="price-desc">Price: high to low</option>
+          </select>
+        </div>
+      )}
 
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>{error}</div>
@@ -96,7 +126,7 @@ export default function StorePage() {
 
       {!loading && listings.length > 0 && (
         <div className="flex flex-col gap-2">
-          {listings.map((l) => (
+          {sorted.map((l) => (
             <div key={l.listingId} className="card p-3">
               <div className="flex items-center gap-3">
                 {/* Thumbnail */}
