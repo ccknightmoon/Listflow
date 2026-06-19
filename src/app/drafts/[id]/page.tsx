@@ -183,6 +183,14 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to list");
+      // Save ebay_listing_id from frontend as a backup in case the list API's DB write was skipped
+      if (data.listingId) {
+        await fetch(`/api/drafts/${params.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ebayListingId: data.listingId }),
+        });
+      }
       setListingUrl(data.url);
       setJustListed(true);
       setTimeout(() => router.push("/drafts"), 2000);
