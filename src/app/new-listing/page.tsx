@@ -327,25 +327,33 @@ export default function NewListingPage() {
             </div>
           ) : result ? (
             <>
-              <p className="text-2xl font-medium mb-3">${result.suggestedPrice}</p>
+              {result.noData ? (
+                <p className="text-sm text-[var(--text-secondary)] py-2 mb-3">
+                  No eBay comps found for this item. Set your own price.
+                </p>
+              ) : (
+                <>
+                  <p className="text-2xl font-medium mb-3">${result.suggestedPrice}</p>
 
-              <div className="grid grid-cols-3 gap-2 mb-3">
-                <MiniStat label="Avg sold" value={`$${result.avgSold}`} />
-                <MiniStat
-                  label="Active range"
-                  value={`$${result.activeRangeLow}–${result.activeRangeHigh}`}
-                />
-                <MiniStat
-                  label="Sell odds"
-                  value={result.sellOdds}
-                  highlight={result.sellOdds === "High"}
-                />
-              </div>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <MiniStat label="Avg sold" value={`$${result.avgSold}`} />
+                    <MiniStat
+                      label="Active range"
+                      value={`$${result.activeRangeLow}–${result.activeRangeHigh}`}
+                    />
+                    <MiniStat
+                      label="Sell odds"
+                      value={result.sellOdds}
+                      highlight={result.sellOdds === "High"}
+                    />
+                  </div>
 
-              <p className="text-xs text-[var(--text-tertiary)] mb-3">
-                Based on {result.comparableSoldCount} sold and{" "}
-                {result.comparableActiveCount} active eBay listings
-              </p>
+                  <p className="text-xs text-[var(--text-tertiary)] mb-3">
+                    Based on {result.comparableSoldCount} sold and{" "}
+                    {result.comparableActiveCount} active eBay listings
+                  </p>
+                </>
+              )}
 
               <div className="flex gap-2">
                 <button

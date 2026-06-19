@@ -215,15 +215,13 @@ export async function POST(req: NextRequest) {
   const avgSold = avgRaw > 0 ? Math.round(avgRaw) : 0;
 
   const sortedActive = [...activePrices].sort((a, b) => a - b);
-  const activeRangeLow =
-    sortedActive.length > 0 ? Math.round(sortedActive[0]) : Math.round(suggestedPrice * 0.8) || 10;
+  const activeRangeLow = sortedActive.length > 0 ? Math.round(sortedActive[0]) : 0;
   const activeRangeHigh =
-    sortedActive.length > 0
-      ? Math.round(sortedActive[sortedActive.length - 1])
-      : Math.round(suggestedPrice * 1.3) || 40;
+    sortedActive.length > 0 ? Math.round(sortedActive[sortedActive.length - 1]) : 0;
 
   const comparableSoldCount = filteredSold.length;
   const comparableActiveCount = activePrices.length;
+  const noData = comparableSoldCount === 0 && comparableActiveCount === 0;
 
   let sellOdds: PriceSuggestion["sellOdds"] = "Low";
   if (comparableSoldCount >= 10) sellOdds = "High";
@@ -235,13 +233,14 @@ export async function POST(req: NextRequest) {
   }
 
   const result: PriceSuggestion = {
-    suggestedPrice: suggestedPrice || 20,
-    avgSold: avgSold || 20,
+    suggestedPrice,
+    avgSold,
     activeRangeLow,
     activeRangeHigh,
     sellOdds,
     comparableSoldCount,
     comparableActiveCount,
+    ...(noData ? { noData: true } : {}),
   };
 
   return NextResponse.json(result);

@@ -703,13 +703,16 @@ export default function BatchUploadPage() {
               );
             }
 
+            const livePricing = result.pricing && !result.pricing.noData ? result.pricing : null;
             const suggestion: PriceSuggestion =
-              result.pricing ??
+              livePricing ??
               getPriceSuggestion(
                 result.condition,
                 Boolean(result.flaws && result.flaws.trim().length > 0)
               );
-            const pricingReady = Boolean(result.pricing);
+            const pricingAttempted = Boolean(result.pricing);
+            const pricingReady = Boolean(livePricing);
+            const pricingNoData = pricingAttempted && !livePricing;
 
             return (
               <div key={i} className="card overflow-hidden">
@@ -737,19 +740,22 @@ export default function BatchUploadPage() {
 
                   <div className="flex items-baseline gap-2 mb-2">
                     <p className="text-2xl font-medium">${suggestion.suggestedPrice}</p>
-                    {!pricingReady && (
+                    {!pricingAttempted && (
                       <p className="text-xs text-[var(--text-tertiary)] flex items-center gap-1">
                         <Loader2 className="w-3 h-3 animate-spin" />
                         fetching live prices...
                       </p>
                     )}
+                    {pricingNoData && (
+                      <p className="text-xs text-[var(--text-tertiary)]">est.</p>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    <MiniStat label="Avg sold" value={`$${suggestion.avgSold}`} />
+                    <MiniStat label="Avg sold" value={pricingReady ? `$${suggestion.avgSold}` : "—"} />
                     <MiniStat
                       label="Active range"
-                      value={`$${suggestion.activeRangeLow}–${suggestion.activeRangeHigh}`}
+                      value={pricingReady ? `$${suggestion.activeRangeLow}–${suggestion.activeRangeHigh}` : "—"}
                     />
                     <MiniStat
                       label="Sell odds"

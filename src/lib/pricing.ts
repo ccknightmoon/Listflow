@@ -13,6 +13,7 @@ export interface PriceSuggestion {
   sellOdds: "High" | "Medium" | "Low";
   comparableSoldCount: number;
   comparableActiveCount: number;
+  noData?: boolean;
 }
 
 /**
