@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ExternalLink, Shirt, ChevronRight } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Shirt, ChevronRight, Trash2 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 interface Listing {
@@ -25,8 +25,29 @@ export default function EbayInventoryPage() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [delistingId, setDelistingId] = useState<string | null>(null);
 
   useEffect(() => { loadInventory(); }, []);
+
+  async function handleDelist(draftId: string) {
+    if (!confirm("End this eBay listing? The draft will be kept so you can relist later.")) return;
+    setDelistingId(draftId);
+    setError(null);
+    try {
+      const res = await fetch("/api/ebay/delist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to delist");
+      setListings((prev) => prev.filter((l) => l.draftId !== draftId));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setDelistingId(null);
+    }
+  }
 
   async function loadInventory() {
     setLoading(true);
@@ -78,6 +99,7 @@ export default function EbayInventoryPage() {
           <div className="flex flex-col gap-2">
             {active.map((l) => {
               const draftId = l.draftId ?? skuToDraftId(l.sku);
+              const isDelisting = delistingId === draftId;
               return (
                 <div key={l.sku} className="card flex items-center gap-3 p-3">
                   {l.thumbnail ? (
@@ -102,6 +124,19 @@ export default function EbayInventoryPage() {
                       <Link href={`/drafts/${draftId}`}>
                         <ChevronRight className="w-4 h-4 text-[var(--text-tertiary)]" />
                       </Link>
+                    )}
+                    {draftId && (
+                      <button
+                        onClick={() => handleDelist(draftId)}
+                        disabled={isDelisting}
+                        className="p-1 rounded hover:bg-[var(--bg-page)]"
+                        title="End listing"
+                      >
+                        {isDelisting
+                          ? <Loader2 className="w-4 h-4 animate-spin text-[var(--text-tertiary)]" />
+                          : <Trash2 className="w-4 h-4" style={{ color: "#B3261E" }} />
+                        }
+                      </button>
                     )}
                   </div>
                 </div>
