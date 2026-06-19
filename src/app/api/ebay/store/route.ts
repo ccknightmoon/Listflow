@@ -1,50 +1,33 @@
 import { NextResponse } from "next/server";
-import { getAllOffers, getAllInventoryItems } from "@/lib/ebay-inventory";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+);
+
 export async function GET() {
   try {
-    const [offersRes, itemsRes] = await Promise.all([
-      getAllOffers(),
-      getAllInventoryItems(),
-    ]);
+    const { data: drafts, error } = await supabase
+      .from("drafts")
+      .select("id, title, suggested_price, thumbnail_url, ebay_listing_id, brand, size, condition")
+      .not("ebay_listing_id", "is", null)
+      .order("id", { ascending: false });
 
-    if (offersRes.status >= 400) {
-      const errData = offersRes.data as { errors?: Array<{ message?: string; longMessage?: string }>; message?: string };
-      const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(offersRes.data);
-      return NextResponse.json({ error: `Offers API ${offersRes.status}: ${msg}` }, { status: 400 });
-    }
+    if (error) throw new Error(error.message);
 
-    type Offer = {
-      offerId: string;
-      sku: string;
-      status: string;
-      pricingSummary?: { price?: { value?: string } };
-      listing?: { listingId?: string };
-    };
-    type InventoryItem = {
-      sku: string;
-      product?: { title?: string; imageUrls?: string[] };
-    };
-
-    const offers = ((offersRes.data as { offers?: Offer[] }).offers ?? [])
-      .filter((o) => o.status === "PUBLISHED");
-
-    const inventoryItems = (itemsRes.data as { inventoryItems?: InventoryItem[] }).inventoryItems ?? [];
-    const itemBySku = new Map(inventoryItems.map((i) => [i.sku, i]));
-
-    const listings = offers.map((offer) => {
-      const item = itemBySku.get(offer.sku);
-      return {
-        listingId: offer.listing?.listingId ?? "",
-        offerId: offer.offerId,
-        sku: offer.sku,
-        title: item?.product?.title ?? offer.sku,
-        price: offer.pricingSummary?.price?.value ?? null,
-        gallery: item?.product?.imageUrls?.[0] ?? null,
-      };
-    });
+    const listings = (drafts ?? []).map((d) => ({
+      draftId: d.id as string,
+      listingId: d.ebay_listing_id as string,
+      title: (d.title as string) ?? "Untitled",
+      price: d.suggested_price as number | null,
+      thumbnail: (d.thumbnail_url as string) ?? null,
+      brand: (d.brand as string) ?? null,
+      size: (d.size as string) ?? null,
+      condition: (d.condition as string) ?? null,
+    }));
 
     return NextResponse.json({ listings, total: listings.length });
   } catch (err) {

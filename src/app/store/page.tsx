@@ -6,12 +6,14 @@ import { ArrowLeft, Loader2, ExternalLink, Shirt } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 interface StoreListing {
+  draftId: string;
   listingId: string;
-  offerId: string;
-  sku: string;
   title: string;
-  price: string | null;
-  gallery: string | null;
+  price: number | null;
+  thumbnail: string | null;
+  brand: string | null;
+  size: string | null;
+  condition: string | null;
 }
 
 export default function StorePage() {
@@ -60,44 +62,59 @@ export default function StorePage() {
 
       {!loading && !error && listings.length === 0 && (
         <div className="card p-8 text-center">
-          <p className="text-sm text-[var(--text-secondary)]">No active listings on your eBay account.</p>
+          <p className="text-sm text-[var(--text-secondary)]">No active listings yet. List items from Drafts to see them here.</p>
         </div>
       )}
 
       {!loading && listings.length > 0 && (
         <div className="flex flex-col gap-2">
           {listings.map((l) => (
-            <a
-              key={l.offerId}
-              href={l.listingId ? `https://www.ebay.com/itm/${l.listingId}` : "#"}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="card flex items-center gap-3 p-3 active:opacity-80"
-            >
-              {l.gallery ? (
+            <div key={l.draftId} className="card flex items-center gap-3 p-3">
+              {l.thumbnail ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={l.gallery}
+                  src={l.thumbnail}
                   alt={l.title}
-                  className="w-12 h-12 rounded-md object-cover flex-shrink-0"
+                  className="w-14 h-14 rounded-md object-cover flex-shrink-0"
                 />
               ) : (
-                <div className="w-12 h-12 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-shrink-0">
+                <div className="w-14 h-14 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-shrink-0">
                   <Shirt className="w-6 h-6 text-[var(--text-secondary)]" />
                 </div>
               )}
 
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{l.title}</p>
-                {l.price && (
-                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                    ${parseFloat(l.price).toFixed(2)}
-                  </p>
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                  {[
+                    l.price != null ? `$${l.price}` : null,
+                    l.size,
+                    l.condition,
+                  ].filter(Boolean).join(" · ")}
+                </p>
+                {l.brand && (
+                  <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{l.brand}</p>
                 )}
               </div>
 
-              <ExternalLink className="w-4 h-4 flex-shrink-0 text-[var(--text-tertiary)]" />
-            </a>
+              <div className="flex flex-col gap-2 flex-shrink-0">
+                <Link
+                  href={`/drafts/${l.draftId}`}
+                  className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-center"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  Edit
+                </Link>
+                <a
+                  href={`https://www.ebay.com/itm/${l.listingId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink className="w-4 h-4 text-[var(--text-tertiary)]" />
+                </a>
+              </div>
+            </div>
           ))}
         </div>
       )}
