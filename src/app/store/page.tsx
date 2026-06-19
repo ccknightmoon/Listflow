@@ -7,24 +7,11 @@ import BottomNav from "@/components/BottomNav";
 
 interface StoreListing {
   listingId: string;
+  offerId: string;
+  sku: string;
   title: string;
-  price: string;
-  gallery: string;
-  endTime: string;
-  quantity: string;
-  quantitySold: string;
-}
-
-function timeLeft(endTime: string): string {
-  if (!endTime) return "";
-  const diff = new Date(endTime).getTime() - Date.now();
-  if (diff <= 0) return "Ended";
-  const days = Math.floor(diff / 86400000);
-  const hours = Math.floor((diff % 86400000) / 3600000);
-  if (days > 0) return `${days}d ${hours}h left`;
-  const mins = Math.floor((diff % 3600000) / 60000);
-  if (hours > 0) return `${hours}h ${mins}m left`;
-  return `${mins}m left`;
+  price: string | null;
+  gallery: string | null;
 }
 
 export default function StorePage() {
@@ -67,7 +54,7 @@ export default function StorePage() {
       {loading && (
         <div className="card p-8 text-center">
           <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)]">Loading eBay store...</p>
+          <p className="text-sm text-[var(--text-secondary)]">Loading store...</p>
         </div>
       )}
 
@@ -81,8 +68,8 @@ export default function StorePage() {
         <div className="flex flex-col gap-2">
           {listings.map((l) => (
             <a
-              key={l.listingId}
-              href={`https://www.ebay.com/itm/${l.listingId}`}
+              key={l.offerId}
+              href={l.listingId ? `https://www.ebay.com/itm/${l.listingId}` : "#"}
               target="_blank"
               rel="noopener noreferrer"
               className="card flex items-center gap-3 p-3 active:opacity-80"
@@ -102,13 +89,9 @@ export default function StorePage() {
 
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{l.title}</p>
-                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                  {l.price ? `$${parseFloat(l.price).toFixed(2)}` : ""}
-                  {l.endTime ? ` · ${timeLeft(l.endTime)}` : ""}
-                </p>
-                {l.quantitySold && l.quantitySold !== "0" && (
-                  <p className="text-xs mt-0.5" style={{ color: "#3B6D11" }}>
-                    {l.quantitySold} sold
+                {l.price && (
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                    ${parseFloat(l.price).toFixed(2)}
                   </p>
                 )}
               </div>

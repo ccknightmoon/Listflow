@@ -1,46 +1,48 @@
 import { NextResponse } from "next/server";
-import { tradingRequest } from "@/lib/ebay-inventory";
+import { getAllOffers, getAllInventoryItems } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
 
-function extract(xml: string, tag: string): string {
-  const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
-  return m?.[1]?.trim() ?? "";
-}
-
-function extractAll(xml: string, tag: string): string[] {
-  const regex = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "g");
-  const results: string[] = [];
-  let m;
-  while ((m = regex.exec(xml)) !== null) results.push(m[1]);
-  return results;
-}
-
 export async function GET() {
   try {
-    const { status: tradeStatus, body: xml } = await tradingRequest(
-      "GetMyeBaySelling",
-      `<?xml version="1.0" encoding="utf-8"?><GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ActiveList><Include>true</Include><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination></ActiveList><DetailLevel>ReturnAll</DetailLevel></GetMyeBaySellingRequest>`
-    );
+    const [offersRes, itemsRes] = await Promise.all([
+      getAllOffers(),
+      getAllInventoryItems(),
+    ]);
 
-    if (!xml.includes("<Ack>Success</Ack>") && !xml.includes("<Ack>Warning</Ack>")) {
-      const errMsg = extract(xml, "LongMessage") || extract(xml, "ShortMessage") || `HTTP ${tradeStatus}: ${xml.slice(0, 400)}` || "Failed to fetch eBay listings";
-      return NextResponse.json({ error: errMsg }, { status: 400 });
+    if (offersRes.status >= 400) {
+      return NextResponse.json({ error: "Failed to fetch eBay offers" }, { status: 400 });
     }
 
-    const itemArrayMatch = xml.match(/<ItemArray>([\s\S]*?)<\/ItemArray>/);
-    const itemsXml = itemArrayMatch?.[1] ?? "";
-    const itemBlocks = extractAll(itemsXml, "Item");
+    type Offer = {
+      offerId: string;
+      sku: string;
+      status: string;
+      pricingSummary?: { price?: { value?: string } };
+      listing?: { listingId?: string };
+    };
+    type InventoryItem = {
+      sku: string;
+      product?: { title?: string; imageUrls?: string[] };
+    };
 
-    const listings = itemBlocks.map((item) => ({
-      listingId: extract(item, "ItemID"),
-      title: extract(item, "Title"),
-      price: extract(item, "CurrentPrice"),
-      gallery: extract(item, "GalleryURL"),
-      endTime: extract(item, "EndTime"),
-      quantity: extract(item, "Quantity"),
-      quantitySold: extract(item, "QuantitySold"),
-    }));
+    const offers = ((offersRes.data as { offers?: Offer[] }).offers ?? [])
+      .filter((o) => o.status === "PUBLISHED");
+
+    const inventoryItems = (itemsRes.data as { inventoryItems?: InventoryItem[] }).inventoryItems ?? [];
+    const itemBySku = new Map(inventoryItems.map((i) => [i.sku, i]));
+
+    const listings = offers.map((offer) => {
+      const item = itemBySku.get(offer.sku);
+      return {
+        listingId: offer.listing?.listingId ?? "",
+        offerId: offer.offerId,
+        sku: offer.sku,
+        title: item?.product?.title ?? offer.sku,
+        price: offer.pricingSummary?.price?.value ?? null,
+        gallery: item?.product?.imageUrls?.[0] ?? null,
+      };
+    });
 
     return NextResponse.json({ listings, total: listings.length });
   } catch (err) {
