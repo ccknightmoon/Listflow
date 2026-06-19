@@ -1,24 +1,49 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, ImagePlus, FileText, BarChart2, ChevronRight } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
+interface Stats {
+  drafts: number;
+  active: number;
+  weeklyRevenue: number;
+}
+
 export default function DashboardPage() {
+  const [stats, setStats] = useState<Stats | null>(null);
+
+  useEffect(() => {
+    fetch("/api/dashboard/stats")
+      .then((r) => r.json())
+      .then((data) => setStats(data))
+      .catch(() => {});
+  }, []);
+
+  const drafts = stats?.drafts ?? null;
+  const active = stats?.active ?? null;
+  const revenue = stats?.weeklyRevenue ?? null;
+
   return (
     <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
       <div className="flex items-center justify-between mb-6">
         <div>
           <p className="text-sm text-[var(--text-secondary)]">Welcome back</p>
-          <h1 className="text-xl font-medium">Alex&apos;s closet</h1>
+          <h1 className="text-xl font-medium">My store</h1>
         </div>
         <div className="w-9 h-9 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 font-medium text-sm">
-          A
+          S
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-6">
-        <Stat label="drafts" value="12" />
-        <Stat label="active" value="47" />
-        <Stat label="this week" value="$612" />
+        <Stat label="drafts" value={drafts !== null ? String(drafts) : "—"} />
+        <Stat label="active" value={active !== null ? String(active) : "—"} />
+        <Stat
+          label="this week"
+          value={revenue !== null ? (revenue === 0 ? "$0" : `$${revenue.toFixed(0)}`) : "—"}
+        />
       </div>
 
       <Link href="/new-listing" className="btn btn-primary w-full mb-6">
@@ -38,13 +63,13 @@ export default function DashboardPage() {
           href="/drafts"
           icon={FileText}
           title="Review drafts"
-          subtitle="12 ready to post"
+          subtitle={drafts !== null ? `${drafts} ready to post` : "Loading…"}
         />
         <QuickAction
-          href="/membership"
+          href="/store"
           icon={BarChart2}
-          title="Pricing insights"
-          subtitle="Market trends for your niche"
+          title="View store"
+          subtitle={active !== null ? `${active} active listings` : "Loading…"}
         />
       </div>
 
