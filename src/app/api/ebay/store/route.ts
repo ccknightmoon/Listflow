@@ -11,7 +11,9 @@ export async function GET() {
     ]);
 
     if (offersRes.status >= 400) {
-      return NextResponse.json({ error: "Failed to fetch eBay offers" }, { status: 400 });
+      const errData = offersRes.data as { errors?: Array<{ message?: string; longMessage?: string }>; message?: string };
+      const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(offersRes.data);
+      return NextResponse.json({ error: `Offers API ${offersRes.status}: ${msg}` }, { status: 400 });
     }
 
     type Offer = {
