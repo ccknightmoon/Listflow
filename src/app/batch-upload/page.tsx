@@ -324,6 +324,8 @@ export default function BatchUploadPage() {
   function fetchPricingForAll(allResults: AiResult[]) {
     allResults.forEach((result, i) => {
       if (result.error) return;
+      const firstPhotoIdx = (groups[i] ?? [])[0];
+      const image = firstPhotoIdx !== undefined ? photos[firstPhotoIdx]?.data : undefined;
       fetch("/api/pricing/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -331,6 +333,7 @@ export default function BatchUploadPage() {
           title: result.suggestedTitle,
           brand: result.brand,
           condition: result.condition,
+          image,
         }),
       })
         .then((r) => (r.ok ? r.json() : null))
@@ -371,6 +374,8 @@ export default function BatchUploadPage() {
         next[index] = retryResult;
         return next;
       });
+      const retryPhotoIdx = (groups[index] ?? [])[0];
+      const retryImage = retryPhotoIdx !== undefined ? photos[retryPhotoIdx]?.data : undefined;
       fetch("/api/pricing/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -378,6 +383,7 @@ export default function BatchUploadPage() {
           title: retryResult.suggestedTitle,
           brand: retryResult.brand,
           condition: retryResult.condition,
+          image: retryImage,
         }),
       })
         .then((r) => (r.ok ? r.json() : null))

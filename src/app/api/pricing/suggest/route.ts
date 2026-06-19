@@ -4,6 +4,7 @@ import type { PriceSuggestion, Condition } from "@/lib/pricing";
 export const runtime = "nodejs";
 
 const FINDING_BASE = "https://svcs.ebay.com/services/search/FindingService/v1";
+const BROWSE_BASE = "https://api.ebay.com/buy/browse/v1";
 
 const CONDITION_MULTIPLIER: Record<Condition, number> = {
   "New with tags": 1.5,
@@ -12,6 +13,84 @@ const CONDITION_MULTIPLIER: Record<Condition, number> = {
   "Good - minor flaws": 0.78,
   "Fair - notable flaws": 0.55,
 };
+
+// Stop words and size tokens to exclude from keyword extraction
+const STOP = new Set([
+  "the", "a", "an", "and", "or", "for", "in", "on", "at", "to", "of", "with",
+  "is", "it", "this", "that", "by", "from", "as", "are", "was", "be", "has",
+  "new", "used", "lot", "buy", "now", "free", "fast", "shipping", "condition",
+  "size", "small", "medium", "large", "extra", "petite", "plus",
+  "xs", "sm", "xl", "xxl", "xxxl", "xlt", "2xl", "3xl", "tall",
+  "men", "women", "mens", "womens", "unisex", "kids",
+]);
+
+// Module-level app token cache (reused across requests to same serverless instance)
+let appTokenCache: { token: string; expires: number } | null = null;
+
+async function getAppToken(): Promise<string> {
+  if (appTokenCache && appTokenCache.expires > Date.now() + 60_000) {
+    return appTokenCache.token;
+  }
+  const id = process.env.EBAY_CLIENT_ID!;
+  const secret = process.env.EBAY_CLIENT_SECRET!;
+  const creds = Buffer.from(`${id}:${secret}`).toString("base64");
+  const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${creds}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`App token fetch failed: ${res.status}`);
+  const data = (await res.json()) as { access_token: string; expires_in: number };
+  appTokenCache = { token: data.access_token, expires: Date.now() + data.expires_in * 1000 };
+  return data.access_token;
+}
+
+async function searchByImage(imageBase64: string): Promise<string[]> {
+  const token = await getAppToken();
+  const res = await fetch(`${BROWSE_BASE}/item_summary/search_by_image?limit=10`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    },
+    body: JSON.stringify({ image: imageBase64 }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`searchByImage ${res.status}`);
+  const data = (await res.json()) as { itemSummaries?: { title: string }[] };
+  return (data.itemSummaries ?? []).map((item) => item.title).filter(Boolean);
+}
+
+function keywordsFromTitles(titles: string[], brand?: string): string {
+  const wordCount: Record<string, number> = {};
+  for (const title of titles) {
+    const words = title
+      .toLowerCase()
+      .split(/[\s\-\/,.()|&]+/)
+      .filter((w) => w.length >= 3 && !STOP.has(w) && !/^\d+$/.test(w));
+    for (const word of new Set(words)) {
+      wordCount[word] = (wordCount[word] ?? 0) + 1;
+    }
+  }
+  const top = Object.entries(wordCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 4)
+    .map(([w]) => w);
+
+  // Prepend brand if not already captured
+  if (brand && brand.toLowerCase() !== "unknown") {
+    const bl = brand.toLowerCase();
+    if (!top.some((w) => w.includes(bl) || bl.includes(w))) {
+      top.unshift(brand);
+    }
+  }
+  return top.slice(0, 5).join(" ");
+}
 
 type EbayJson = Record<string, unknown>;
 
@@ -44,7 +123,7 @@ function itemPrice(item: EbayJson): number {
   try {
     const ss = (item["sellingStatus"] as EbayJson[])?.[0];
     const cp = (ss?.["currentPrice"] as EbayJson[])?.[0];
-    return parseFloat(cp?.["__value__"] as string ?? "0") || 0;
+    return parseFloat((cp?.["__value__"] as string) ?? "0") || 0;
   } catch {
     return 0;
   }
@@ -59,28 +138,38 @@ function removeOutliers(prices: number[]): number[] {
 
 function buildKeywords(title: string, brand?: string): string {
   const titleWords = title.split(/\s+/).slice(0, 6).join(" ").trim();
-  if (
-    brand &&
-    brand.toLowerCase() !== "unknown" &&
-    !title.toLowerCase().includes(brand.toLowerCase())
-  ) {
+  if (brand && brand.toLowerCase() !== "unknown" && !title.toLowerCase().includes(brand.toLowerCase())) {
     return `${brand} ${titleWords}`.trim();
   }
   return titleWords || title.trim();
 }
 
 export async function POST(req: NextRequest) {
-  const { title, brand, condition } = (await req.json()) as {
+  const { title, brand, condition, image } = (await req.json()) as {
     title: string;
     brand?: string;
     condition: Condition;
+    image?: string; // base64, no data-URL prefix
   };
 
   if (!process.env.EBAY_CLIENT_ID) {
     return NextResponse.json({ error: "EBAY_CLIENT_ID not configured" }, { status: 500 });
   }
 
-  const keywords = buildKeywords(title, brand);
+  // Determine search keywords: visual search if image provided, else AI title
+  let keywords = buildKeywords(title, brand);
+  if (image) {
+    try {
+      const visualTitles = await searchByImage(image);
+      if (visualTitles.length >= 2) {
+        const visualKeywords = keywordsFromTitles(visualTitles, brand);
+        if (visualKeywords) keywords = visualKeywords;
+      }
+    } catch {
+      // visual search failed — fall through to AI title keywords
+    }
+  }
+
   if (!keywords) {
     return NextResponse.json({ error: "No search keywords provided" }, { status: 400 });
   }
@@ -102,22 +191,16 @@ export async function POST(req: NextRequest) {
   ]);
 
   const soldItems =
-    soldRes.status === "fulfilled"
-      ? extractItems(soldRes.value, "findCompletedItemsResponse")
-      : [];
+    soldRes.status === "fulfilled" ? extractItems(soldRes.value, "findCompletedItemsResponse") : [];
   const activeItems =
-    activeRes.status === "fulfilled"
-      ? extractItems(activeRes.value, "findItemsAdvancedResponse")
-      : [];
+    activeRes.status === "fulfilled" ? extractItems(activeRes.value, "findItemsAdvancedResponse") : [];
 
   const rawSoldPrices = soldItems.map(itemPrice).filter((p) => p > 0);
   const activePrices = activeItems.map(itemPrice).filter((p) => p > 0);
 
   const filteredSold = removeOutliers(rawSoldPrices);
   const avgRaw =
-    filteredSold.length > 0
-      ? filteredSold.reduce((s, p) => s + p, 0) / filteredSold.length
-      : 0;
+    filteredSold.length > 0 ? filteredSold.reduce((s, p) => s + p, 0) / filteredSold.length : 0;
 
   const mult = CONDITION_MULTIPLIER[condition] ?? 1.0;
   const suggestedPrice = avgRaw > 0 ? Math.max(1, Math.round(avgRaw * mult)) : 0;

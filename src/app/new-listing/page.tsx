@@ -118,14 +118,14 @@ export default function NewListingPage() {
     }
   }
 
-  async function fetchPricing(pTitle: string, pBrand: string | undefined, pCondition: Condition) {
+  async function fetchPricing(pTitle: string, pBrand: string | undefined, pCondition: Condition, pImage?: string) {
     setPricingLoading(true);
     setResult(null);
     try {
       const res = await fetch("/api/pricing/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: pTitle, brand: pBrand, condition: pCondition }),
+        body: JSON.stringify({ title: pTitle, brand: pBrand, condition: pCondition, image: pImage }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Pricing failed");
@@ -145,7 +145,7 @@ export default function NewListingPage() {
     }));
 
     if (images.length === 0) {
-      fetchPricing(title, undefined, condition);
+      fetchPricing(title, undefined, condition, photos["front"]?.data);
       return;
     }
 
@@ -170,7 +170,8 @@ export default function NewListingPage() {
       setCondition(newCondition);
       setFlaws(data.flaws ?? flaws);
 
-      fetchPricing(newTitle, data.brand, newCondition);
+      const frontPhoto = photos["front"]?.data ?? photos[Object.keys(photos)[0]]?.data;
+      fetchPricing(newTitle, data.brand, newCondition, frontPhoto);
     } catch (err) {
       setError((err as Error).message);
     } finally {
