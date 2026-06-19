@@ -45,7 +45,8 @@ export async function POST(req: NextRequest) {
     // Purge all stale offers and the inventory item before recreating.
     // eBay blocks condition changes on inventory items with prior offers — deleting everything
     // gives us a guaranteed clean slate with the correct condition and category.
-    const skusToClean = [...new Set([sku, legacyFullSku, legacyShortSku, legacyHyphenSku])];
+    // Always include autoSku so that switching from auto→custom SKU cleans up the old auto entry
+    const skusToClean = [...new Set([sku, autoSku, legacyFullSku, legacyShortSku, legacyHyphenSku])];
     for (const candidateSku of skusToClean) {
       const existingRes = await getOfferBySku(candidateSku);
       const existingOffers = (existingRes.data as { offers?: Array<{ offerId: string }> }).offers ?? [];
