@@ -6,18 +6,15 @@ import { ArrowLeft, Loader2, ExternalLink, Shirt } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 interface StoreListing {
-  draftId: string;
   listingId: string;
   title: string;
   price: number | null;
   thumbnail: string | null;
-  brand: string | null;
-  size: string | null;
-  condition: string | null;
 }
 
 export default function StorePage() {
   const [listings, setListings] = useState<StoreListing[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,6 +28,7 @@ export default function StorePage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load store");
       setListings(data.listings ?? []);
+      setTotal(data.total ?? 0);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -44,9 +42,14 @@ export default function StorePage() {
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <h1 className="text-xl font-medium">
-          {loading ? "Store" : `Store (${listings.length})`}
-        </h1>
+        <div>
+          <h1 className="text-xl font-medium">
+            {loading ? "Store" : `Store (${listings.length}${total > listings.length ? ` of ${total}` : ""})`}
+          </h1>
+          {!loading && !error && (
+            <p className="text-xs text-[var(--text-secondary)]">All active eBay listings</p>
+          )}
+        </div>
       </div>
 
       {error && (
@@ -62,14 +65,20 @@ export default function StorePage() {
 
       {!loading && !error && listings.length === 0 && (
         <div className="card p-8 text-center">
-          <p className="text-sm text-[var(--text-secondary)]">No active listings yet. List items from Drafts to see them here.</p>
+          <p className="text-sm text-[var(--text-secondary)]">No active eBay listings found.</p>
         </div>
       )}
 
       {!loading && listings.length > 0 && (
         <div className="flex flex-col gap-2">
           {listings.map((l) => (
-            <div key={l.draftId} className="card flex items-center gap-3 p-3">
+            <a
+              key={l.listingId}
+              href={`https://www.ebay.com/itm/${l.listingId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="card flex items-center gap-3 p-3 hover:opacity-80 transition-opacity"
+            >
               {l.thumbnail ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
@@ -85,36 +94,14 @@ export default function StorePage() {
 
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{l.title}</p>
-                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                  {[
-                    l.price != null ? `$${l.price}` : null,
-                    l.size,
-                    l.condition,
-                  ].filter(Boolean).join(" · ")}
-                </p>
-                {l.brand && (
-                  <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{l.brand}</p>
+                {l.price != null && (
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">${l.price.toFixed(2)}</p>
                 )}
+                <p className="text-xs text-[var(--text-tertiary)] mt-0.5">#{l.listingId}</p>
               </div>
 
-              <div className="flex flex-col gap-2 flex-shrink-0">
-                <Link
-                  href={`/drafts/${l.draftId}`}
-                  className="text-[10px] text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-center"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  Edit
-                </Link>
-                <a
-                  href={`https://www.ebay.com/itm/${l.listingId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ExternalLink className="w-4 h-4 text-[var(--text-tertiary)]" />
-                </a>
-              </div>
-            </div>
+              <ExternalLink className="w-4 h-4 text-[var(--text-tertiary)] flex-shrink-0" />
+            </a>
           ))}
         </div>
       )}

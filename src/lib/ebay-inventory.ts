@@ -299,7 +299,7 @@ export async function tradingRequest(callName: string, xmlBody: string): Promise
     const req = https.request(
       {
         hostname: "api.ebay.com",
-        path: "/ws/services",
+        path: "/ws/api.dll",
         method: "POST",
         headers: {
           "X-EBAY-API-SITEID": "0",
