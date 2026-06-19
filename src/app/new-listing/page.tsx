@@ -96,6 +96,7 @@ export default function NewListingPage() {
   const [result, setResult] = useState<PriceSuggestion | null>(null);
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pricingLoading, setPricingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
 
@@ -117,6 +118,25 @@ export default function NewListingPage() {
     }
   }
 
+  async function fetchPricing(pTitle: string, pBrand: string | undefined, pCondition: Condition) {
+    setPricingLoading(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/pricing/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: pTitle, brand: pBrand, condition: pCondition }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Pricing failed");
+      setResult(data as PriceSuggestion);
+    } catch {
+      setResult(getPriceSuggestion(pCondition, false));
+    } finally {
+      setPricingLoading(false);
+    }
+  }
+
   async function handleAnalyze() {
     setError(null);
     const images = Object.values(photos).map((p) => ({
@@ -125,8 +145,7 @@ export default function NewListingPage() {
     }));
 
     if (images.length === 0) {
-      const suggestion = getPriceSuggestion(condition, flaws.trim().length > 0);
-      setResult(suggestion);
+      fetchPricing(title, undefined, condition);
       return;
     }
 
@@ -145,15 +164,13 @@ export default function NewListingPage() {
       }
 
       setAiResult(data);
-      setTitle(data.suggestedTitle ?? title);
-      setCondition(data.condition ?? condition);
+      const newTitle = data.suggestedTitle ?? title;
+      const newCondition = data.condition ?? condition;
+      setTitle(newTitle);
+      setCondition(newCondition);
       setFlaws(data.flaws ?? flaws);
 
-      const suggestion = getPriceSuggestion(
-        data.condition ?? condition,
-        Boolean(data.flaws && data.flaws.trim().length > 0)
-      );
-      setResult(suggestion);
+      fetchPricing(newTitle, data.brand, newCondition);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -296,51 +313,61 @@ export default function NewListingPage() {
         </div>
       )}
 
-      {result && (
+      {(pricingLoading || result) && (
         <div className="card p-4">
           <p className="text-xs text-[var(--text-secondary)] mb-1">
             Suggested listing price
           </p>
-          <p className="text-2xl font-medium mb-3">${result.suggestedPrice}</p>
 
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            <MiniStat label="Avg sold" value={`$${result.avgSold}`} />
-            <MiniStat
-              label="Active range"
-              value={`$${result.activeRangeLow}-${result.activeRangeHigh}`}
-            />
-            <MiniStat
-              label="Sell odds"
-              value={result.sellOdds}
-              highlight={result.sellOdds === "High"}
-            />
-          </div>
+          {pricingLoading ? (
+            <div className="flex items-center gap-2 py-4">
+              <Loader2 className="w-5 h-5 animate-spin text-[var(--text-secondary)]" />
+              <p className="text-sm text-[var(--text-secondary)]">Fetching live prices from eBay...</p>
+            </div>
+          ) : result ? (
+            <>
+              <p className="text-2xl font-medium mb-3">${result.suggestedPrice}</p>
 
-          <p className="text-xs text-[var(--text-tertiary)] mb-3">
-            Based on {result.comparableSoldCount} comparable sold listings and{" "}
-            {result.comparableActiveCount} active listings
-          </p>
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                <MiniStat label="Avg sold" value={`$${result.avgSold}`} />
+                <MiniStat
+                  label="Active range"
+                  value={`$${result.activeRangeLow}–${result.activeRangeHigh}`}
+                />
+                <MiniStat
+                  label="Sell odds"
+                  value={result.sellOdds}
+                  highlight={result.sellOdds === "High"}
+                />
+              </div>
 
-          <div className="flex gap-2">
-            <button
-              className="btn flex-1"
-              onClick={handleSaveDraft}
-              disabled={saveStatus === "saving" || saveStatus === "saved"}
-            >
-              {saveStatus === "saving" ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : saveStatus === "saved" ? (
-                <Check className="w-4 h-4" />
-              ) : (
-                <FileText className="w-4 h-4" />
-              )}
-              {saveStatus === "saved" ? "Saved!" : saveStatus === "saving" ? "Saving..." : "Save draft"}
-            </button>
-            <button className="btn btn-primary flex-1">
-              <Upload className="w-4 h-4" />
-              List on eBay
-            </button>
-          </div>
+              <p className="text-xs text-[var(--text-tertiary)] mb-3">
+                Based on {result.comparableSoldCount} sold and{" "}
+                {result.comparableActiveCount} active eBay listings
+              </p>
+
+              <div className="flex gap-2">
+                <button
+                  className="btn flex-1"
+                  onClick={handleSaveDraft}
+                  disabled={saveStatus === "saving" || saveStatus === "saved"}
+                >
+                  {saveStatus === "saving" ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : saveStatus === "saved" ? (
+                    <Check className="w-4 h-4" />
+                  ) : (
+                    <FileText className="w-4 h-4" />
+                  )}
+                  {saveStatus === "saved" ? "Saved!" : saveStatus === "saving" ? "Saving..." : "Save draft"}
+                </button>
+                <button className="btn btn-primary flex-1">
+                  <Upload className="w-4 h-4" />
+                  List on eBay
+                </button>
+              </div>
+            </>
+          ) : null}
         </div>
       )}
     </main>

@@ -34,6 +34,7 @@ interface AiResult {
   condition: Condition;
   flaws: string;
   suggestedTitle: string;
+  pricing?: PriceSuggestion;
   error?: string;
 }
 
@@ -313,10 +314,36 @@ export default function BatchUploadPage() {
 
       setResults(allResults);
       setStep("results");
+      fetchPricingForAll(allResults);
     } catch (err) {
       setError((err as Error).message);
       setStep("review");
     }
+  }
+
+  function fetchPricingForAll(allResults: AiResult[]) {
+    allResults.forEach((result, i) => {
+      if (result.error) return;
+      fetch("/api/pricing/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: result.suggestedTitle,
+          brand: result.brand,
+          condition: result.condition,
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((pricing: PriceSuggestion | null) => {
+          if (!pricing) return;
+          setResults((prev) => {
+            const next = [...prev];
+            next[i] = { ...next[i], pricing };
+            return next;
+          });
+        })
+        .catch(() => {});
+    });
   }
 
   async function handleRetry(index: number) {
@@ -338,11 +365,31 @@ export default function BatchUploadPage() {
         throw new Error(data.error || "Retry failed");
       }
 
+      const retryResult: AiResult = data.results[0];
       setResults((prev) => {
         const next = [...prev];
-        next[index] = data.results[0];
+        next[index] = retryResult;
         return next;
       });
+      fetch("/api/pricing/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: retryResult.suggestedTitle,
+          brand: retryResult.brand,
+          condition: retryResult.condition,
+        }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((pricing: PriceSuggestion | null) => {
+          if (!pricing) return;
+          setResults((prev) => {
+            const next = [...prev];
+            next[index] = { ...next[index], pricing };
+            return next;
+          });
+        })
+        .catch(() => {});
     } catch (err) {
       setResults((prev) => {
         const next = [...prev];
@@ -361,10 +408,9 @@ export default function BatchUploadPage() {
       const result = results[index];
       const group = groups[index] ?? [];
 
-      const suggestion: PriceSuggestion = getPriceSuggestion(
-        result.condition,
-        Boolean(result.flaws && result.flaws.trim().length > 0)
-      );
+      const suggestion: PriceSuggestion =
+        result.pricing ??
+        getPriceSuggestion(result.condition, Boolean(result.flaws && result.flaws.trim().length > 0));
 
       // Upload all photos in the group; first becomes the thumbnail
       const photoUrls: string[] = [];
@@ -651,10 +697,13 @@ export default function BatchUploadPage() {
               );
             }
 
-            const suggestion: PriceSuggestion = getPriceSuggestion(
-              result.condition,
-              Boolean(result.flaws && result.flaws.trim().length > 0)
-            );
+            const suggestion: PriceSuggestion =
+              result.pricing ??
+              getPriceSuggestion(
+                result.condition,
+                Boolean(result.flaws && result.flaws.trim().length > 0)
+              );
+            const pricingReady = Boolean(result.pricing);
 
             return (
               <div key={i} className="card overflow-hidden">
@@ -680,13 +729,21 @@ export default function BatchUploadPage() {
                     </p>
                   </div>
 
-                  <p className="text-2xl font-medium mb-2">${suggestion.suggestedPrice}</p>
+                  <div className="flex items-baseline gap-2 mb-2">
+                    <p className="text-2xl font-medium">${suggestion.suggestedPrice}</p>
+                    {!pricingReady && (
+                      <p className="text-xs text-[var(--text-tertiary)] flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        fetching live prices...
+                      </p>
+                    )}
+                  </div>
 
                   <div className="grid grid-cols-3 gap-2 mb-3">
                     <MiniStat label="Avg sold" value={`$${suggestion.avgSold}`} />
                     <MiniStat
                       label="Active range"
-                      value={`$${suggestion.activeRangeLow}-${suggestion.activeRangeHigh}`}
+                      value={`$${suggestion.activeRangeLow}–${suggestion.activeRangeHigh}`}
                     />
                     <MiniStat
                       label="Sell odds"
