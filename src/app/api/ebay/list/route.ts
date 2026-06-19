@@ -147,11 +147,15 @@ export async function POST(req: NextRequest) {
         // categoryId is immutable on an existing offer — delete and recreate with safe clothing category.
         // Also handles "item specific missing" errors caused by wrong taxonomy category (e.g. shirt → pants).
         await deleteOffer(offerId);
+        // Wait for eBay to process the deletion before creating a new offer
+        await new Promise((r) => setTimeout(r, 2000));
         const safeCategory = getSafeFallbackCategory(draft.title || "");
         const originalCondition = CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
-        const conditionsToTry = [originalCondition, "USED_EXCELLENT", "USED_ACCEPTABLE"].filter(
-          (c, i, arr) => arr.indexOf(c) === i
-        );
+        // Only escalate to worse conditions if the item is actually that condition.
+        // Never try USED_ACCEPTABLE for Good/Excellent items — many categories reject it.
+        const conditionsToTry = originalCondition === "USED_ACCEPTABLE"
+          ? ["USED_ACCEPTABLE", "USED_GOOD", "USED_EXCELLENT"]
+          : [originalCondition, "USED_EXCELLENT"].filter((c, i, arr) => arr.indexOf(c) === i);
 
         for (const tryCondition of conditionsToTry) {
           const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition);
