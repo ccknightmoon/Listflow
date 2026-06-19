@@ -18,13 +18,13 @@ function extractAll(xml: string, tag: string): string[] {
 
 export async function GET() {
   try {
-    const xml = await tradingRequest(
+    const { status: tradeStatus, body: xml } = await tradingRequest(
       "GetMyeBaySelling",
       `<?xml version="1.0" encoding="utf-8"?><GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ActiveList><Include>true</Include><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination></ActiveList><DetailLevel>ReturnAll</DetailLevel></GetMyeBaySellingRequest>`
     );
 
     if (!xml.includes("<Ack>Success</Ack>") && !xml.includes("<Ack>Warning</Ack>")) {
-      const errMsg = extract(xml, "LongMessage") || extract(xml, "ShortMessage") || xml.slice(0, 500) || "Failed to fetch eBay listings";
+      const errMsg = extract(xml, "LongMessage") || extract(xml, "ShortMessage") || `HTTP ${tradeStatus}: ${xml.slice(0, 400)}` || "Failed to fetch eBay listings";
       return NextResponse.json({ error: errMsg }, { status: 400 });
     }
 

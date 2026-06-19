@@ -291,8 +291,8 @@ export async function getAllInventoryItems() {
   return inventoryRequest("GET", "/sell/inventory/v1/inventory_item?limit=200&offset=0");
 }
 
-// Makes a Trading API XML call. Returns raw XML response string.
-export async function tradingRequest(callName: string, xmlBody: string): Promise<string> {
+// Makes a Trading API XML call. Returns status code and raw XML response body.
+export async function tradingRequest(callName: string, xmlBody: string): Promise<{ status: number; body: string }> {
   const token = await getAccessToken();
   return new Promise((resolve, reject) => {
     const buf = Buffer.from(xmlBody, "utf-8");
@@ -313,7 +313,7 @@ export async function tradingRequest(callName: string, xmlBody: string): Promise
       (res) => {
         let raw = "";
         res.on("data", (c: Buffer) => { raw += c.toString(); });
-        res.on("end", () => resolve(raw));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body: raw }));
       }
     );
     req.on("error", reject);
@@ -326,16 +326,16 @@ export async function tradingRequest(callName: string, xmlBody: string): Promise
 // More reliable than SKU-based offer deletion because we always have the listing ID.
 export async function endItemByListingId(listingId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    const raw = await tradingRequest(
+    const { body } = await tradingRequest(
       "EndItem",
       `<?xml version="1.0" encoding="utf-8"?><EndItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><EndingReason>NotAvailable</EndingReason><ItemID>${listingId}</ItemID></EndItemRequest>`
     );
-    if (raw.includes("<Ack>Success</Ack>") || raw.includes("<Ack>Warning</Ack>")) {
+    if (body.includes("<Ack>Success</Ack>") || body.includes("<Ack>Warning</Ack>")) {
       return { success: true };
     }
-    const match = raw.match(/<LongMessage>(.*?)<\/LongMessage>/);
-    const shortMatch = raw.match(/<ShortMessage>(.*?)<\/ShortMessage>/);
-    return { success: false, error: match?.[1] ?? shortMatch?.[1] ?? raw.slice(0, 300) };
+    const match = body.match(/<LongMessage>(.*?)<\/LongMessage>/);
+    const shortMatch = body.match(/<ShortMessage>(.*?)<\/ShortMessage>/);
+    return { success: false, error: match?.[1] ?? shortMatch?.[1] ?? body.slice(0, 300) };
   } catch (e) {
     return { success: false, error: (e as Error).message };
   }
