@@ -130,10 +130,17 @@ export async function POST(req: NextRequest) {
       const publishErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
       const errMsg = publishErr?.longMessage ?? publishErr?.message ?? "";
 
-      if (errMsg.toLowerCase().includes("condition")) {
+      const errLower = errMsg.toLowerCase();
+      const needsCategoryFallback =
+        errLower.includes("condition") ||
+        errLower.includes("item specific") ||
+        errLower.includes("missing") ||
+        errLower.includes("inseam") ||
+        errLower.includes("required");
+
+      if (needsCategoryFallback) {
         // categoryId is immutable on an existing offer — delete and recreate with safe clothing category.
-        // 15687 (fan graphic tees path) may restrict used conditions; 57990 (Men's Casual Shirts) is a safe alternative.
-        // Try each used condition in order so that at least one succeeds if the category accepts any used grade.
+        // Also handles "item specific missing" errors caused by wrong taxonomy category (e.g. shirt → pants).
         await deleteOffer(offerId);
         const safeCategory = getSafeFallbackCategory(draft.title || "");
         const originalCondition = CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
