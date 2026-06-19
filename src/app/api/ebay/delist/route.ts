@@ -27,14 +27,18 @@ export async function POST(req: NextRequest) {
     // Primary: end listing directly by listing ID via Trading API
     if (listingId) {
       const result = await endItemByListingId(listingId);
-      // "Invalid item ID" / "Auction has already ended" are acceptable — listing is already gone
-      const alreadyGone = !result.success && result.error &&
-        (result.error.toLowerCase().includes("invalid item") ||
-         result.error.toLowerCase().includes("already ended") ||
-         result.error.toLowerCase().includes("cannot be ended"));
+      // Treat as already gone: empty response, invalid/not-found item, or already ended
+      const alreadyGone = !result.success && (
+        !result.error ||
+        result.error.toLowerCase().includes("invalid item") ||
+        result.error.toLowerCase().includes("already ended") ||
+        result.error.toLowerCase().includes("cannot be ended") ||
+        result.error.toLowerCase().includes("not found") ||
+        result.error.toLowerCase().includes("does not exist")
+      );
       if (!result.success && !alreadyGone) {
         return NextResponse.json(
-          { error: `eBay delist failed: ${result.error}` },
+          { error: `eBay delist failed: ${result.error || "(empty response)"}` },
           { status: 400 }
         );
       }
