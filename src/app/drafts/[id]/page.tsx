@@ -48,6 +48,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [deleting, setDeleting] = useState(false);
   const [listing, setListing] = useState(false);
   const [listingUrl, setListingUrl] = useState<string | null>(null);
+  const [justListed, setJustListed] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,6 +99,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         setDescription(str(d.description));
         if (d.ebay_listing_id) setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
       } catch (err) {
+
         setError((err as Error).message);
       } finally {
         setLoading(false);
@@ -182,6 +184,8 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to list");
       setListingUrl(data.url);
+      setJustListed(true);
+      setTimeout(() => router.push("/drafts"), 2000);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -421,17 +425,19 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         style={{ background: "var(--bg-surface)" }}>
         <div className="flex flex-col gap-2">
           {listingUrl && (
-            <a
-              href={listingUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn w-full flex items-center justify-center gap-2 text-sm"
-              style={{ color: "#3B6D11" }}
-            >
-              <BadgeCheck className="w-4 h-4" />
-              Live on eBay — tap to view
-              <ExternalLink className="w-3 h-3" />
-            </a>
+            <div className="flex gap-2">
+              <a
+                href={listingUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn flex-1 flex items-center justify-center gap-2 text-sm"
+                style={{ color: "#3B6D11" }}
+              >
+                <BadgeCheck className="w-4 h-4" />
+                {justListed ? "Listed! Returning…" : "Live on eBay — tap to view"}
+                {!justListed && <ExternalLink className="w-3 h-3" />}
+              </a>
+            </div>
           )}
           <div className="flex gap-2">
             <button onClick={handleSave} disabled={saving || saved} className="btn flex-1">
