@@ -54,7 +54,8 @@ export async function GET() {
       const priceStr = xmlFind(item, "CurrentPrice");
       const price = priceStr ? parseFloat(priceStr) : null;
       const thumbnail = xmlFind(item, "GalleryURL") || null;
-      return { listingId, title, price, thumbnail };
+      const sku = xmlFind(item, "SKU") || null;
+      return { listingId, title, price, thumbnail, sku };
     });
 
     return NextResponse.json({ listings, total: total || listings.length });

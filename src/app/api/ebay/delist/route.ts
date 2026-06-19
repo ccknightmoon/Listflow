@@ -11,8 +11,27 @@ const supabase = createClient(
 
 export async function POST(req: NextRequest) {
   try {
-    const { draftId } = await req.json();
-    if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
+    const body = await req.json();
+    const { draftId, listingId: directListingId } = body as { draftId?: string; listingId?: string };
+
+    // Direct delist by listing ID — for items not tracked in Supabase
+    if (directListingId && !draftId) {
+      const result = await endItemByListingId(directListingId);
+      const alreadyGone = !result.success && (
+        !result.error ||
+        result.error.toLowerCase().includes("invalid item") ||
+        result.error.toLowerCase().includes("already ended") ||
+        result.error.toLowerCase().includes("cannot be ended") ||
+        result.error.toLowerCase().includes("not found") ||
+        result.error.toLowerCase().includes("does not exist")
+      );
+      if (!result.success && !alreadyGone) {
+        return NextResponse.json({ error: `eBay delist failed: ${result.error || "(empty response)"}` }, { status: 400 });
+      }
+      return NextResponse.json({ success: true });
+    }
+
+    if (!draftId) return NextResponse.json({ error: "draftId or listingId required" }, { status: 400 });
 
     const { data: draft } = await supabase
       .from("drafts")
