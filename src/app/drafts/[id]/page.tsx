@@ -161,6 +161,18 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
     setListing(true);
     setError(null);
     try {
+      // Auto-save current form values first so the listing API uses the latest data
+      await fetch(`/api/drafts/${params.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title, brand, color, size, condition, flaws,
+          suggestedPrice: price ? Number(price) : null,
+          customSku, itemType, style, material, theme,
+          sleevLength, neckline, fit, pattern, description,
+        }),
+      });
+
       const res = await fetch("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
