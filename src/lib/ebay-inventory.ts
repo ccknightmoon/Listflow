@@ -27,8 +27,8 @@ function garmentTypeQuery(title: string): string {
   const gender = isWomens ? "women's" : "men's";
 
   const isTop = /\b(shirt|tee|t-shirt|top|blouse|polo|button-up|button-down)\b/.test(lower);
-  const isBottom = !isTop && /\b(pant|jean|denim|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
   const isOuterwear = !isTop && /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
+  const isBottom = !isTop && !isOuterwear && /\b(pant|jean|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
   const isShoe = /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
 
   if (isShoe)      return `${gender} used shoe footwear`;
@@ -44,8 +44,8 @@ export function getSafeFallbackCategory(title: string): string {
   const lower = (title || "").toLowerCase();
   const isWomens = lower.includes("women") || lower.includes("ladies");
   const isTop = /\b(shirt|tee|t-shirt|top|blouse|polo|button-up|button-down)\b/.test(lower);
-  const isBottom = !isTop && /\b(pant|jean|denim|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
   const isOuterwear = !isTop && /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
+  const isBottom = !isTop && !isOuterwear && /\b(pant|jean|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
   const isShoe = /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
 
   if (isWomens) {
@@ -146,7 +146,8 @@ export async function upsertInventoryItem(sku: string, draft: {
 
   // For pants, split "WaistxInseam" (e.g. "38x32") into separate aspects
   const titleLower = (draft.title || "").toLowerCase();
-  const isBottomItem = /\b(pant|jean|denim|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(titleLower);
+  const isOuterwearItem = /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(titleLower);
+  const isBottomItem = !isOuterwearItem && /\b(pant|jean|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(titleLower);
   if (isAspect(draft.size)) {
     const pantsMatch = isBottomItem && draft.size.match(/^(\d+)[xX](\d+)$/);
     if (pantsMatch) {
