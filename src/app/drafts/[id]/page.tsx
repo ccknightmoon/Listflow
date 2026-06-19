@@ -25,6 +25,7 @@ interface Draft {
   avg_sold: number | null;
   sell_odds: string | null;
   thumbnail_url: string | null;
+  photo_urls: string[] | null;
   custom_sku: string | null;
   item_type: string | null;
   style: string | null;
@@ -245,12 +246,24 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>{error}</div>
       )}
 
-      {draft?.thumbnail_url ? (
+      {draft?.photo_urls && draft.photo_urls.length > 0 ? (
+        <div className="flex gap-2 overflow-x-auto -mx-5 px-5 mb-4 snap-x snap-mandatory">
+          {draft.photo_urls.map((url, i) => (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              key={i}
+              src={url}
+              alt={`Photo ${i + 1}`}
+              className="h-52 w-52 object-cover rounded-xl flex-shrink-0 snap-start"
+            />
+          ))}
+        </div>
+      ) : draft?.thumbnail_url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={draft.thumbnail_url}
           alt={title}
-          className="w-full aspect-square object-cover rounded-xl mb-4"
+          className="w-full object-cover rounded-xl mb-4"
           style={{ maxHeight: 240, objectFit: "cover" }}
         />
       ) : (

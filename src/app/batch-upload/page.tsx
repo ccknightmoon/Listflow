@@ -360,22 +360,26 @@ export default function BatchUploadPage() {
     try {
       const result = results[index];
       const group = groups[index] ?? [];
-      const thumb = group.length > 0 ? photos[group[0]].previewUrl : null;
 
       const suggestion: PriceSuggestion = getPriceSuggestion(
         result.condition,
         Boolean(result.flaws && result.flaws.trim().length > 0)
       );
 
-      let thumbnailUrl: string | null = null;
-      if (thumb) {
-        try {
-          thumbnailUrl = await uploadThumbnail(thumb);
-        } catch (thumbErr) {
-          console.error("Thumbnail upload failed:", (thumbErr as Error).message);
-          // non-fatal — draft saves without thumbnail but we log the error
+      // Upload all photos in the group; first becomes the thumbnail
+      const photoUrls: string[] = [];
+      for (const photoIdx of group) {
+        const dataUrl = photos[photoIdx]?.previewUrl;
+        if (dataUrl) {
+          try {
+            const url = await uploadThumbnail(dataUrl);
+            photoUrls.push(url);
+          } catch (err) {
+            console.error("Photo upload failed:", (err as Error).message);
+          }
         }
       }
+      const thumbnailUrl = photoUrls[0] ?? null;
 
       const res = await fetch("/api/drafts", {
         method: "POST",
@@ -393,6 +397,7 @@ export default function BatchUploadPage() {
           activeRangeHigh: suggestion.activeRangeHigh,
           sellOdds: suggestion.sellOdds,
           thumbnailUrl,
+          photoUrls: photoUrls.length > 0 ? photoUrls : null,
         }),
       });
 

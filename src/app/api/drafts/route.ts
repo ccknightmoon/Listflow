@@ -67,6 +67,7 @@ export async function POST(req: NextRequest) {
         active_range_high: body.activeRangeHigh ?? null,
         sell_odds: body.sellOdds ?? null,
         thumbnail_url: body.thumbnailUrl ?? null,
+        photo_urls: body.photoUrls ?? null,
       },
     ])
     .select();
