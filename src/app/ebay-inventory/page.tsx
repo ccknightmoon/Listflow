@@ -93,21 +93,31 @@ export default function EbayInventoryPage() {
     if (!confirm(`End ${ids.length} listing${ids.length !== 1 ? "s" : ""}? Drafts will be kept.`)) return;
     setBulkDelisting(true);
     setError(null);
+    const failed: string[] = [];
     for (const draftId of ids) {
       try {
-        await fetch("/api/ebay/delist", {
+        const res = await fetch("/api/ebay/delist", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ draftId }),
         });
-        setListings((prev) => prev.filter((l) => l.draftId !== draftId));
-        setSelected((prev) => { const next = new Set(prev); next.delete(draftId); return next; });
+        if (res.ok) {
+          setListings((prev) => prev.filter((l) => l.draftId !== draftId));
+          setSelected((prev) => { const next = new Set(prev); next.delete(draftId); return next; });
+        } else {
+          const data = await res.json();
+          failed.push(data.error ?? "Unknown error");
+        }
       } catch {
-        // continue with remaining items
+        failed.push("Network error");
       }
     }
     setBulkDelisting(false);
-    exitSelectMode();
+    if (failed.length > 0) {
+      setError(`${failed.length} item(s) failed to delist: ${failed[0]}`);
+    } else {
+      exitSelectMode();
+    }
   }
 
   const active = listings.filter((l) => l.status === "PUBLISHED");

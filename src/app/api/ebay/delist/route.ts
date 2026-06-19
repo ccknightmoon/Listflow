@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
-import { getOfferBySku, deleteOffer, deleteInventoryItem } from "@/lib/ebay-inventory";
+import { getOfferBySku, deleteOffer, deleteInventoryItem, endItemByListingId } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
 
@@ -16,13 +16,31 @@ export async function POST(req: NextRequest) {
 
     const { data: draft } = await supabase
       .from("drafts")
-      .select("id, custom_sku")
+      .select("id, custom_sku, ebay_listing_id")
       .eq("id", draftId)
       .single();
 
     if (!draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
 
-    // Try every SKU format this draft could have been listed under
+    const listingId = draft.ebay_listing_id as string | null;
+
+    // Primary: end listing directly by listing ID via Trading API
+    if (listingId) {
+      const result = await endItemByListingId(listingId);
+      // "Invalid item ID" / "Auction has already ended" are acceptable — listing is already gone
+      const alreadyGone = !result.success && result.error &&
+        (result.error.toLowerCase().includes("invalid item") ||
+         result.error.toLowerCase().includes("already ended") ||
+         result.error.toLowerCase().includes("cannot be ended"));
+      if (!result.success && !alreadyGone) {
+        return NextResponse.json(
+          { error: `eBay delist failed: ${result.error}` },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Cleanup: delete any offers/inventory items across all SKU formats
     const hex = (draftId as string).replace(/-/g, "");
     const candidateSkus = [
       draft.custom_sku as string | null,
