@@ -125,6 +125,7 @@ export async function upsertInventoryItem(sku: string, draft: {
   condition: string | null;
   flaws: string | null;
   thumbnail_url: string | null;
+  photo_urls?: string[] | null;
   item_type?: string | null;
   style?: string | null;
   material?: string | null;
@@ -168,7 +169,12 @@ export async function upsertInventoryItem(sku: string, draft: {
       title: (draft.title || "Item").slice(0, 80),
       description: draft.description || descParts.join("\n") || "No description.",
       aspects,
-      ...(draft.thumbnail_url?.startsWith("http") ? { imageUrls: [draft.thumbnail_url] } : {}),
+      ...(() => {
+        // Use all photo_urls if available, fall back to thumbnail_url; eBay max is 24
+        const urls = (draft.photo_urls ?? []).filter((u) => u?.startsWith("http"));
+        if (urls.length === 0 && draft.thumbnail_url?.startsWith("http")) urls.push(draft.thumbnail_url);
+        return urls.length > 0 ? { imageUrls: urls.slice(0, 24) } : {};
+      })(),
     },
   };
 
