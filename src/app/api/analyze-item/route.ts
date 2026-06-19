@@ -15,7 +15,7 @@ shape:
   "size": "string, best guess from tags/labels visible, or 'Unknown'",
   "condition": "one of: New with tags, New without tags, Excellent used, Good - minor flaws, Fair - notable flaws",
   "flaws": "short description of any visible flaws, or empty string if none",
-  "suggestedTitle": "a concise eBay listing title under 80 characters"
+  "suggestedTitle": "eBay listing title — keyword-rich, MAXIMUM 80 characters (count carefully, never exceed 80). Pack in as many buyer search terms as possible: Brand + Men's/Women's/Unisex + Item Type + Color + Size + style keywords (e.g. Vintage, Graphic Tee, Band Tee, Y2K, 90s, Streetwear, Distressed, Oversized). Do NOT use filler phrases like 'Great condition' or 'Fast shipping' — every word should be a search keyword. Aim to use all 80 characters."
 }`;
 
 export async function POST(req: NextRequest) {

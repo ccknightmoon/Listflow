@@ -68,18 +68,21 @@ async function searchByImage(imageBase64: string): Promise<string[]> {
 
 function keywordsFromTitles(titles: string[], brand?: string): string {
   const wordCount: Record<string, number> = {};
-  for (const title of titles) {
+  // Earlier results are more visually similar — weight them higher
+  titles.forEach((title, ti) => {
+    const weight = titles.length - ti;
     const words = title
       .toLowerCase()
       .split(/[\s\-\/,.()|&]+/)
       .filter((w) => w.length >= 3 && !STOP.has(w) && !/^\d+$/.test(w));
     for (const word of new Set(words)) {
-      wordCount[word] = (wordCount[word] ?? 0) + 1;
+      wordCount[word] = (wordCount[word] ?? 0) + weight;
     }
-  }
+  });
+
   const top = Object.entries(wordCount)
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
+    .slice(0, 5)
     .map(([w]) => w);
 
   // Prepend brand if not already captured
@@ -89,7 +92,10 @@ function keywordsFromTitles(titles: string[], brand?: string): string {
       top.unshift(brand);
     }
   }
-  return top.slice(0, 5).join(" ");
+
+  const result = top.slice(0, 5).join(" ");
+  // Quality check: must have at least 2 meaningful words
+  return result.split(/\s+/).filter((w) => w.length >= 3).length >= 2 ? result : "";
 }
 
 type EbayJson = Record<string, unknown>;
@@ -177,6 +183,7 @@ export async function POST(req: NextRequest) {
   const [soldRes, activeRes] = await Promise.allSettled([
     findingGet("findCompletedItems", {
       keywords,
+      categoryId: "11450", // Clothing, Shoes & Accessories
       "itemFilter(0).name": "SoldItemsOnly",
       "itemFilter(0).value": "true",
       "paginationInput.entriesPerPage": "50",
@@ -184,6 +191,7 @@ export async function POST(req: NextRequest) {
     }),
     findingGet("findItemsAdvanced", {
       keywords,
+      categoryId: "11450",
       "itemFilter(0).name": "ListingType",
       "itemFilter(0).value": "FixedPrice",
       "paginationInput.entriesPerPage": "50",
