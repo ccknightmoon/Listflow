@@ -183,17 +183,23 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to list");
-      // Save ebay_listing_id from frontend as a backup in case the list API's DB write was skipped
+      // Save all form values + ebay_listing_id together so nothing gets wiped
       if (data.listingId) {
         await fetch(`/api/drafts/${params.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ebayListingId: data.listingId }),
+          body: JSON.stringify({
+            title, brand, color, size, condition, flaws,
+            suggestedPrice: price ? Number(price) : null,
+            customSku, itemType, style, material, theme,
+            sleevLength, neckline, fit, pattern, description,
+            ebayListingId: String(data.listingId),
+          }),
         });
       }
       setListingUrl(data.url);
       setJustListed(true);
-      setTimeout(() => router.push("/drafts"), 2000);
+      setTimeout(() => router.push("/ebay-inventory"), 2000);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -442,7 +448,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
                 style={{ color: "#3B6D11" }}
               >
                 <BadgeCheck className="w-4 h-4" />
-                {justListed ? "Listed! Returning…" : "Live on eBay — tap to view"}
+                {justListed ? "Listed! Going to Listed page…" : "Live on eBay — tap to view"}
                 {!justListed && <ExternalLink className="w-3 h-3" />}
               </a>
             </div>

@@ -162,7 +162,8 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const listingId = (publishResult.data as { listingId?: string }).listingId;
+    const rawListingId = (publishResult.data as { listingId?: string | number }).listingId;
+    const listingId = rawListingId != null ? String(rawListingId) : undefined;
     if (listingId) {
       await supabase.from("drafts").update({ ebay_listing_id: listingId }).eq("id", draftId);
     }
@@ -170,7 +171,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       listingId,
-      url: `https://www.ebay.com/itm/${listingId}`,
+      url: listingId ? `https://www.ebay.com/itm/${listingId}` : null,
     });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
