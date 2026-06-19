@@ -199,7 +199,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       }
       setListingUrl(data.url);
       setJustListed(true);
-      setTimeout(() => router.push("/ebay-inventory"), 2000);
+      setTimeout(() => router.push("/drafts"), 1500);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -448,7 +448,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
                 style={{ color: "#3B6D11" }}
               >
                 <BadgeCheck className="w-4 h-4" />
-                {justListed ? "Listed! Going to Listed page…" : "Live on eBay — tap to view"}
+                {justListed ? "Listed! Returning to drafts…" : "Live on eBay — tap to view"}
                 {!justListed && <ExternalLink className="w-3 h-3" />}
               </a>
             </div>
