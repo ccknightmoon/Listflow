@@ -143,7 +143,20 @@ export async function upsertInventoryItem(sku: string, draft: {
   aspects["Size Type"] = ["Regular"];
   if (isAspect(draft.brand)) aspects["Brand"] = [draft.brand];
   if (isAspect(draft.color)) aspects["Color"] = [draft.color];
-  if (isAspect(draft.size)) aspects["Size"] = [draft.size];
+
+  // For pants, split "WaistxInseam" (e.g. "38x32") into separate aspects
+  const titleLower = (draft.title || "").toLowerCase();
+  const isBottomItem = /\b(pant|jean|denim|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(titleLower);
+  if (isAspect(draft.size)) {
+    const pantsMatch = isBottomItem && draft.size.match(/^(\d+)[xX](\d+)$/);
+    if (pantsMatch) {
+      aspects["Waist Size"] = [`${pantsMatch[1]} in`];
+      aspects["Inseam"] = [`${pantsMatch[2]} in`];
+      aspects["Size"] = [draft.size]; // keep full size string too
+    } else {
+      aspects["Size"] = [draft.size];
+    }
+  }
   if (isAspect(draft.item_type)) aspects["Type"] = [draft.item_type];
   if (isAspect(draft.style)) aspects["Style"] = [draft.style];
   if (isAspect(draft.material)) aspects["Material"] = [draft.material];
