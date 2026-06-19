@@ -36,7 +36,7 @@ export default function DraftsPage() {
       const res = await fetch("/api/drafts");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load drafts");
-      setDrafts(data.drafts ?? []);
+      setDrafts((data.drafts ?? []).filter((d: Draft) => !d.ebay_listing_id));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -56,6 +56,7 @@ export default function DraftsPage() {
   function toggleSelectAll() {
     setSelected(selected.size === drafts.length ? new Set() : new Set(drafts.map((d) => d.id)));
   }
+
 
   async function handleDeleteSelected() {
     if (selected.size === 0) return;
