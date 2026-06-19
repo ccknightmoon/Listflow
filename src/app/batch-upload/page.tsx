@@ -752,7 +752,7 @@ export default function BatchUploadPage() {
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    <MiniStat label="Avg sold" value={pricingReady ? `$${suggestion.avgSold}` : "—"} />
+                    <MiniStat label="Market price" value={pricingReady ? `$${suggestion.avgSold}` : "—"} />
                     <MiniStat
                       label="Active range"
                       value={pricingReady ? `$${suggestion.activeRangeLow}–${suggestion.activeRangeHigh}` : "—"}

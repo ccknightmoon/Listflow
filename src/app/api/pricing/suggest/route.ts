@@ -3,7 +3,6 @@ import type { PriceSuggestion, Condition } from "@/lib/pricing";
 
 export const runtime = "nodejs";
 
-const FINDING_BASE = "https://svcs.ebay.com/services/search/FindingService/v1";
 const BROWSE_BASE = "https://api.ebay.com/buy/browse/v1";
 
 const CONDITION_MULTIPLIER: Record<Condition, number> = {
@@ -14,7 +13,6 @@ const CONDITION_MULTIPLIER: Record<Condition, number> = {
   "Fair - notable flaws": 0.55,
 };
 
-// Stop words and size tokens to exclude from keyword extraction
 const STOP = new Set([
   "the", "a", "an", "and", "or", "for", "in", "on", "at", "to", "of", "with",
   "is", "it", "this", "that", "by", "from", "as", "are", "was", "be", "has",
@@ -24,7 +22,6 @@ const STOP = new Set([
   "men", "women", "mens", "womens", "unisex", "kids",
 ]);
 
-// Module-level app token cache (reused across requests to same serverless instance)
 let appTokenCache: { token: string; expires: number } | null = null;
 
 async function getAppToken(): Promise<string> {
@@ -49,9 +46,14 @@ async function getAppToken(): Promise<string> {
   return data.access_token;
 }
 
-async function searchByImage(imageBase64: string): Promise<string[]> {
+interface BrowseItem {
+  title: string;
+  price: number;
+}
+
+async function searchByImage(imageBase64: string): Promise<BrowseItem[]> {
   const token = await getAppToken();
-  const res = await fetch(`${BROWSE_BASE}/item_summary/search_by_image?limit=10`, {
+  const res = await fetch(`${BROWSE_BASE}/item_summary/search_by_image?limit=20`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`,
@@ -62,13 +64,45 @@ async function searchByImage(imageBase64: string): Promise<string[]> {
     signal: AbortSignal.timeout(10_000),
   });
   if (!res.ok) throw new Error(`searchByImage ${res.status}`);
-  const data = (await res.json()) as { itemSummaries?: { title: string }[] };
-  return (data.itemSummaries ?? []).map((item) => item.title).filter(Boolean);
+  const data = (await res.json()) as {
+    itemSummaries?: { title?: string; price?: { value?: string } }[];
+  };
+  return (data.itemSummaries ?? [])
+    .map((item) => ({
+      title: item.title ?? "",
+      price: parseFloat(item.price?.value ?? "0") || 0,
+    }))
+    .filter((item) => item.title);
+}
+
+async function searchByText(keywords: string): Promise<BrowseItem[]> {
+  const token = await getAppToken();
+  const url = new URL(`${BROWSE_BASE}/item_summary/search`);
+  url.searchParams.set("q", keywords);
+  url.searchParams.set("limit", "20");
+  url.searchParams.set("category_ids", "11450");
+  url.searchParams.set("filter", "buyingOptions:{FIXED_PRICE}");
+  const res = await fetch(url.toString(), {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+    },
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!res.ok) throw new Error(`Browse search ${res.status}`);
+  const data = (await res.json()) as {
+    itemSummaries?: { title?: string; price?: { value?: string } }[];
+  };
+  return (data.itemSummaries ?? [])
+    .map((item) => ({
+      title: item.title ?? "",
+      price: parseFloat(item.price?.value ?? "0") || 0,
+    }))
+    .filter((item) => item.title);
 }
 
 function keywordsFromTitles(titles: string[], brand?: string): string {
   const wordCount: Record<string, number> = {};
-  // Earlier results are more visually similar — weight them higher
   titles.forEach((title, ti) => {
     const weight = titles.length - ti;
     const words = title
@@ -79,67 +113,18 @@ function keywordsFromTitles(titles: string[], brand?: string): string {
       wordCount[word] = (wordCount[word] ?? 0) + weight;
     }
   });
-
   const top = Object.entries(wordCount)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([w]) => w);
-
-  // Prepend brand if not already captured
   if (brand && brand.toLowerCase() !== "unknown") {
     const bl = brand.toLowerCase();
     if (!top.some((w) => w.includes(bl) || bl.includes(w))) {
       top.unshift(brand);
     }
   }
-
   const result = top.slice(0, 5).join(" ");
-  // Quality check: must have at least 2 meaningful words
   return result.split(/\s+/).filter((w) => w.length >= 3).length >= 2 ? result : "";
-}
-
-type EbayJson = Record<string, unknown>;
-
-async function findingGet(operation: string, params: Record<string, string>): Promise<unknown> {
-  const appId = process.env.EBAY_CLIENT_ID;
-  if (!appId) throw new Error("EBAY_CLIENT_ID not configured");
-  const url = new URL(FINDING_BASE);
-  url.searchParams.set("OPERATION-NAME", operation);
-  url.searchParams.set("SECURITY-APPNAME", appId);
-  url.searchParams.set("RESPONSE-DATA-FORMAT", "JSON");
-  url.searchParams.set("REST-PAYLOAD", "");
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url.toString(), { signal: AbortSignal.timeout(8000) });
-  if (!res.ok) throw new Error(`eBay Finding API ${res.status}`);
-  return res.json();
-}
-
-function extractItems(data: unknown, responseKey: string): EbayJson[] {
-  try {
-    const d = data as EbayJson;
-    const resp = (d[responseKey] as EbayJson[])?.[0];
-    const items = ((resp?.["searchResult"] as EbayJson[])?.[0]?.["item"]) as EbayJson[] | undefined;
-    return items ?? [];
-  } catch {
-    return [];
-  }
-}
-
-function itemPrice(item: EbayJson): number {
-  try {
-    const ss = (item["sellingStatus"] as EbayJson[])?.[0];
-    const cp = (ss?.["currentPrice"] as EbayJson[])?.[0];
-    return parseFloat((cp?.["__value__"] as string) ?? "0") || 0;
-  } catch {
-    return 0;
-  }
-}
-
-function removeOutliers(prices: number[]): number[] {
-  if (prices.length <= 4) return prices;
-  const sorted = [...prices].sort((a, b) => a - b);
-  const cut = Math.max(1, Math.floor(sorted.length * 0.1));
-  return sorted.slice(cut, sorted.length - cut);
 }
 
 function buildKeywords(title: string, brand?: string): string {
@@ -150,95 +135,75 @@ function buildKeywords(title: string, brand?: string): string {
   return titleWords || title.trim();
 }
 
+function removeOutliers(prices: number[]): number[] {
+  if (prices.length <= 4) return prices;
+  const sorted = [...prices].sort((a, b) => a - b);
+  const cut = Math.max(1, Math.floor(sorted.length * 0.1));
+  return sorted.slice(cut, sorted.length - cut);
+}
+
 export async function POST(req: NextRequest) {
   const { title, brand, condition, image } = (await req.json()) as {
     title: string;
     brand?: string;
     condition: Condition;
-    image?: string; // base64, no data-URL prefix
+    image?: string;
   };
 
-  if (!process.env.EBAY_CLIENT_ID) {
-    return NextResponse.json({ error: "EBAY_CLIENT_ID not configured" }, { status: 500 });
+  if (!process.env.EBAY_CLIENT_ID || !process.env.EBAY_CLIENT_SECRET) {
+    return NextResponse.json({ error: "eBay credentials not configured" }, { status: 500 });
   }
 
-  // Determine search keywords: visual search if image provided, else AI title
   let keywords = buildKeywords(title, brand);
+  let items: BrowseItem[] = [];
+
   if (image) {
     try {
-      const visualTitles = await searchByImage(image);
-      if (visualTitles.length >= 2) {
-        const visualKeywords = keywordsFromTitles(visualTitles, brand);
+      const visualItems = await searchByImage(image);
+      if (visualItems.length >= 2) {
+        const visualKeywords = keywordsFromTitles(visualItems.map((i) => i.title), brand);
         if (visualKeywords) keywords = visualKeywords;
+        items = visualItems;
       }
     } catch {
-      // visual search failed — fall through to AI title keywords
+      // visual search failed — fall through to text search
     }
   }
 
-  if (!keywords) {
-    return NextResponse.json({ error: "No search keywords provided" }, { status: 400 });
+  if (items.length === 0 && keywords) {
+    try {
+      items = await searchByText(keywords);
+    } catch {
+      // text search failed
+    }
   }
 
-  const [soldRes, activeRes] = await Promise.allSettled([
-    findingGet("findCompletedItems", {
-      keywords,
-      categoryId: "11450", // Clothing, Shoes & Accessories
-      "itemFilter(0).name": "SoldItemsOnly",
-      "itemFilter(0).value": "true",
-      "paginationInput.entriesPerPage": "50",
-      sortOrder: "EndTimeSoonest",
-    }),
-    findingGet("findItemsAdvanced", {
-      keywords,
-      categoryId: "11450",
-      "itemFilter(0).name": "ListingType",
-      "itemFilter(0).value": "FixedPrice",
-      "paginationInput.entriesPerPage": "50",
-    }),
-  ]);
-
-  const soldItems =
-    soldRes.status === "fulfilled" ? extractItems(soldRes.value, "findCompletedItemsResponse") : [];
-  const activeItems =
-    activeRes.status === "fulfilled" ? extractItems(activeRes.value, "findItemsAdvancedResponse") : [];
-
-  const rawSoldPrices = soldItems.map(itemPrice).filter((p) => p > 0);
-  const activePrices = activeItems.map(itemPrice).filter((p) => p > 0);
-
-  const filteredSold = removeOutliers(rawSoldPrices);
-  const avgRaw =
-    filteredSold.length > 0 ? filteredSold.reduce((s, p) => s + p, 0) / filteredSold.length : 0;
+  const activePrices = items.map((i) => i.price).filter((p) => p > 0);
+  const filtered = removeOutliers(activePrices);
+  const sorted = [...filtered].sort((a, b) => a - b);
+  const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
 
   const mult = CONDITION_MULTIPLIER[condition] ?? 1.0;
-  const suggestedPrice = avgRaw > 0 ? Math.max(1, Math.round(avgRaw * mult)) : 0;
-  const avgSold = avgRaw > 0 ? Math.round(avgRaw) : 0;
+  // Price slightly below market median to sell competitively
+  const suggestedPrice = median > 0 ? Math.max(1, Math.round(median * mult * 0.95)) : 0;
 
-  const sortedActive = [...activePrices].sort((a, b) => a - b);
-  const activeRangeLow = sortedActive.length > 0 ? Math.round(sortedActive[0]) : 0;
-  const activeRangeHigh =
-    sortedActive.length > 0 ? Math.round(sortedActive[sortedActive.length - 1]) : 0;
-
-  const comparableSoldCount = filteredSold.length;
+  const allSorted = [...activePrices].sort((a, b) => a - b);
+  const activeRangeLow = allSorted.length > 0 ? Math.round(allSorted[0]) : 0;
+  const activeRangeHigh = allSorted.length > 0 ? Math.round(allSorted[allSorted.length - 1]) : 0;
   const comparableActiveCount = activePrices.length;
-  const noData = comparableSoldCount === 0 && comparableActiveCount === 0;
+  const noData = comparableActiveCount === 0;
 
   let sellOdds: PriceSuggestion["sellOdds"] = "Low";
-  if (comparableSoldCount >= 10) sellOdds = "High";
-  else if (comparableSoldCount >= 3) sellOdds = "Medium";
-
-  if (activePrices.length > 0 && suggestedPrice > 0) {
-    const activeMid = (activeRangeLow + activeRangeHigh) / 2;
-    if (suggestedPrice > activeMid * 1.15 && sellOdds === "High") sellOdds = "Medium";
-  }
+  if (comparableActiveCount >= 20) sellOdds = "High";
+  else if (comparableActiveCount >= 5) sellOdds = "Medium";
 
   const result: PriceSuggestion = {
     suggestedPrice,
-    avgSold,
+    avgSold: Math.round(median),
     activeRangeLow,
     activeRangeHigh,
     sellOdds,
-    comparableSoldCount,
+    comparableSoldCount: 0,
     comparableActiveCount,
     ...(noData ? { noData: true } : {}),
   };
