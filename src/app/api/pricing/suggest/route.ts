@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import https from "node:https";
 import type { PriceSuggestion, Condition } from "@/lib/pricing";
 
 export const runtime = "nodejs";
 
-const BROWSE_BASE = "https://api.ebay.com/buy/browse/v1";
+const BROWSE_BASE_HOST = "api.ebay.com";
+const BROWSE_BASE_PATH = "/buy/browse/v1";
 
 const CONDITION_MULTIPLIER: Record<Condition, number> = {
   "New with tags": 1.5,
@@ -24,6 +26,20 @@ const STOP = new Set([
 
 let appTokenCache: { token: string; expires: number } | null = null;
 
+function httpsRequest(options: https.RequestOptions, body?: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = https.request(options, (res) => {
+      let data = "";
+      res.on("data", (c: Buffer) => { data += c.toString(); });
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body: data }));
+    });
+    req.on("error", reject);
+    req.setTimeout(10_000, () => { req.destroy(new Error("Request timeout")); });
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
 async function getAppToken(): Promise<string> {
   if (appTokenCache && appTokenCache.expires > Date.now() + 60_000) {
     return appTokenCache.token;
@@ -31,17 +47,24 @@ async function getAppToken(): Promise<string> {
   const id = process.env.EBAY_CLIENT_ID!;
   const secret = process.env.EBAY_CLIENT_SECRET!;
   const creds = Buffer.from(`${id}:${secret}`).toString("base64");
-  const res = await fetch("https://api.ebay.com/identity/v1/oauth2/token", {
-    method: "POST",
-    headers: {
-      Authorization: `Basic ${creds}`,
-      "Content-Type": "application/x-www-form-urlencoded",
+  const body = "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope";
+  const buf = Buffer.from(body, "utf-8");
+
+  const { status, body: resBody } = await httpsRequest(
+    {
+      hostname: BROWSE_BASE_HOST,
+      path: "/identity/v1/oauth2/token",
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${creds}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Length": buf.length,
+      },
     },
-    body: "grant_type=client_credentials&scope=https%3A%2F%2Fapi.ebay.com%2Foauth%2Fapi_scope",
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) throw new Error(`App token fetch failed: ${res.status}`);
-  const data = (await res.json()) as { access_token: string; expires_in: number };
+    body
+  );
+  if (status !== 200) throw new Error(`App token fetch failed: ${status} ${resBody.slice(0, 200)}`);
+  const data = JSON.parse(resBody) as { access_token: string; expires_in: number };
   appTokenCache = { token: data.access_token, expires: Date.now() + data.expires_in * 1000 };
   return data.access_token;
 }
@@ -53,18 +76,25 @@ interface BrowseItem {
 
 async function searchByImage(imageBase64: string): Promise<BrowseItem[]> {
   const token = await getAppToken();
-  const res = await fetch(`${BROWSE_BASE}/item_summary/search_by_image?limit=20`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-      "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+  const bodyStr = JSON.stringify({ image: imageBase64 });
+  const buf = Buffer.from(bodyStr, "utf-8");
+
+  const { status, body } = await httpsRequest(
+    {
+      hostname: BROWSE_BASE_HOST,
+      path: `${BROWSE_BASE_PATH}/item_summary/search_by_image?limit=20`,
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "Content-Length": buf.length,
+        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+      },
     },
-    body: JSON.stringify({ image: imageBase64 }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!res.ok) throw new Error(`searchByImage ${res.status}`);
-  const data = (await res.json()) as {
+    bodyStr
+  );
+  if (status !== 200) throw new Error(`searchByImage ${status}`);
+  const data = JSON.parse(body) as {
     itemSummaries?: { title?: string; price?: { value?: string } }[];
   };
   return (data.itemSummaries ?? [])
@@ -77,20 +107,25 @@ async function searchByImage(imageBase64: string): Promise<BrowseItem[]> {
 
 async function searchByText(keywords: string): Promise<BrowseItem[]> {
   const token = await getAppToken();
-  const url = new URL(`${BROWSE_BASE}/item_summary/search`);
-  url.searchParams.set("q", keywords);
-  url.searchParams.set("limit", "20");
-  url.searchParams.set("category_ids", "11450");
-  url.searchParams.set("filter", "buyingOptions:{FIXED_PRICE}");
-  const res = await fetch(url.toString(), {
+  const params = new URLSearchParams({
+    q: keywords,
+    limit: "20",
+    category_ids: "11450",
+    filter: "buyingOptions:{FIXED_PRICE}",
+  });
+  const path = `${BROWSE_BASE_PATH}/item_summary/search?${params.toString()}`;
+
+  const { status, body } = await httpsRequest({
+    hostname: BROWSE_BASE_HOST,
+    path,
+    method: "GET",
     headers: {
       Authorization: `Bearer ${token}`,
       "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
     },
-    signal: AbortSignal.timeout(8000),
   });
-  if (!res.ok) throw new Error(`Browse search ${res.status}`);
-  const data = (await res.json()) as {
+  if (status !== 200) throw new Error(`Browse search ${status}`);
+  const data = JSON.parse(body) as {
     itemSummaries?: { title?: string; price?: { value?: string } }[];
   };
   return (data.itemSummaries ?? [])
@@ -184,7 +219,6 @@ export async function POST(req: NextRequest) {
   const median = sorted.length > 0 ? sorted[Math.floor(sorted.length / 2)] : 0;
 
   const mult = CONDITION_MULTIPLIER[condition] ?? 1.0;
-  // Price slightly below market median to sell competitively
   const suggestedPrice = median > 0 ? Math.max(1, Math.round(median * mult * 0.95)) : 0;
 
   const allSorted = [...activePrices].sort((a, b) => a - b);
