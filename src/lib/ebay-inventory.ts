@@ -26,8 +26,9 @@ function garmentTypeQuery(title: string): string {
   const isWomens = lower.includes("women") || lower.includes("ladies");
   const gender = isWomens ? "women's" : "men's";
 
-  const isBottom = /\b(pant|jean|denim|short|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
-  const isOuterwear = /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
+  const isTop = /\b(shirt|tee|t-shirt|top|blouse|polo|button-up|button-down)\b/.test(lower);
+  const isBottom = !isTop && /\b(pant|jean|denim|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
+  const isOuterwear = !isTop && /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
   const isShoe = /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
 
   if (isShoe)      return `${gender} used shoe footwear`;
@@ -42,8 +43,9 @@ function garmentTypeQuery(title: string): string {
 export function getSafeFallbackCategory(title: string): string {
   const lower = (title || "").toLowerCase();
   const isWomens = lower.includes("women") || lower.includes("ladies");
-  const isBottom = /\b(pant|jean|denim|short|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
-  const isOuterwear = /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
+  const isTop = /\b(shirt|tee|t-shirt|top|blouse|polo|button-up|button-down)\b/.test(lower);
+  const isBottom = !isTop && /\b(pant|jean|denim|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
+  const isOuterwear = !isTop && /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
   const isShoe = /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
 
   if (isWomens) {
