@@ -616,7 +616,7 @@ export default function BatchUploadPage() {
           })()}
           {results.map((result, i) => {
             const group = groups[i] ?? [];
-            const thumb = group.length > 0 ? photos[group[0]].previewUrl : undefined;
+            const groupPhotos = group.map((idx) => photos[idx]?.previewUrl).filter(Boolean) as string[];
             const status = saveStatus[i] ?? "idle";
 
             if (result.error) {
@@ -648,64 +648,70 @@ export default function BatchUploadPage() {
             );
 
             return (
-              <div key={i} className="card p-4">
-                <div className="flex gap-3 mb-3">
-                  {thumb && (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={thumb}
-                      alt={result.suggestedTitle}
-                      className="w-16 h-16 object-cover rounded-md flex-shrink-0"
-                    />
-                  )}
-                  <div>
+              <div key={i} className="card overflow-hidden">
+                {/* Scrollable photo strip — swipe to see all photos in this group */}
+                {groupPhotos.length > 0 && (
+                  <div className="flex gap-2 overflow-x-auto px-4 pt-4 pb-2 snap-x snap-mandatory">
+                    {groupPhotos.map((url, pi) => (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        key={pi}
+                        src={url}
+                        alt={`Photo ${pi + 1}`}
+                        className="h-36 w-36 object-cover rounded-lg flex-shrink-0 snap-start"
+                      />
+                    ))}
+                  </div>
+                )}
+                <div className="px-4 pb-4">
+                  <div className="mb-3 mt-2">
                     <p className="text-sm font-medium">{result.suggestedTitle}</p>
                     <p className="text-xs text-[var(--text-secondary)]">
                       {result.brand} &middot; {result.color} &middot; {result.size}
                     </p>
                   </div>
-                </div>
 
-                <p className="text-2xl font-medium mb-2">${suggestion.suggestedPrice}</p>
+                  <p className="text-2xl font-medium mb-2">${suggestion.suggestedPrice}</p>
 
-                <div className="grid grid-cols-3 gap-2 mb-3">
-                  <MiniStat label="Avg sold" value={`$${suggestion.avgSold}`} />
-                  <MiniStat
-                    label="Active range"
-                    value={`$${suggestion.activeRangeLow}-${suggestion.activeRangeHigh}`}
-                  />
-                  <MiniStat
-                    label="Sell odds"
-                    value={suggestion.sellOdds}
-                    highlight={suggestion.sellOdds === "High"}
-                  />
-                </div>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    <MiniStat label="Avg sold" value={`$${suggestion.avgSold}`} />
+                    <MiniStat
+                      label="Active range"
+                      value={`$${suggestion.activeRangeLow}-${suggestion.activeRangeHigh}`}
+                    />
+                    <MiniStat
+                      label="Sell odds"
+                      value={suggestion.sellOdds}
+                      highlight={suggestion.sellOdds === "High"}
+                    />
+                  </div>
 
-                {status === "error" && (
-                  <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
-                    Could not save draft. Try again.
-                  </p>
-                )}
+                  {status === "error" && (
+                    <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
+                      Could not save draft. Try again.
+                    </p>
+                  )}
 
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => handleSaveDraft(i)}
-                    disabled={status === "saving" || status === "saved"}
-                    className="btn flex-1"
-                  >
-                    {status === "saving" ? (
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                    ) : status === "saved" ? (
-                      <Check className="w-4 h-4" style={{ color: "#3B6D11" }} />
-                    ) : (
-                      <FileText className="w-4 h-4" />
-                    )}
-                    {status === "saved" ? "Saved" : status === "saving" ? "Saving..." : "Save draft"}
-                  </button>
-                  <button className="btn btn-primary flex-1">
-                    <Upload className="w-4 h-4" />
-                    List on eBay
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleSaveDraft(i)}
+                      disabled={status === "saving" || status === "saved"}
+                      className="btn flex-1"
+                    >
+                      {status === "saving" ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : status === "saved" ? (
+                        <Check className="w-4 h-4" style={{ color: "#3B6D11" }} />
+                      ) : (
+                        <FileText className="w-4 h-4" />
+                      )}
+                      {status === "saved" ? "Saved" : status === "saving" ? "Saving..." : "Save draft"}
+                    </button>
+                    <button className="btn btn-primary flex-1">
+                      <Upload className="w-4 h-4" />
+                      List on eBay
+                    </button>
+                  </div>
                 </div>
               </div>
             );
