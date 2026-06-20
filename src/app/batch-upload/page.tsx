@@ -34,6 +34,19 @@ interface AiResult {
   condition: Condition;
   flaws: string;
   suggestedTitle: string;
+  style?: string;
+  material?: string;
+  sleeveLength?: string;
+  neckline?: string;
+  fit?: string;
+  pattern?: string;
+  description?: string;
+  vintage?: string;
+  theme?: string;
+  character?: string;
+  characterFamily?: string;
+  yearManufactured?: string;
+  season?: string;
   pricing?: PriceSuggestion;
   error?: string;
 }
@@ -496,6 +509,20 @@ export default function BatchUploadPage() {
           sellOdds: suggestion.sellOdds,
           thumbnailUrl,
           photoUrls: photoUrls.length > 0 ? photoUrls : null,
+          itemType: result.itemType ?? null,
+          style: result.style ?? null,
+          material: result.material ?? null,
+          sleeveLength: result.sleeveLength ?? null,
+          neckline: result.neckline ?? null,
+          fit: result.fit ?? null,
+          pattern: result.pattern ?? null,
+          description: result.description ?? null,
+          vintage: result.vintage ?? null,
+          theme: result.theme ?? null,
+          character: result.character ?? null,
+          characterFamily: result.characterFamily ?? null,
+          yearManufactured: result.yearManufactured ?? null,
+          season: result.season ?? null,
         }),
       });
 

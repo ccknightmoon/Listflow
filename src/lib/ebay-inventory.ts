@@ -119,6 +119,67 @@ function isAspect(v: string | null | undefined): v is string {
   return typeof v === "string" && v !== "null" && v.trim() !== "";
 }
 
+interface AspectInfo {
+  mode: "FREE_TEXT" | "SELECTION_ONLY";
+  cardinality: "SINGLE" | "MULTI";
+  allowedValues: string[];
+}
+
+const aspectCache = new Map<string, { map: Map<string, AspectInfo>; expiresAt: number }>();
+const ASPECT_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
+
+async function fetchCategoryAspects(categoryId: string): Promise<Map<string, AspectInfo>> {
+  const cached = aspectCache.get(categoryId);
+  if (cached && Date.now() < cached.expiresAt) return cached.map;
+
+  try {
+    const result = await inventoryRequest(
+      "GET",
+      `/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category?category_id=${categoryId}`
+    );
+    if (result.status >= 400) return new Map();
+
+    type RawAspect = {
+      localizedAspectName: string;
+      aspectConstraint: { aspectMode: string; itemToAspectCardinality: string };
+      aspectValues?: Array<{ localizedValue: string }>;
+    };
+    const rawAspects = (result.data as { aspects?: RawAspect[] }).aspects ?? [];
+    const map = new Map<string, AspectInfo>();
+    for (const a of rawAspects) {
+      map.set(a.localizedAspectName.toLowerCase(), {
+        mode: a.aspectConstraint.aspectMode as "FREE_TEXT" | "SELECTION_ONLY",
+        cardinality: a.aspectConstraint.itemToAspectCardinality as "SINGLE" | "MULTI",
+        allowedValues: (a.aspectValues ?? []).map(v => v.localizedValue),
+      });
+    }
+    aspectCache.set(categoryId, { map, expiresAt: Date.now() + ASPECT_CACHE_TTL_MS });
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function normalizeAspectValues(values: string[], info: AspectInfo): string[] {
+  if (info.mode === "FREE_TEXT" || info.allowedValues.length === 0) return values;
+
+  const result: string[] = [];
+  for (const v of values) {
+    const lower = v.toLowerCase();
+    // Exact match
+    const exact = info.allowedValues.find(a => a.toLowerCase() === lower);
+    if (exact) { result.push(exact); continue; }
+    // Contains match
+    const partial = info.allowedValues.find(a =>
+      a.toLowerCase().includes(lower) || lower.includes(a.toLowerCase())
+    );
+    if (partial) result.push(partial);
+    // No match → omit (eBay silently drops unrecognized SELECTION_ONLY values)
+  }
+  // Respect cardinality
+  return info.cardinality === "SINGLE" ? result.slice(0, 1) : result;
+}
+
 export async function upsertInventoryItem(sku: string, draft: {
   title: string | null;
   brand: string | null;
@@ -137,10 +198,16 @@ export async function upsertInventoryItem(sku: string, draft: {
   fit?: string | null;
   pattern?: string | null;
   description?: string | null;
+  vintage?: string | null;
+  character?: string | null;
+  character_family?: string | null;
+  year_manufactured?: string | null;
+  season?: string | null;
 }, categoryId = "1059", conditionOverride?: string) {
   const aspects: Record<string, string[]> = {};
   aspects["Department"] = [getDepartment(draft.title || "")];
   aspects["Size Type"] = ["Regular"];
+  aspects["Country of Origin"] = ["United States"];
   if (isAspect(draft.brand)) aspects["Brand"] = [draft.brand];
   if (isAspect(draft.color)) aspects["Color"] = [draft.color];
 
@@ -153,7 +220,7 @@ export async function upsertInventoryItem(sku: string, draft: {
     if (pantsMatch) {
       aspects["Waist Size"] = [`${pantsMatch[1]} in`];
       aspects["Inseam"] = [`${pantsMatch[2]} in`];
-      aspects["Size"] = [draft.size]; // keep full size string too
+      aspects["Size"] = [draft.size];
     } else {
       aspects["Size"] = [draft.size];
     }
@@ -161,11 +228,32 @@ export async function upsertInventoryItem(sku: string, draft: {
   if (isAspect(draft.item_type)) aspects["Type"] = [draft.item_type];
   if (isAspect(draft.style)) aspects["Style"] = [draft.style];
   if (isAspect(draft.material)) aspects["Material"] = [draft.material];
-  if (isAspect(draft.theme)) aspects["Theme"] = [draft.theme];
+  // Theme can be multi-value on eBay (e.g. "90s", "Vintage", "Music")
+  if (isAspect(draft.theme)) aspects["Theme"] = draft.theme.split(",").map(t => t.trim()).filter(Boolean);
   if (isAspect(draft.sleeve_length)) aspects["Sleeve Length"] = [draft.sleeve_length];
   if (isAspect(draft.neckline)) aspects["Neckline"] = [draft.neckline];
   if (isAspect(draft.fit)) aspects["Fit"] = [draft.fit];
   if (isAspect(draft.pattern)) aspects["Pattern"] = [draft.pattern];
+  // New fields
+  if (isAspect(draft.vintage)) aspects["Vintage"] = [draft.vintage === "Yes" ? "Yes" : "No"];
+  if (isAspect(draft.character)) aspects["Character"] = [draft.character];
+  if (isAspect(draft.character_family)) aspects["Character Family"] = [draft.character_family];
+  if (isAspect(draft.year_manufactured)) aspects["Year Manufactured"] = [draft.year_manufactured];
+  if (isAspect(draft.season)) aspects["Season"] = [draft.season];
+
+  // Normalize aspect values against eBay's actual allowed values for this category.
+  // SELECTION_ONLY aspects reject unrecognized values silently — normalization fixes mismatches.
+  const categoryAspects = await fetchCategoryAspects(categoryId);
+  for (const [aspectName, values] of Object.entries(aspects)) {
+    const info = categoryAspects.get(aspectName.toLowerCase());
+    if (!info) continue;
+    const normalized = normalizeAspectValues(values, info);
+    if (normalized.length > 0) {
+      aspects[aspectName] = normalized;
+    } else if (info.mode === "SELECTION_ONLY") {
+      delete aspects[aspectName]; // Avoid sending invalid values eBay would drop anyway
+    }
+  }
 
   const descParts = [
     draft.brand ? `Brand: ${draft.brand}` : null,
@@ -186,7 +274,6 @@ export async function upsertInventoryItem(sku: string, draft: {
       description: draft.description || descParts.join("\n") || "No description.",
       aspects,
       ...(() => {
-        // Use all photo_urls if available, fall back to thumbnail_url; eBay max is 24
         const urls = (draft.photo_urls ?? []).filter((u) => u?.startsWith("http"));
         if (urls.length === 0 && draft.thumbnail_url?.startsWith("http")) urls.push(draft.thumbnail_url);
         return urls.length > 0 ? { imageUrls: urls.slice(0, 24) } : {};

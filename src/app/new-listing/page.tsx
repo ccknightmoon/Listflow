@@ -14,7 +14,7 @@ import {
   Check,
 } from "lucide-react";
 
-import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
+import { Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
 
 const CONDITIONS: Condition[] = [
@@ -39,6 +39,19 @@ interface AiResult {
   condition: Condition;
   flaws: string;
   suggestedTitle: string;
+  style?: string;
+  material?: string;
+  sleeveLength?: string;
+  neckline?: string;
+  fit?: string;
+  pattern?: string;
+  description?: string;
+  vintage?: string;
+  theme?: string;
+  character?: string;
+  characterFamily?: string;
+  yearManufactured?: string;
+  season?: string;
 }
 
 const SLOTS = [
@@ -99,6 +112,9 @@ export default function NewListingPage() {
   const [pricingLoading, setPricingLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [savedDraftId, setSavedDraftId] = useState<string | null>(null);
+  const [listStatus, setListStatus] = useState<"idle" | "listing" | "listed" | "error">("idle");
+  const [listError, setListError] = useState<string | null>(null);
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -131,7 +147,7 @@ export default function NewListingPage() {
       if (!res.ok) throw new Error(data.error || "Pricing failed");
       setResult(data as PriceSuggestion);
     } catch {
-      setResult(getPriceSuggestion(pCondition, false));
+      setResult({ noData: true } as PriceSuggestion);
     } finally {
       setPricingLoading(false);
     }
@@ -179,7 +195,8 @@ export default function NewListingPage() {
     }
   }
 
-  async function handleSaveDraft() {
+  async function handleSaveDraft(): Promise<string | null> {
+    if (savedDraftId) return savedDraftId;
     setSaveStatus("saving");
     try {
       const thumb = photos["front"]?.previewUrl ?? photos[Object.keys(photos)[0]]?.previewUrl ?? null;
@@ -189,7 +206,6 @@ export default function NewListingPage() {
           thumbnailUrl = await uploadThumbnail(thumb);
         } catch (thumbErr) {
           console.error("Thumbnail upload failed:", (thumbErr as Error).message);
-          // non-fatal — draft saves without thumbnail
         }
       }
 
@@ -211,13 +227,52 @@ export default function NewListingPage() {
           activeRangeHigh: activeRangeHigh ?? null,
           sellOdds: sellOdds ?? null,
           thumbnailUrl,
+          itemType: aiResult?.itemType ?? null,
+          style: aiResult?.style ?? null,
+          material: aiResult?.material ?? null,
+          sleeveLength: aiResult?.sleeveLength ?? null,
+          neckline: aiResult?.neckline ?? null,
+          fit: aiResult?.fit ?? null,
+          pattern: aiResult?.pattern ?? null,
+          description: aiResult?.description ?? null,
+          vintage: aiResult?.vintage ?? null,
+          theme: aiResult?.theme ?? null,
+          character: aiResult?.character ?? null,
+          characterFamily: aiResult?.characterFamily ?? null,
+          yearManufactured: aiResult?.yearManufactured ?? null,
+          season: aiResult?.season ?? null,
         }),
       });
 
       if (!res.ok) throw new Error("Failed to save draft");
+      const data = await res.json();
+      const id = data.draft?.id ?? null;
+      setSavedDraftId(id);
       setSaveStatus("saved");
+      return id;
     } catch {
       setSaveStatus("error");
+      return null;
+    }
+  }
+
+  async function handleListOnEbay() {
+    setListStatus("listing");
+    setListError(null);
+    try {
+      const draftId = await handleSaveDraft();
+      if (!draftId) throw new Error("Could not save draft before listing");
+      const res = await fetch("/api/ebay/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to list on eBay");
+      setListStatus("listed");
+    } catch (err) {
+      setListStatus("error");
+      setListError((err as Error).message);
     }
   }
 
@@ -354,11 +409,14 @@ export default function NewListingPage() {
                 </>
               )}
 
+              {listError && (
+                <p className="text-xs mb-2" style={{ color: "#B3261E" }}>{listError}</p>
+              )}
               <div className="flex gap-2">
                 <button
                   className="btn flex-1"
-                  onClick={handleSaveDraft}
-                  disabled={saveStatus === "saving" || saveStatus === "saved"}
+                  onClick={() => handleSaveDraft()}
+                  disabled={saveStatus === "saving" || saveStatus === "saved" || listStatus === "listing"}
                 >
                   {saveStatus === "saving" ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -369,9 +427,19 @@ export default function NewListingPage() {
                   )}
                   {saveStatus === "saved" ? "Saved!" : saveStatus === "saving" ? "Saving..." : "Save draft"}
                 </button>
-                <button className="btn btn-primary flex-1">
-                  <Upload className="w-4 h-4" />
-                  List on eBay
+                <button
+                  className="btn btn-primary flex-1"
+                  onClick={handleListOnEbay}
+                  disabled={listStatus === "listing" || listStatus === "listed"}
+                >
+                  {listStatus === "listing" ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : listStatus === "listed" ? (
+                    <Check className="w-4 h-4" />
+                  ) : (
+                    <Upload className="w-4 h-4" />
+                  )}
+                  {listStatus === "listed" ? "Listed!" : listStatus === "listing" ? "Listing..." : "List on eBay"}
                 </button>
               </div>
             </>
