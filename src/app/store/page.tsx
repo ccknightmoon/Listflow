@@ -236,7 +236,7 @@ export default function StorePage() {
                   <p className="text-sm font-medium truncate">{l.title}</p>
                   <p className="text-xs text-[var(--text-secondary)] mt-0.5">
                     {l.price != null ? `$${l.price.toFixed(2)}` : "—"}
-                    {l.sku ? ` · SKU: ${l.sku}` : ""}
+                    {l.sku && !l.sku.startsWith("listflow") ? ` · SKU: ${l.sku}` : ""}
                   </p>
                 </div>
               </div>
