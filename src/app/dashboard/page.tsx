@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Plus, ImagePlus, FileText, BarChart2, ChevronRight } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
+import { supabase } from "@/lib/supabase";
 
 interface Stats {
   drafts: number;
@@ -13,12 +14,17 @@ interface Stats {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/dashboard/stats")
       .then((r) => r.json())
       .then((data) => setStats(data))
       .catch(() => {});
+
+    supabase.auth.getUser().then(({ data }) => {
+      setUserEmail(data.user?.email ?? null);
+    });
   }, []);
 
   const drafts = stats?.drafts ?? null;
@@ -30,10 +36,10 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <p className="text-sm text-[var(--text-secondary)]">Welcome back</p>
-          <h1 className="text-xl font-medium">My store</h1>
+          <h1 className="text-xl font-medium">{userEmail ?? "My store"}</h1>
         </div>
         <div className="w-9 h-9 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 font-medium text-sm">
-          S
+          {userEmail ? userEmail[0].toUpperCase() : "S"}
         </div>
       </div>
 
