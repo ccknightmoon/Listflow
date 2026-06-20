@@ -33,6 +33,7 @@ export default function SalesPage() {
       const res = await fetch(`/api/ebay/sales?days=${d}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load");
+      if (data.error) throw new Error(data.error);
       setSales(data.sales ?? []);
       setTotalRevenue(data.totalRevenue ?? 0);
     } catch (err) {

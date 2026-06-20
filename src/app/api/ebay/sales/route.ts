@@ -25,17 +25,12 @@ export async function GET(req: Request) {
 
   const result = await tradingRequest(
     "GetSellerTransactions",
-    `<?xml version="1.0" encoding="utf-8"?>
-    <GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents">
-      <ModTimeFrom>${from}</ModTimeFrom>
-      <ModTimeTo>${to}</ModTimeTo>
-      <Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination>
-      <IncludeContainingOrder>true</IncludeContainingOrder>
-    </GetSellerTransactionsRequest>`
+    `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetSellerTransactionsRequest>`
   );
 
   if (!result.body.includes("<Ack>Success</Ack>")) {
-    return NextResponse.json({ error: "eBay API error", sales: [] }, { status: 200 });
+    const errMsg = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
+    return NextResponse.json({ error: errMsg, sales: [] }, { status: 200 });
   }
 
   const txBlocks = xmlFindAll(result.body, "Transaction");
