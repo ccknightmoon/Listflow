@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X } from "lucide-react";
 
 const CONDITIONS = [
   "New with tags",
@@ -57,6 +57,9 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needsReconnect, setNeedsReconnect] = useState(false);
+  const [needsConnect, setNeedsConnect] = useState(false);
+  const [reanalyzePhotos, setReanalyzePhotos] = useState<Array<{ data: string; mediaType: string; previewUrl: string }>>([]);
+  const [reanalyzing, setReanalyzing] = useState(false);
 
   const [title, setTitle] = useState("");
   const [brand, setBrand] = useState("");
@@ -211,6 +214,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         body: JSON.stringify({ draftId: params.id, customSku: customSku || undefined }),
       });
       const data = await res.json();
+      if (data.connect) { setNeedsConnect(true); throw new Error(data.error); }
       if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error); }
       if (!res.ok) throw new Error(data.error || "Failed to list");
       // Save all form values + ebay_listing_id together so nothing gets wiped
@@ -234,6 +238,48 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       setError((err as Error).message);
     } finally {
       setListing(false);
+    }
+  }
+
+  async function handleAddReanalyzePhoto(file: File) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      const mediaType = file.type || "image/jpeg";
+      const b64 = dataUrl.split(",")[1];
+      setReanalyzePhotos((prev) => [...prev.slice(0, 2), { data: b64, mediaType, previewUrl: dataUrl }]);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async function handleReanalyze() {
+    if (reanalyzePhotos.length === 0) return;
+    setReanalyzing(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/analyze-item", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images: reanalyzePhotos.map((p) => ({ data: p.data, mediaType: p.mediaType })) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Analysis failed");
+      if (data.suggestedTitle) setTitle(data.suggestedTitle);
+      if (data.brand) setBrand(data.brand);
+      if (data.color) setColor(data.color);
+      if (data.size) setSize(data.size);
+      if (data.condition) setCondition(data.condition);
+      if (data.flaws) setFlaws(data.flaws);
+      if (data.itemType) setItemType(data.itemType);
+      if (data.style) setStyle(data.style);
+      if (data.material) setMaterial(data.material);
+      if (data.pattern) setPattern(data.pattern);
+      if (data.description) setDescription(data.description);
+      setReanalyzePhotos([]);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setReanalyzing(false);
     }
   }
 
@@ -293,6 +339,9 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
           {error}
+          {needsConnect && (
+            <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
+          )}
           {needsReconnect && (
             <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>
           )}
@@ -324,6 +373,41 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           <Shirt className="w-10 h-10 text-[var(--text-tertiary)]" />
         </div>
       )}
+
+      {/* Re-analyze with new photos */}
+      <div className="card p-3 mb-4">
+        <p className="text-xs text-[var(--text-secondary)] mb-2 flex items-center gap-1">
+          <Sparkles className="w-3.5 h-3.5" /> Re-analyze with new photos
+        </p>
+        <div className="flex gap-2 mb-2">
+          {reanalyzePhotos.map((p, i) => (
+            <div key={i} className="relative">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={p.previewUrl} alt="" className="w-16 h-16 rounded-lg object-cover" />
+              <button
+                onClick={() => setReanalyzePhotos((prev) => prev.filter((_, j) => j !== i))}
+                className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white border border-[var(--border)] flex items-center justify-center"
+              >
+                <X className="w-2.5 h-2.5 text-[var(--text-secondary)]" />
+              </button>
+            </div>
+          ))}
+          {reanalyzePhotos.length < 3 && (
+            <label className="w-16 h-16 rounded-lg border-2 border-dashed border-[var(--border)] flex flex-col items-center justify-center cursor-pointer hover:border-[var(--brand-600)] transition-colors">
+              <Camera className="w-5 h-5 text-[var(--text-tertiary)]" />
+              <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleAddReanalyzePhoto(e.target.files[0])} />
+            </label>
+          )}
+        </div>
+        <button
+          onClick={handleReanalyze}
+          disabled={reanalyzePhotos.length === 0 || reanalyzing}
+          className="btn w-full text-sm"
+        >
+          {reanalyzing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+          {reanalyzing ? "Analyzing..." : "Re-analyze"}
+        </button>
+      </div>
 
       {draft?.avg_sold != null && (
         <div className="card p-3 mb-4 flex gap-4 text-sm">

@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
     if (!process.env.EBAY_OAUTH_REFRESH_TOKEN) {
-      return NextResponse.json({ error: "eBay not connected — go to /api/ebay/connect to authorize" }, { status: 400 });
+      return NextResponse.json({ error: "eBay not connected. Authorize your account to start listing.", connect: true }, { status: 400 });
     }
 
     const { data: draft, error: dbError } = await supabase

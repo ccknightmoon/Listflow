@@ -13,7 +13,6 @@ interface Draft {
   sell_odds: string | null;
   condition: string | null;
   thumbnail_url: string | null;
-  ebay_listing_id: string | null;
   created_at: string | null;
 }
 
@@ -41,7 +40,7 @@ export default function DraftsPage() {
       const res = await fetch("/api/drafts");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load drafts");
-      setDrafts((data.drafts ?? []).filter((d: Draft) => !d.ebay_listing_id));
+      setDrafts((data.drafts ?? []).filter((d: { ebay_listing_id?: string | null }) => !d.ebay_listing_id) as Draft[]);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -90,6 +89,12 @@ export default function DraftsPage() {
   async function handleListSelected() {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
+
+    const noPriceCount = drafts.filter((d) => ids.includes(d.id) && !d.suggested_price).length;
+    if (noPriceCount > 0) {
+      if (!confirm(`${noPriceCount} item${noPriceCount !== 1 ? "s" : ""} have no price set. List anyway?`)) return;
+    }
+
     setListStatus("listing");
     setListProgress(0);
 
@@ -186,6 +191,15 @@ export default function DraftsPage() {
         </div>
       )}
 
+      {!loading && drafts.filter((d) => !d.suggested_price).length > 0 && (
+        <div className="card p-3 mb-4 flex items-center gap-2 text-sm" style={{ borderColor: "#F59E0B", background: "#FFFBEB" }}>
+          <span className="text-base">⚠️</span>
+          <p style={{ color: "#92400E" }}>
+            {drafts.filter((d) => !d.suggested_price).length} draft{drafts.filter((d) => !d.suggested_price).length !== 1 ? "s" : ""} have no price — set one before listing.
+          </p>
+        </div>
+      )}
+
       {!loading && !error && drafts.length === 0 && (
         <div className="card p-8 text-center">
           <p className="text-sm text-[var(--text-secondary)]">
@@ -255,15 +269,9 @@ export default function DraftsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium truncate">{d.title ?? "Untitled item"}</p>
-                      {d.ebay_listing_id && (
-                        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full flex-shrink-0"
-                          style={{ background: "#E8F5E2", color: "#3B6D11" }}>
-                          Live
-                        </span>
-                      )}
                     </div>
-                    <p className="text-xs text-[var(--text-secondary)]">
-                      {d.suggested_price != null ? `$${d.suggested_price}` : "No price"}
+                    <p className="text-xs mt-0.5" style={{ color: d.suggested_price == null ? "#D97706" : "var(--text-secondary)" }}>
+                      {d.suggested_price != null ? `$${d.suggested_price}` : "No price set"}
                       {d.condition ? ` · ${d.condition}` : ""}
                     </p>
                   </div>
