@@ -31,9 +31,25 @@ export async function POST(req: NextRequest) {
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
     if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before listing" }, { status: 400 });
 
+    // Auto-assign next sequential SKU if none set
+    let assignedSku = requestCustomSku || (draft.custom_sku as string | null);
+    if (!assignedSku) {
+      const { data: maxRow } = await supabase
+        .from("drafts")
+        .select("custom_sku")
+        .not("custom_sku", "is", null)
+        .order("custom_sku", { ascending: false })
+        .limit(50);
+      const maxNum = (maxRow ?? [])
+        .map((r) => parseInt(r.custom_sku as string, 10))
+        .filter((n) => !isNaN(n))
+        .reduce((max, n) => (n > max ? n : max), 0);
+      assignedSku = String(maxNum + 1);
+      // Save it so it's visible on the draft
+      await supabase.from("drafts").update({ custom_sku: assignedSku }).eq("id", draftId);
+    }
     const autoSku = String(parseInt(draftId.replace(/-/g, "").slice(0, 8), 16) % 1000000);
-    // Prefer SKU passed directly in request (avoids DB save/read timing issues), then DB value, then auto
-    const sku = requestCustomSku || draft.custom_sku || autoSku;
+    const sku = assignedSku;
     // Legacy SKU formats used before the numeric format was introduced
     const legacyFullSku = `listflow${draftId.replace(/-/g, "")}`;
     const legacyShortSku = `listflow${draftId.replace(/-/g, "").slice(0, 8)}`;
@@ -192,6 +208,14 @@ export async function POST(req: NextRequest) {
       url: listingId ? `https://www.ebay.com/itm/${listingId}` : null,
     });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+    const msg = (err as Error).message ?? "";
+    const isTokenExpired = msg.toLowerCase().includes("invalid_grant") ||
+      msg.toLowerCase().includes("token expired") ||
+      msg.toLowerCase().includes("invalid access token") ||
+      msg.toLowerCase().includes("oauth");
+    if (isTokenExpired) {
+      return NextResponse.json({ error: "eBay token expired. Reconnect eBay to continue listing.", reconnect: true }, { status: 401 });
+    }
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Shirt, Loader2, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 interface Draft {
@@ -26,6 +26,7 @@ export default function DraftsPage() {
   const [deleting, setDeleting] = useState(false);
   const [listStatus, setListStatus] = useState<ListStatus>("idle");
   const [listProgress, setListProgress] = useState(0);
+  const [search, setSearch] = useState("");
 
   useEffect(() => { loadDrafts(); }, []);
 
@@ -54,7 +55,12 @@ export default function DraftsPage() {
   }
 
   function toggleSelectAll() {
-    setSelected(selected.size === drafts.length ? new Set() : new Set(drafts.map((d) => d.id)));
+    const allFilteredSelected = filtered.every((d) => selected.has(d.id));
+    if (allFilteredSelected) {
+      setSelected((prev) => { const next = new Set(prev); filtered.forEach((d) => next.delete(d.id)); return next; });
+    } else {
+      setSelected((prev) => new Set([...prev, ...filtered.map((d) => d.id)]));
+    }
   }
 
 
@@ -109,17 +115,40 @@ export default function DraftsPage() {
     }, 2500);
   }
 
-  const allSelected = drafts.length > 0 && selected.size === drafts.length;
+  const q = search.trim().toLowerCase();
+  const filtered = !q ? drafts : drafts.filter((d) =>
+    (d.title ?? "").toLowerCase().includes(q)
+  );
+  const allSelected = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
   const hasSelection = selected.size > 0;
+
 
   return (
     <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-4">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <h1 className="text-xl font-medium">Drafts ({drafts.length})</h1>
       </div>
+
+      {!loading && drafts.length > 0 && (
+        <div className="relative mb-4">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
+          <input
+            type="search"
+            placeholder="Search drafts..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+          />
+          {search && (
+            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
+              <X className="w-4 h-4 text-[var(--text-tertiary)]" />
+            </button>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>{error}</div>
@@ -154,8 +183,14 @@ export default function DraftsPage() {
             )}
           </div>
 
+          {q && filtered.length === 0 && (
+            <div className="card p-6 text-center mb-4">
+              <p className="text-sm text-[var(--text-secondary)]">No drafts match &ldquo;{search.trim()}&rdquo;</p>
+            </div>
+          )}
+
           <div className="flex flex-col gap-2 mb-6">
-            {drafts.map((d) => {
+            {filtered.map((d) => {
               const isSelected = selected.has(d.id);
               return (
                 <div

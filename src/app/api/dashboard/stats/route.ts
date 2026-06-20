@@ -59,8 +59,9 @@ export async function GET() {
     active = totalStr ? parseInt(totalStr, 10) : 0;
   }
 
-  // Weekly revenue: sum TransactionPrice * QuantityPurchased for each sold transaction
+  // Weekly revenue + sale count
   let weeklyRevenue = 0;
+  let weeklySales = 0;
   if (salesResult.status === "fulfilled" && salesResult.value.body.includes("<Ack>Success</Ack>")) {
     const txBlocks = xmlFindAll(salesResult.value.body, "Transaction");
     for (const tx of txBlocks) {
@@ -68,9 +69,9 @@ export async function GET() {
       const qtyStr = xmlFind(tx, "QuantityPurchased");
       const price = parseFloat(priceStr || "0");
       const qty = parseInt(qtyStr || "1", 10);
-      if (price > 0) weeklyRevenue += price * qty;
+      if (price > 0) { weeklyRevenue += price * qty; weeklySales += qty; }
     }
   }
 
-  return NextResponse.json({ drafts, active, weeklyRevenue });
+  return NextResponse.json({ drafts, active, weeklyRevenue, weeklySales });
 }

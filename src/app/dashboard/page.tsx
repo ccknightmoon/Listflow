@@ -10,6 +10,7 @@ interface Stats {
   drafts: number;
   active: number;
   weeklyRevenue: number;
+  weeklySales: number;
 }
 
 export default function DashboardPage() {
@@ -36,6 +37,7 @@ export default function DashboardPage() {
   const drafts = stats?.drafts ?? null;
   const active = stats?.active ?? null;
   const revenue = stats?.weeklyRevenue ?? null;
+  const weeklySales = stats?.weeklySales ?? null;
 
   return (
     <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
@@ -55,6 +57,7 @@ export default function DashboardPage() {
         <Stat
           label="this week"
           value={revenue !== null ? (revenue === 0 ? "$0" : `$${revenue.toFixed(0)}`) : "—"}
+          sub={weeklySales !== null && weeklySales > 0 ? `${weeklySales} sold` : undefined}
         />
       </div>
 
@@ -96,11 +99,12 @@ export default function DashboardPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
     <div className="card p-3 text-center">
       <p className="text-xl font-medium">{value}</p>
       <p className="text-[11px] text-[var(--text-secondary)]">{label}</p>
+      {sub && <p className="text-[10px] text-green-600 mt-0.5">{sub}</p>}
     </div>
   );
 }

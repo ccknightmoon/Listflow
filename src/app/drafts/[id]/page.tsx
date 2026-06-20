@@ -56,6 +56,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [justListed, setJustListed] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
 
   const [title, setTitle] = useState("");
   const [brand, setBrand] = useState("");
@@ -210,6 +211,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         body: JSON.stringify({ draftId: params.id, customSku: customSku || undefined }),
       });
       const data = await res.json();
+      if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error); }
       if (!res.ok) throw new Error(data.error || "Failed to list");
       // Save all form values + ebay_listing_id together so nothing gets wiped
       if (data.listingId) {
@@ -289,7 +291,12 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       </div>
 
       {error && (
-        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>{error}</div>
+        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
+          {error}
+          {needsReconnect && (
+            <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>
+          )}
+        </div>
       )}
 
       {draft?.photo_urls && draft.photo_urls.length > 0 ? (
