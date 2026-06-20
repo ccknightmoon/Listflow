@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 import { tradingRequest } from "@/lib/ebay-inventory";
 
 export const runtime = "nodejs";
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+);
 
 function xmlFind(xml: string, tag: string): string {
   const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
@@ -39,15 +45,27 @@ export async function GET(req: Request) {
     const itemBlock = xmlFind(tx, "Item");
     const title = xmlFind(itemBlock, "Title") || xmlFind(tx, "Title");
     const listingId = xmlFind(itemBlock, "ItemID");
-    const thumbnail = xmlFind(itemBlock, "PictureDetails")
-      ? xmlFind(xmlFind(itemBlock, "PictureDetails"), "GalleryURL")
-      : null;
     const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
     const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
     const soldAt = xmlFind(tx, "CreatedDate");
-
-    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail };
+    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null };
   }).filter((s) => s.price > 0);
+
+  // Look up thumbnails from Supabase for items listed through Listflow
+  if (sales.length > 0) {
+    const listingIds = sales.map((s) => s.listingId).filter(Boolean);
+    const { data: drafts } = await supabase
+      .from("drafts")
+      .select("ebay_listing_id, thumbnail_url")
+      .in("ebay_listing_id", listingIds);
+
+    if (drafts && drafts.length > 0) {
+      const thumbMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.thumbnail_url as string | null]));
+      for (const sale of sales) {
+        sale.thumbnail = thumbMap.get(sale.listingId) ?? null;
+      }
+    }
+  }
 
   const totalRevenue = sales.reduce((sum, s) => sum + s.total, 0);
 
