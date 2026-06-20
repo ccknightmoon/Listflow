@@ -36,6 +36,11 @@ interface Draft {
   fit: string | null;
   pattern: string | null;
   description: string | null;
+  vintage: string | null;
+  character: string | null;
+  character_family: string | null;
+  year_manufactured: string | null;
+  season: string | null;
   ebay_listing_id: string | null;
 }
 
@@ -69,6 +74,11 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [fit, setFit] = useState("");
   const [pattern, setPattern] = useState("");
   const [description, setDescription] = useState("");
+  const [vintage, setVintage] = useState("");
+  const [character, setCharacter] = useState("");
+  const [characterFamily, setCharacterFamily] = useState("");
+  const [yearManufactured, setYearManufactured] = useState("");
+  const [season, setSeason] = useState("");
 
   useEffect(() => {
     async function load() {
@@ -97,6 +107,11 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         setFit(str(d.fit));
         setPattern(str(d.pattern));
         setDescription(str(d.description));
+        setVintage(str(d.vintage));
+        setCharacter(str(d.character));
+        setCharacterFamily(str(d.character_family));
+        setYearManufactured(str(d.year_manufactured));
+        setSeason(str(d.season));
         if (d.ebay_listing_id) setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
       } catch (err) {
 
@@ -129,6 +144,11 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       if (ok(data.fit)) setFit(data.fit);
       if (ok(data.pattern)) setPattern(data.pattern);
       if (ok(data.description)) setDescription(data.description);
+      if (ok(data.vintage)) setVintage(data.vintage);
+      if (ok(data.character)) setCharacter(data.character);
+      if (ok(data.character_family)) setCharacterFamily(data.character_family);
+      if (ok(data.year_manufactured)) setYearManufactured(data.year_manufactured);
+      if (ok(data.season)) setSeason(data.season);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -148,6 +168,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           suggestedPrice: price ? Number(price) : null,
           customSku, itemType, style, material, theme,
           sleevLength, neckline, fit, pattern, description,
+          vintage, character, characterFamily, yearManufactured, season,
         }),
       });
       if (!res.ok) throw new Error("Failed to save");
@@ -173,6 +194,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           suggestedPrice: price ? Number(price) : null,
           customSku, itemType, style, material, theme,
           sleevLength, neckline, fit, pattern, description,
+          vintage, character, characterFamily, yearManufactured, season,
         }),
       });
 
@@ -421,6 +443,51 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Pattern</label>
               <input className="input w-full" placeholder="Solid, Graphic..." value={pattern} onChange={(e) => setPattern(e.target.value)} />
             </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Vintage</label>
+              <select className="input w-full" value={vintage} onChange={(e) => setVintage(e.target.value)}>
+                <option value="">—</option>
+                <option value="Yes">Yes</option>
+                <option value="No">No</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Year Manufactured</label>
+              <select className="input w-full" value={yearManufactured} onChange={(e) => setYearManufactured(e.target.value)}>
+                <option value="">—</option>
+                <option>Pre-1960</option>
+                <option>1960-1969</option>
+                <option>1970-1979</option>
+                <option>1980-1989</option>
+                <option>1990-1999</option>
+                <option>2000-2009</option>
+                <option>2010-2019</option>
+                <option>2020-2029</option>
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Character</label>
+              <input className="input w-full" placeholder="Mickey Mouse, Stitch..." value={character} onChange={(e) => setCharacter(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text-secondary)] mb-1 block">Character Family</label>
+              <input className="input w-full" placeholder="Disney, Marvel..." value={characterFamily} onChange={(e) => setCharacterFamily(e.target.value)} />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">Season</label>
+            <select className="input w-full" value={season} onChange={(e) => setSeason(e.target.value)}>
+              <option value="">—</option>
+              <option>All Seasons</option>
+              <option>Fall</option>
+              <option>Spring</option>
+              <option>Summer</option>
+              <option>Winter</option>
+            </select>
           </div>
           <div>
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">Description</label>
