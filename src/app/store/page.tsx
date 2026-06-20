@@ -67,8 +67,9 @@ export default function StorePage() {
   }
 
   const q = search.trim().toLowerCase();
-  const filtered = q.length < 2 ? listings : listings.filter((l) => {
+  const filtered = !q ? listings : listings.filter((l) => {
     const sku = (l.sku ?? "").toLowerCase();
+    if (q.length === 1) return sku === q;
     if (sku && (sku === q || sku.startsWith(q))) return true;
     const qWords = q.split(/\s+/);
     const titleWords = l.title.toLowerCase().split(/[\s\-\/,.()&]+/);
@@ -132,10 +133,7 @@ export default function StorePage() {
             <option value="price-asc">Price: low to high</option>
             <option value="price-desc">Price: high to low</option>
           </select>
-          {q.length === 1 && (
-            <p className="text-xs text-[var(--text-secondary)]">Keep typing to search...</p>
-          )}
-          {q.length >= 2 && (
+          {q && (
             <p className="text-xs text-[var(--text-secondary)]">
               {sorted.length} result{sorted.length !== 1 ? "s" : ""} for &ldquo;{search.trim()}&rdquo;
             </p>
