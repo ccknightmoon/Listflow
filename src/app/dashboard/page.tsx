@@ -14,7 +14,7 @@ interface Stats {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/dashboard/stats")
@@ -23,7 +23,13 @@ export default function DashboardPage() {
       .catch(() => {});
 
     supabase.auth.getUser().then(({ data }) => {
-      setUserEmail(data.user?.email ?? null);
+      const user = data.user;
+      const name =
+        user?.user_metadata?.full_name ||
+        user?.user_metadata?.name ||
+        user?.email?.split("@")[0] ||
+        null;
+      setDisplayName(name);
     });
   }, []);
 
@@ -36,10 +42,10 @@ export default function DashboardPage() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <p className="text-sm text-[var(--text-secondary)]">Welcome back</p>
-          <h1 className="text-xl font-medium">{userEmail ?? "My store"}</h1>
+          <h1 className="text-xl font-medium">{displayName ?? "My store"}</h1>
         </div>
         <div className="w-9 h-9 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 font-medium text-sm">
-          {userEmail ? userEmail[0].toUpperCase() : "S"}
+          {displayName ? displayName[0].toUpperCase() : "S"}
         </div>
       </div>
 
