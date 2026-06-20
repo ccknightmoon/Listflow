@@ -120,6 +120,11 @@ export default function BatchUploadPage() {
   const [retryingPricing, setRetryingPricing] = useState<Record<number, boolean>>({});
   const [saveStatus, setSaveStatus] = useState<Record<number, SaveStatus>>({});
   const [savingAll, setSavingAll] = useState(false);
+  const [draftIds, setDraftIds] = useState<Record<number, string>>({});
+  const [listStatus, setListStatus] = useState<Record<number, "idle" | "saving" | "listing" | "listed" | "error">>({});
+  const [listErrors, setListErrors] = useState<Record<number, string>>({});
+  const [listingAll, setListingAll] = useState(false);
+  const [listingAllProgress, setListingAllProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [groupingProgress, setGroupingProgress] = useState<string>("");
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -447,7 +452,8 @@ export default function BatchUploadPage() {
     }
   }
 
-  async function handleSaveDraft(index: number) {
+  async function handleSaveDraft(index: number): Promise<string | null> {
+    if (draftIds[index]) return draftIds[index];
     setSaveStatus((prev) => ({ ...prev, [index]: "saving" }));
 
     try {
@@ -493,14 +499,64 @@ export default function BatchUploadPage() {
         }),
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to save draft");
-      }
+      if (!res.ok) throw new Error("Failed to save draft");
 
+      const data = await res.json();
+      const id: string = data.draft?.id;
+      setDraftIds((prev) => ({ ...prev, [index]: id }));
       setSaveStatus((prev) => ({ ...prev, [index]: "saved" }));
+      return id;
     } catch {
       setSaveStatus((prev) => ({ ...prev, [index]: "error" }));
+      return null;
     }
+  }
+
+  async function handleListOnEbay(index: number) {
+    let id = draftIds[index];
+    if (!id) {
+      setListStatus((prev) => ({ ...prev, [index]: "saving" }));
+      const saved = await handleSaveDraft(index);
+      if (!saved) {
+        setListStatus((prev) => ({ ...prev, [index]: "error" }));
+        setListErrors((prev) => ({ ...prev, [index]: "Failed to save draft" }));
+        return;
+      }
+      id = saved;
+    }
+
+    setListStatus((prev) => ({ ...prev, [index]: "listing" }));
+    try {
+      const res = await fetch("/api/ebay/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Listing failed");
+      setListStatus((prev) => ({ ...prev, [index]: "listed" }));
+    } catch (err) {
+      setListStatus((prev) => ({ ...prev, [index]: "error" }));
+      setListErrors((prev) => ({ ...prev, [index]: (err as Error).message }));
+    }
+  }
+
+  async function handleListAllOnEbay() {
+    const indices = results
+      .map((_, i) => i)
+      .filter((i) => !results[i].error && listStatus[i] !== "listed");
+
+    setListingAll(true);
+    setListingAllProgress({ done: 0, total: indices.length });
+
+    for (let n = 0; n < indices.length; n++) {
+      await handleListOnEbay(indices[n]);
+      setListingAllProgress({ done: n + 1, total: indices.length });
+      if (n < indices.length - 1) await delay(1000);
+    }
+
+    setListingAll(false);
+    setListingAllProgress(null);
   }
 
   return (
@@ -680,14 +736,34 @@ export default function BatchUploadPage() {
           {(() => {
             const unsaved = results.filter((r, i) => !r.error && (saveStatus[i] ?? "idle") === "idle").length;
             const allSaved = results.every((r, i) => r.error || saveStatus[i] === "saved");
+            const unlistedCount = results.filter((r, i) => !r.error && listStatus[i] !== "listed").length;
+            const allListed = results.filter((r) => !r.error).length > 0 && results.every((r, i) => r.error || listStatus[i] === "listed");
             const failedCount = results.filter((r) => r.error).length;
             const anyRetrying = Object.values(retrying).some(Boolean);
             return (
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2">
+                <button
+                  onClick={handleListAllOnEbay}
+                  disabled={listingAll || savingAll || unlistedCount === 0}
+                  className="btn btn-primary w-full"
+                >
+                  {listingAll ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : allListed ? (
+                    <Check className="w-4 h-4" />
+                  ) : (
+                    <Upload className="w-4 h-4" />
+                  )}
+                  {listingAll && listingAllProgress
+                    ? `Listing ${listingAllProgress.done}/${listingAllProgress.total}...`
+                    : allListed
+                    ? "All listed on eBay!"
+                    : `List all on eBay (${unlistedCount})`}
+                </button>
                 <button
                   onClick={handleSaveAllDrafts}
-                  disabled={savingAll || allSaved || unsaved === 0}
-                  className="btn btn-primary flex-1"
+                  disabled={savingAll || listingAll || allSaved || unsaved === 0}
+                  className="btn w-full"
                 >
                   {savingAll ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -696,13 +772,13 @@ export default function BatchUploadPage() {
                   ) : (
                     <FileText className="w-4 h-4" />
                   )}
-                  {allSaved ? "All saved" : savingAll ? "Saving..." : `Save all (${unsaved})`}
+                  {allSaved ? "All saved as drafts" : savingAll ? "Saving..." : `Save all as drafts (${unsaved})`}
                 </button>
                 {failedCount > 0 && (
                   <button
                     onClick={handleRetryAllFailed}
                     disabled={anyRetrying}
-                    className="btn flex-1"
+                    className="btn w-full"
                   >
                     {anyRetrying ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -823,11 +899,16 @@ export default function BatchUploadPage() {
                       Could not save draft. Try again.
                     </p>
                   )}
+                  {listStatus[i] === "error" && listErrors[i] && (
+                    <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
+                      {listErrors[i]}
+                    </p>
+                  )}
 
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleSaveDraft(i)}
-                      disabled={status === "saving" || status === "saved"}
+                      disabled={status === "saving" || status === "saved" || listingAll}
                       className="btn flex-1"
                     >
                       {status === "saving" ? (
@@ -839,9 +920,19 @@ export default function BatchUploadPage() {
                       )}
                       {status === "saved" ? "Saved" : status === "saving" ? "Saving..." : "Save draft"}
                     </button>
-                    <button className="btn btn-primary flex-1">
-                      <Upload className="w-4 h-4" />
-                      List on eBay
+                    <button
+                      onClick={() => handleListOnEbay(i)}
+                      disabled={listStatus[i] === "saving" || listStatus[i] === "listing" || listStatus[i] === "listed" || listingAll}
+                      className="btn btn-primary flex-1"
+                    >
+                      {(listStatus[i] === "saving" || listStatus[i] === "listing") ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : listStatus[i] === "listed" ? (
+                        <Check className="w-4 h-4" />
+                      ) : (
+                        <Upload className="w-4 h-4" />
+                      )}
+                      {listStatus[i] === "saving" ? "Saving..." : listStatus[i] === "listing" ? "Listing..." : listStatus[i] === "listed" ? "Listed!" : "List on eBay"}
                     </button>
                   </div>
                 </div>
