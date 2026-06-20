@@ -27,6 +27,10 @@ export default function StorePage() {
   const [search, setSearch] = useState("");
   const [editingPrice, setEditingPrice] = useState<Map<string, string>>(new Map());
   const [savingPrice, setSavingPrice] = useState<Set<string>>(new Set());
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkPrice, setBulkPrice] = useState("");
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -138,6 +142,32 @@ export default function StorePage() {
     }
   }
 
+  async function handleBulkPrice() {
+    if (!bulkPrice || selected.size === 0) return;
+    setBulkSaving(true);
+    const targets = sorted.filter((l) => selected.has(l.listingId));
+    let failed = 0;
+    for (const l of targets) {
+      try {
+        const res = await fetch("/api/ebay/update-price", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ listingId: l.listingId, price: bulkPrice, draftId: l.draftId }),
+        });
+        if (res.ok) {
+          setListings((prev) => prev.map((x) =>
+            x.listingId === l.listingId ? { ...x, price: parseFloat(bulkPrice) } : x
+          ));
+        } else failed++;
+      } catch { failed++; }
+    }
+    setBulkSaving(false);
+    setSelected(new Set());
+    setSelectMode(false);
+    setBulkPrice("");
+    if (failed > 0) setError(`${failed} item(s) failed to update`);
+  }
+
   const q = search.trim().toLowerCase();
   const filtered = !q ? listings : listings.filter((l) => {
     const sku = (l.sku ?? "").toLowerCase();
@@ -175,6 +205,13 @@ export default function StorePage() {
         </div>
         {!loading && ebayLoading && (
           <Loader2 className="w-4 h-4 animate-spin text-[var(--text-tertiary)]" />
+        )}
+        {!loading && listings.length > 0 && (
+          selectMode ? (
+            <button onClick={() => { setSelectMode(false); setSelected(new Set()); setBulkPrice(""); }} className="text-sm text-[var(--text-secondary)]">Cancel</button>
+          ) : (
+            <button onClick={() => setSelectMode(true)} className="text-sm" style={{ color: "var(--brand-600)" }}>Select</button>
+          )
         )}
       </div>
 
@@ -242,7 +279,12 @@ export default function StorePage() {
       {!loading && sorted.length > 0 && (
         <div className="flex flex-col gap-2">
           {sorted.map((l) => (
-            <div key={l.listingId} className="card p-3">
+            <div
+              key={l.listingId}
+              className={`card p-3 ${selectMode && selected.has(l.listingId) ? "ring-2 ring-[var(--brand-600)]" : ""}`}
+              onClick={selectMode ? () => setSelected((prev) => { const next = new Set(prev); next.has(l.listingId) ? next.delete(l.listingId) : next.add(l.listingId); return next; }) : undefined}
+              style={selectMode ? { cursor: "pointer" } : undefined}
+            >
               <div className="flex items-center gap-3">
                 {l.thumbnail ? (
                   // eslint-disable-next-line @next/next/no-img-element
@@ -344,6 +386,35 @@ export default function StorePage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {selectMode && selected.size > 0 && (
+        <div className="fixed bottom-20 left-0 right-0 max-w-md mx-auto px-5">
+          <div className="card p-3 shadow-lg flex flex-col gap-2">
+            <p className="text-xs text-[var(--text-secondary)]">{selected.size} item{selected.size !== 1 ? "s" : ""} selected</p>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.99"
+                  placeholder="New price"
+                  value={bulkPrice}
+                  onChange={(e) => setBulkPrice(e.target.value)}
+                  className="input w-full pl-7"
+                />
+              </div>
+              <button
+                onClick={handleBulkPrice}
+                disabled={!bulkPrice || bulkSaving}
+                className="btn btn-primary px-4"
+              >
+                {bulkSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

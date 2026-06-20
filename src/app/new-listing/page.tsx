@@ -369,7 +369,18 @@ export default function NewListingPage() {
             <DetectedField label="Brand" value={aiResult.brand} />
             <DetectedField label="Color" value={aiResult.color} />
             <DetectedField label="Size" value={aiResult.size} />
+            {aiResult.material && <DetectedField label="Material" value={aiResult.material} />}
+            {aiResult.style && <DetectedField label="Style" value={aiResult.style} />}
+            {aiResult.pattern && <DetectedField label="Pattern" value={aiResult.pattern} />}
+            {aiResult.sleeveLength && <DetectedField label="Sleeve" value={aiResult.sleeveLength} />}
+            {aiResult.vintage === "Yes" && <DetectedField label="Vintage" value="Yes" />}
+            {aiResult.theme && <DetectedField label="Theme" value={aiResult.theme} />}
           </div>
+          {aiResult.description && (
+            <p className="text-xs text-[var(--text-secondary)] mt-3 pt-3 border-t border-[var(--border)] leading-relaxed">
+              {aiResult.description}
+            </p>
+          )}
         </div>
       )}
 
