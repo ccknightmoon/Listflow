@@ -11,11 +11,14 @@ interface Draft {
   title: string | null;
   suggested_price: number | null;
   sell_odds: string | null;
+  condition: string | null;
   thumbnail_url: string | null;
   ebay_listing_id: string | null;
+  created_at: string | null;
 }
 
 type ListStatus = "idle" | "listing" | "done";
+type SortKey = "newest" | "oldest" | "price-desc" | "price-asc";
 
 export default function DraftsPage() {
   const router = useRouter();
@@ -27,6 +30,7 @@ export default function DraftsPage() {
   const [listStatus, setListStatus] = useState<ListStatus>("idle");
   const [listProgress, setListProgress] = useState(0);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortKey>("newest");
 
   useEffect(() => { loadDrafts(); }, []);
 
@@ -116,9 +120,18 @@ export default function DraftsPage() {
   }
 
   const q = search.trim().toLowerCase();
-  const filtered = !q ? drafts : drafts.filter((d) =>
+  const filtered = [...(!q ? drafts : drafts.filter((d) =>
     (d.title ?? "").toLowerCase().includes(q)
-  );
+  ))].sort((a, b) => {
+    if (sort === "newest" || sort === "oldest") {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return sort === "newest" ? tb - ta : ta - tb;
+    }
+    const pa = a.suggested_price ?? 0;
+    const pb = b.suggested_price ?? 0;
+    return sort === "price-desc" ? pb - pa : pa - pb;
+  });
   const allSelected = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
   const hasSelection = selected.size > 0;
 
@@ -133,20 +146,32 @@ export default function DraftsPage() {
       </div>
 
       {!loading && drafts.length > 0 && (
-        <div className="relative mb-4">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
-          <input
-            type="search"
-            placeholder="Search drafts..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
-          />
-          {search && (
-            <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
-              <X className="w-4 h-4 text-[var(--text-tertiary)]" />
-            </button>
-          )}
+        <div className="flex flex-col gap-2 mb-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
+            <input
+              type="search"
+              placeholder="Search drafts..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+            />
+            {search && (
+              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
+                <X className="w-4 h-4 text-[var(--text-tertiary)]" />
+              </button>
+            )}
+          </div>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as SortKey)}
+            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="price-desc">Price: high to low</option>
+            <option value="price-asc">Price: low to high</option>
+          </select>
         </div>
       )}
 
@@ -238,8 +263,8 @@ export default function DraftsPage() {
                       )}
                     </div>
                     <p className="text-xs text-[var(--text-secondary)]">
-                      {d.suggested_price != null ? `$${d.suggested_price}` : ""}
-                      {d.sell_odds ? ` · ${d.sell_odds} sell odds` : ""}
+                      {d.suggested_price != null ? `$${d.suggested_price}` : "No price"}
+                      {d.condition ? ` · ${d.condition}` : ""}
                     </p>
                   </div>
 

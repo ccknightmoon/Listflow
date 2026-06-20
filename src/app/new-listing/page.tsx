@@ -166,28 +166,27 @@ export default function NewListingPage() {
     }
 
     setLoading(true);
+    const frontPhoto = photos["front"]?.data ?? photos[Object.keys(photos)[0]]?.data;
+
     try {
-      const res = await fetch("/api/analyze-item", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ images }),
-      });
+      // Run AI analysis and pricing in parallel — pricing uses the image for visual search
+      // so it doesn't need to wait for the AI title
+      const [res] = await Promise.all([
+        fetch("/api/analyze-item", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ images }),
+        }),
+        fetchPricing(title, undefined, condition, frontPhoto),
+      ]);
 
       const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Analysis failed");
-      }
+      if (!res.ok) throw new Error(data.error || "Analysis failed");
 
       setAiResult(data);
-      const newTitle = data.suggestedTitle ?? title;
-      const newCondition = data.condition ?? condition;
-      setTitle(newTitle);
-      setCondition(newCondition);
+      setTitle(data.suggestedTitle ?? title);
+      setCondition(data.condition ?? condition);
       setFlaws(data.flaws ?? flaws);
-
-      const frontPhoto = photos["front"]?.data ?? photos[Object.keys(photos)[0]]?.data;
-      fetchPricing(newTitle, data.brand, newCondition, frontPhoto);
     } catch (err) {
       setError((err as Error).message);
     } finally {

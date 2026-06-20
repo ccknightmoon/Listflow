@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 type SortKey = "newest" | "oldest" | "price-asc" | "price-desc";
@@ -25,6 +25,8 @@ export default function StorePage() {
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
+  const [editingPrice, setEditingPrice] = useState<Map<string, string>>(new Map());
+  const [savingPrice, setSavingPrice] = useState<Set<string>>(new Set());
 
   useEffect(() => { loadAll(); }, []);
 
@@ -110,6 +112,29 @@ export default function StorePage() {
       setError("Network error");
     } finally {
       setDeleting((prev) => { const next = new Set(prev); next.delete(listing.listingId); return next; });
+    }
+  }
+
+  async function handleUpdatePrice(listing: StoreListing) {
+    const newPrice = editingPrice.get(listing.listingId);
+    if (!newPrice) return;
+    setSavingPrice((prev) => new Set(prev).add(listing.listingId));
+    try {
+      const res = await fetch("/api/ebay/update-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId: listing.listingId, price: newPrice, draftId: listing.draftId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      setListings((prev) => prev.map((l) =>
+        l.listingId === listing.listingId ? { ...l, price: parseFloat(newPrice) } : l
+      ));
+      setEditingPrice((prev) => { const next = new Map(prev); next.delete(listing.listingId); return next; });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingPrice((prev) => { const next = new Set(prev); next.delete(listing.listingId); return next; });
     }
   }
 
@@ -234,10 +259,39 @@ export default function StorePage() {
 
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{l.title}</p>
-                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                    {l.price != null ? `$${l.price.toFixed(2)}` : "—"}
-                    {l.sku ? ` · SKU: ${l.sku}` : ""}
-                  </p>
+                  {editingPrice.has(l.listingId) ? (
+                    <div className="flex items-center gap-1 mt-1">
+                      <span className="text-xs text-[var(--text-secondary)]">$</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.99"
+                        value={editingPrice.get(l.listingId)}
+                        onChange={(e) => setEditingPrice((prev) => new Map(prev).set(l.listingId, e.target.value))}
+                        className="w-20 text-xs border border-[var(--border)] rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[var(--brand-600)]"
+                        autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") handleUpdatePrice(l);
+                          if (e.key === "Escape") setEditingPrice((prev) => { const next = new Map(prev); next.delete(l.listingId); return next; });
+                        }}
+                      />
+                      <button onClick={() => handleUpdatePrice(l)} disabled={savingPrice.has(l.listingId)} className="text-green-600">
+                        {savingPrice.has(l.listingId) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                      </button>
+                      <button onClick={() => setEditingPrice((prev) => { const next = new Map(prev); next.delete(l.listingId); return next; })} className="text-[var(--text-tertiary)]">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ) : (
+                    <p
+                      className="text-xs text-[var(--text-secondary)] mt-0.5 cursor-pointer hover:text-[var(--brand-600)]"
+                      onClick={() => setEditingPrice((prev) => new Map(prev).set(l.listingId, l.price != null ? l.price.toFixed(2) : ""))}
+                    >
+                      {l.price != null ? `$${l.price.toFixed(2)}` : "Tap to set price"}
+                      {l.sku ? ` · SKU: ${l.sku}` : ""}
+                      <span className="ml-1 opacity-40 text-[10px]">edit</span>
+                    </p>
+                  )}
                 </div>
               </div>
 
