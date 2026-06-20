@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 type SortKey = "newest" | "oldest" | "price-asc" | "price-desc";
@@ -14,55 +14,102 @@ interface StoreListing {
   thumbnail: string | null;
   sku: string | null;
   startTime: string | null;
+  draftId?: string | null;
 }
 
 export default function StorePage() {
   const [listings, setListings] = useState<StoreListing[]>([]);
-  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [ebayLoading, setEbayLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
 
-  useEffect(() => { loadStore(); }, []);
+  useEffect(() => { loadAll(); }, []);
 
-  async function loadStore() {
+  async function loadAll() {
     setLoading(true);
+    setEbayLoading(true);
     setError(null);
+
+    // Phase 1: load Listflow items from Supabase — instant
+    let supabaseListingIds = new Set<string>();
+    try {
+      const res = await fetch("/api/ebay/inventory");
+      const data = await res.json();
+      if (res.ok) {
+        const items: StoreListing[] = (data.listings ?? []).map((l: {
+          listingId: string; title: string; price: string | null;
+          thumbnail: string | null; sku: string | null; startTime: string | null; draftId: string;
+        }) => ({
+          listingId: l.listingId,
+          title: l.title,
+          price: l.price != null ? parseFloat(l.price) : null,
+          thumbnail: l.thumbnail,
+          sku: l.sku,
+          startTime: l.startTime,
+          draftId: l.draftId,
+        }));
+        supabaseListingIds = new Set(items.map((i) => i.listingId));
+        setListings(items);
+      }
+    } catch {
+      // non-fatal — eBay load below may still work
+    } finally {
+      setLoading(false);
+    }
+
+    // Phase 2: load all eBay listings async — fills in items not created through Listflow
     try {
       const res = await fetch("/api/ebay/store");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load store");
-      setListings(data.listings ?? []);
-      setTotal(data.total ?? 0);
+      const ebayItems: StoreListing[] = (data.listings ?? [])
+        .filter((l: StoreListing) => !supabaseListingIds.has(l.listingId))
+        .map((l: StoreListing) => ({
+          listingId: l.listingId,
+          title: l.title,
+          price: l.price,
+          thumbnail: l.thumbnail,
+          sku: l.sku,
+          startTime: l.startTime,
+          draftId: null,
+        }));
+      setListings((prev) => [...prev, ...ebayItems]);
     } catch (err) {
-      setError((err as Error).message);
+      // Only show error if Supabase also returned nothing
+      setListings((prev) => {
+        if (prev.length === 0) setError((err as Error).message);
+        return prev;
+      });
     } finally {
-      setLoading(false);
+      setEbayLoading(false);
     }
   }
 
-  async function handleDelist(listingId: string, title: string) {
-    if (!confirm(`End listing "${title}"? This will remove it from eBay.`)) return;
-    setDeleting((prev) => new Set(prev).add(listingId));
+  async function handleDelist(listing: StoreListing) {
+    if (!confirm(`End listing "${listing.title}"? This will remove it from eBay.`)) return;
+    setDeleting((prev) => new Set(prev).add(listing.listingId));
     try {
+      const body = listing.draftId
+        ? { draftId: listing.draftId }
+        : { listingId: listing.listingId };
       const res = await fetch("/api/ebay/delist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listingId }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok) {
-        setListings((prev) => prev.filter((l) => l.listingId !== listingId));
-        setTotal((t) => t - 1);
+        setListings((prev) => prev.filter((l) => l.listingId !== listing.listingId));
       } else {
         setError(data.error ?? "Failed to delist");
       }
     } catch {
       setError("Network error");
     } finally {
-      setDeleting((prev) => { const next = new Set(prev); next.delete(listingId); return next; });
+      setDeleting((prev) => { const next = new Set(prev); next.delete(listing.listingId); return next; });
     }
   }
 
@@ -95,12 +142,15 @@ export default function StorePage() {
         </Link>
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-medium">
-            {loading ? "Store" : `Store (${listings.length}${total > listings.length ? ` of ${total}` : ""})`}
+            {loading ? "Store" : `Store (${listings.length})`}
           </h1>
           {!loading && !error && (
             <p className="text-xs text-[var(--text-secondary)]">All active eBay listings</p>
           )}
         </div>
+        {!loading && ebayLoading && (
+          <Loader2 className="w-4 h-4 animate-spin text-[var(--text-tertiary)]" />
+        )}
       </div>
 
       {!loading && listings.length > 0 && (
@@ -152,7 +202,7 @@ export default function StorePage() {
         </div>
       )}
 
-      {!loading && !error && listings.length === 0 && (
+      {!loading && !error && listings.length === 0 && !ebayLoading && (
         <div className="card p-8 text-center">
           <p className="text-sm text-[var(--text-secondary)]">No active eBay listings found.</p>
         </div>
@@ -169,7 +219,6 @@ export default function StorePage() {
           {sorted.map((l) => (
             <div key={l.listingId} className="card p-3">
               <div className="flex items-center gap-3">
-                {/* Thumbnail */}
                 {l.thumbnail ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -183,7 +232,6 @@ export default function StorePage() {
                   </div>
                 )}
 
-                {/* Info */}
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{l.title}</p>
                   <p className="text-xs text-[var(--text-secondary)] mt-0.5">
@@ -194,7 +242,6 @@ export default function StorePage() {
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--border)]">
                 <a
                   href={`https://www.ebay.com/sh/edit-item/${l.listingId}`}
@@ -215,9 +262,21 @@ export default function StorePage() {
                   <ExternalLink className="w-3.5 h-3.5" />
                   View
                 </a>
+                {l.draftId && (
+                  <>
+                    <div className="w-px h-4 bg-[var(--border)]" />
+                    <Link
+                      href={`/drafts/${l.draftId}`}
+                      className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                      Draft
+                    </Link>
+                  </>
+                )}
                 <div className="w-px h-4 bg-[var(--border)]" />
                 <button
-                  onClick={() => handleDelist(l.listingId, l.title)}
+                  onClick={() => handleDelist(l)}
                   disabled={deleting.has(l.listingId)}
                   className="flex items-center gap-1 text-xs hover:text-red-600 flex-1 justify-center py-1 disabled:opacity-50"
                   style={{ color: deleting.has(l.listingId) ? undefined : "var(--text-secondary)" }}

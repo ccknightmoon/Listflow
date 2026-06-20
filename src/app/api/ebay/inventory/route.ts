@@ -12,9 +12,9 @@ export async function GET() {
   try {
     const { data: drafts, error } = await supabase
       .from("drafts")
-      .select("id, title, suggested_price, thumbnail_url, ebay_listing_id")
+      .select("id, title, suggested_price, thumbnail_url, ebay_listing_id, created_at")
       .not("ebay_listing_id", "is", null)
-      .order("id", { ascending: false });
+      .order("created_at", { ascending: false });
 
     if (error) throw new Error(error.message);
 
@@ -26,6 +26,7 @@ export async function GET() {
       price: d.suggested_price?.toString() ?? null,
       title: (d.title as string) ?? d.id,
       thumbnail: (d.thumbnail_url as string) ?? null,
+      startTime: (d.created_at as string) ?? null,
     }));
 
     return NextResponse.json({ listings });

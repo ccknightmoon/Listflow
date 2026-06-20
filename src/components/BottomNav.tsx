@@ -2,13 +2,12 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, FileText, ShoppingBag, Store, LogOut } from "lucide-react";
+import { Home, FileText, Store, LogOut } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
 
 const navItems = [
   { href: "/dashboard", icon: Home, label: "Home" },
   { href: "/drafts", icon: FileText, label: "Drafts" },
-  { href: "/ebay-inventory", icon: ShoppingBag, label: "Listed" },
   { href: "/store", icon: Store, label: "Store" },
 ];
 
