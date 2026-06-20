@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 type SortKey = "newest" | "oldest" | "price-asc" | "price-desc";
@@ -23,6 +23,7 @@ export default function StorePage() {
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("newest");
+  const [search, setSearch] = useState("");
 
   useEffect(() => { loadStore(); }, []);
 
@@ -65,7 +66,16 @@ export default function StorePage() {
     }
   }
 
-  const sorted = [...listings].sort((a, b) => {
+  const q = search.trim().toLowerCase();
+  const filtered = q
+    ? listings.filter(
+        (l) =>
+          l.title.toLowerCase().includes(q) ||
+          (l.sku ?? "").toLowerCase().includes(q)
+      )
+    : listings;
+
+  const sorted = [...filtered].sort((a, b) => {
     if (sort === "newest" || sort === "oldest") {
       const ta = a.startTime ? new Date(a.startTime).getTime() : 0;
       const tb = b.startTime ? new Date(b.startTime).getTime() : 0;
@@ -93,7 +103,25 @@ export default function StorePage() {
       </div>
 
       {!loading && listings.length > 0 && (
-        <div className="mb-4">
+        <div className="flex flex-col gap-2 mb-4">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
+            <input
+              type="search"
+              placeholder="Search by title or SKU..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+            />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2"
+              >
+                <X className="w-4 h-4 text-[var(--text-tertiary)]" />
+              </button>
+            )}
+          </div>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
@@ -104,6 +132,11 @@ export default function StorePage() {
             <option value="price-asc">Price: low to high</option>
             <option value="price-desc">Price: high to low</option>
           </select>
+          {q && (
+            <p className="text-xs text-[var(--text-secondary)]">
+              {sorted.length} result{sorted.length !== 1 ? "s" : ""} for &ldquo;{search.trim()}&rdquo;
+            </p>
+          )}
         </div>
       )}
 
@@ -124,7 +157,13 @@ export default function StorePage() {
         </div>
       )}
 
-      {!loading && listings.length > 0 && (
+      {!loading && listings.length > 0 && sorted.length === 0 && (
+        <div className="card p-8 text-center">
+          <p className="text-sm text-[var(--text-secondary)]">No listings match &ldquo;{search.trim()}&rdquo;.</p>
+        </div>
+      )}
+
+      {!loading && sorted.length > 0 && (
         <div className="flex flex-col gap-2">
           {sorted.map((l) => (
             <div key={l.listingId} className="card p-3">
