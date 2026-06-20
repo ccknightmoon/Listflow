@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, ImagePlus, FileText, BarChart2, ChevronRight } from "lucide-react";
+import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, ChevronRight } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { supabase } from "@/lib/supabase";
 
@@ -82,6 +82,12 @@ export default function DashboardPage() {
           icon={BarChart2}
           title="View store"
           subtitle={active !== null ? `${active} active listings` : "Loading…"}
+        />
+        <QuickAction
+          href="/sales"
+          icon={TrendingUp}
+          title="Sales history"
+          subtitle="See what you've sold"
         />
       </div>
 

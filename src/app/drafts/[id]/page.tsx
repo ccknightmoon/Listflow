@@ -182,6 +182,12 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   }
 
   async function handleList() {
+    const priceNum = price ? Number(price) : null;
+    if (!priceNum) {
+      if (!confirm("No price set. Continue listing anyway?")) return;
+    } else if (priceNum >= 200) {
+      if (!confirm(`List at $${priceNum.toFixed(2)}? Make sure that's the right price.`)) return;
+    }
     setListing(true);
     setError(null);
     try {

@@ -199,13 +199,17 @@ export default function NewListingPage() {
     if (savedDraftId) return savedDraftId;
     setSaveStatus("saving");
     try {
-      const thumb = photos["front"]?.previewUrl ?? photos[Object.keys(photos)[0]]?.previewUrl ?? null;
+      const allPhotoUrls: string[] = [];
       let thumbnailUrl: string | null = null;
-      if (thumb) {
+      for (const key of ["front", "measure", "flaw"]) {
+        const preview = photos[key]?.previewUrl;
+        if (!preview) continue;
         try {
-          thumbnailUrl = await uploadThumbnail(thumb);
-        } catch (thumbErr) {
-          console.error("Thumbnail upload failed:", (thumbErr as Error).message);
+          const url = await uploadThumbnail(preview);
+          allPhotoUrls.push(url);
+          if (key === "front" || !thumbnailUrl) thumbnailUrl = url;
+        } catch (err) {
+          console.error(`Photo upload failed (${key}):`, (err as Error).message);
         }
       }
 
@@ -227,6 +231,7 @@ export default function NewListingPage() {
           activeRangeHigh: activeRangeHigh ?? null,
           sellOdds: sellOdds ?? null,
           thumbnailUrl,
+          photoUrls: allPhotoUrls.length > 0 ? allPhotoUrls : null,
           itemType: aiResult?.itemType ?? null,
           style: aiResult?.style ?? null,
           material: aiResult?.material ?? null,
