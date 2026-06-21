@@ -123,6 +123,7 @@ export default function NewListingPage() {
   const [customPrice, setCustomPrice] = useState("");
   const [brand, setBrand] = useState("");
   const [size, setSize] = useState("");
+  const [color, setColor] = useState("");
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -197,6 +198,7 @@ export default function NewListingPage() {
       setFlaws(data.flaws ?? flaws);
       setBrand(data.brand ?? "");
       setSize(data.size ?? "");
+      setColor(data.color ?? "");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -231,7 +233,7 @@ export default function NewListingPage() {
         body: JSON.stringify({
           title,
           brand: brand || aiResult?.brand || null,
-          color: aiResult?.color ?? null,
+          color: color || aiResult?.color || null,
           size: size || aiResult?.size || null,
           condition,
           flaws,
@@ -286,7 +288,7 @@ export default function NewListingPage() {
         await fetch(`/api/drafts/${draftId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, brand: brand || aiResult?.brand || null, size: size || aiResult?.size || null, condition, flaws, suggestedPrice: finalPrice }),
+          body: JSON.stringify({ title, brand: brand || aiResult?.brand || null, size: size || aiResult?.size || null, color: color || aiResult?.color || null, condition, flaws, suggestedPrice: finalPrice }),
         });
       }
       const res = await fetch("/api/ebay/list", {
@@ -420,7 +422,15 @@ export default function NewListingPage() {
                 placeholder="Brand"
               />
             </div>
-            <DetectedField label="Color" value={aiResult.color} />
+            <div>
+              <p className="text-[11px] text-[var(--text-tertiary)]">Color</p>
+              <input
+                className="input w-full text-sm py-0.5 px-1.5 mt-0.5"
+                value={color}
+                onChange={(e) => setColor(e.target.value)}
+                placeholder="Color"
+              />
+            </div>
             <div>
               <p className="text-[11px] text-[var(--text-tertiary)]">Size</p>
               <input

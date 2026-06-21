@@ -38,6 +38,8 @@ export default function DraftsPage() {
   const [deleting, setDeleting] = useState(false);
   const [listStatus, setListStatus] = useState<ListStatus>("idle");
   const [listProgress, setListProgress] = useState(0);
+  const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
+  const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
 
@@ -118,6 +120,8 @@ export default function DraftsPage() {
         });
         if (!res.ok) {
           const data = await res.json();
+          if (data.connect) setNeedsEbayConnect(true);
+          if (data.reconnect) setNeedsEbayReconnect(true);
           setError(`Item ${i + 1} failed: ${data.error ?? "Unknown error"}`);
         } else {
           successCount++;
@@ -197,7 +201,11 @@ export default function DraftsPage() {
       )}
 
       {error && (
-        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>{error}</div>
+        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
+          {error}
+          {needsEbayConnect && <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>}
+          {needsEbayReconnect && <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>}
+        </div>
       )}
 
       {loading && (
