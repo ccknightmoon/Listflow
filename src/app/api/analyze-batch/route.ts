@@ -60,7 +60,7 @@ async function analyzeGroup(
     try {
       const data = await openAIPost(apiKey, {
         model: "gpt-4o-mini",
-        max_tokens: 900,
+        max_tokens: 1000,
         messages: [
           {
             role: "user",

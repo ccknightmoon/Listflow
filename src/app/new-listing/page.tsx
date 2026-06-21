@@ -205,6 +205,13 @@ export default function NewListingPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Analysis failed");
 
+      // Prepend measurements before storing in state so description is correct on first render
+      const measLine = formatMeasurements(data);
+      if (measLine && data.description) {
+        data.description = `${measLine}\n\n${data.description}`;
+      } else if (measLine) {
+        data.description = measLine;
+      }
       setAiResult(data);
       setTitle(data.suggestedTitle ?? title);
       setCondition(data.condition ?? condition);
@@ -212,13 +219,6 @@ export default function NewListingPage() {
       setBrand(data.brand ?? "");
       setSize(data.size ?? "");
       setColor(data.color ?? "");
-      // Prepend measurements to description when tape values are detected
-      const measLine = formatMeasurements(data);
-      if (measLine && data.description) {
-        data.description = `${measLine}\n\n${data.description}`;
-      } else if (measLine) {
-        data.description = measLine;
-      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
