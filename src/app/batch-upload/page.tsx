@@ -59,6 +59,14 @@ interface Thumbnail {
 type Step = "upload" | "grouping" | "review" | "analyzing" | "results";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+const CONDITIONS: Condition[] = [
+  "New with tags",
+  "New without tags",
+  "Excellent used",
+  "Good - minor flaws",
+  "Fair - notable flaws",
+];
+
 const MAX_DIMENSION = 1024;
 const THUMB_DIMENSION = 256;
 const THUMB_QUALITY = 0.5;
@@ -899,6 +907,17 @@ export default function BatchUploadPage() {
                         setResults((prev) => prev.map((r, j) => j === i ? { ...r, suggestedTitle: val } : r));
                       }}
                     />
+                    <select
+                      className="input w-full text-xs mb-1"
+                      value={result.condition}
+                      disabled={!!draftIds[i]}
+                      onChange={(e) => {
+                        const val = e.target.value as Condition;
+                        setResults((prev) => prev.map((r, j) => j === i ? { ...r, condition: val } : r));
+                      }}
+                    >
+                      {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                    </select>
                     <p className="text-xs text-[var(--text-secondary)]">
                       {result.brand} &middot; {result.color} &middot; {result.size}
                     </p>
