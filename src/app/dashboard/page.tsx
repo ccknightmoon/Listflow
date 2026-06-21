@@ -15,13 +15,15 @@ interface Stats {
 
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
+  const [statsLoaded, setStatsLoaded] = useState(false);
   const [displayName, setDisplayName] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/dashboard/stats")
       .then((r) => r.json())
       .then((data) => setStats(data))
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setStatsLoaded(true));
 
     supabase.auth.getUser().then(({ data }) => {
       const user = data.user;
@@ -78,13 +80,13 @@ export default function DashboardPage() {
           href="/drafts"
           icon={FileText}
           title="Review drafts"
-          subtitle={drafts !== null ? `${drafts} ready to post` : "Loading…"}
+          subtitle={drafts !== null ? `${drafts} ready to post` : statsLoaded ? "Tap to view drafts" : "Loading…"}
         />
         <QuickAction
           href="/store"
           icon={BarChart2}
           title="View store"
-          subtitle={active !== null ? `${active} active listings` : "Loading…"}
+          subtitle={active !== null ? `${active} active listings` : statsLoaded ? "Tap to view store" : "Loading…"}
         />
         <QuickAction
           href="/sales"

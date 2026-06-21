@@ -189,12 +189,13 @@ export default function BatchUploadPage() {
       .map((_, i) => i)
       .filter((i) => !results[i].error && (saveStatus[i] ?? "idle") === "idle");
 
+    let successCount = 0;
     for (const i of indices) {
-      await handleSaveDraft(i);
+      const id = await handleSaveDraft(i);
+      if (id) successCount++;
     }
     setSavingAll(false);
-    // Brief pause so user sees "All saved", then go to Drafts
-    setTimeout(() => router.push("/drafts"), 1200);
+    if (successCount > 0) setTimeout(() => router.push("/drafts"), 1200);
   }
 
   async function handleGroupPhotos() {
