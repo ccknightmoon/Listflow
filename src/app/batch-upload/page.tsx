@@ -920,39 +920,46 @@ export default function BatchUploadPage() {
                     >
                       {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <div className="flex gap-1 mt-1">
-                      <input
-                        className="input text-xs flex-1"
-                        placeholder="Brand"
-                        value={result.brand}
-                        disabled={!!draftIds[i]}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setResults((prev) => prev.map((r, j) => j === i ? { ...r, brand: val } : r));
-                        }}
-                      />
-                      <p className="text-xs text-[var(--text-secondary)] self-center px-1">&middot;</p>
-                      <input
-                        className="input text-xs w-20"
-                        placeholder="Color"
-                        value={result.color}
-                        disabled={!!draftIds[i]}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setResults((prev) => prev.map((r, j) => j === i ? { ...r, color: val } : r));
-                        }}
-                      />
-                      <p className="text-xs text-[var(--text-secondary)] self-center px-1">&middot;</p>
-                      <input
-                        className="input text-xs w-16"
-                        placeholder="Size"
-                        value={result.size}
-                        disabled={!!draftIds[i]}
-                        onChange={(e) => {
-                          const val = e.target.value;
-                          setResults((prev) => prev.map((r, j) => j === i ? { ...r, size: val } : r));
-                        }}
-                      />
+                    <div className="grid grid-cols-3 gap-1 mt-1">
+                      <div>
+                        <p className="text-[10px] text-[var(--text-tertiary)] mb-0.5">Brand</p>
+                        <input
+                          className="input text-xs w-full"
+                          placeholder="Brand"
+                          value={result.brand}
+                          disabled={!!draftIds[i]}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setResults((prev) => prev.map((r, j) => j === i ? { ...r, brand: val } : r));
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-[var(--text-tertiary)] mb-0.5">Color</p>
+                        <input
+                          className="input text-xs w-full"
+                          placeholder="Color"
+                          value={result.color}
+                          disabled={!!draftIds[i]}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setResults((prev) => prev.map((r, j) => j === i ? { ...r, color: val } : r));
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-[var(--text-tertiary)] mb-0.5">Size</p>
+                        <input
+                          className="input text-xs w-full"
+                          placeholder="Size"
+                          value={result.size}
+                          disabled={!!draftIds[i]}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setResults((prev) => prev.map((r, j) => j === i ? { ...r, size: val } : r));
+                          }}
+                        />
+                      </div>
                     </div>
                     <textarea
                       className="input w-full text-xs mt-1"
