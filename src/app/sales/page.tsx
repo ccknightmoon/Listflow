@@ -75,7 +75,9 @@ export default function SalesPage() {
         <div className="card p-4 mb-4 flex items-center gap-3">
           <TrendingUp className="w-5 h-5 text-green-600 flex-shrink-0" />
           <div>
-            <p className="text-xs text-[var(--text-secondary)]">Total revenue</p>
+            <p className="text-xs text-[var(--text-secondary)]">
+              {sales.length} item{sales.length !== 1 ? "s" : ""} sold
+            </p>
             <p className="text-xl font-medium">${totalRevenue.toFixed(2)}</p>
           </div>
         </div>

@@ -7,6 +7,16 @@ import BottomNav from "@/components/BottomNav";
 
 type SortKey = "newest" | "oldest" | "price-asc" | "price-desc";
 
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return "";
+  const d = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+  if (d === 0) return "today";
+  if (d === 1) return "yesterday";
+  if (d < 7) return `${d}d ago`;
+  if (d < 30) return `${Math.floor(d / 7)}w ago`;
+  return `${Math.floor(d / 30)}mo ago`;
+}
+
 interface StoreListing {
   listingId: string;
   title: string;
@@ -331,6 +341,7 @@ export default function StorePage() {
                     >
                       {l.price != null ? `$${l.price.toFixed(2)}` : "Tap to set price"}
                       {l.sku ? ` · SKU: ${l.sku}` : ""}
+                      {l.startTime ? ` · Listed ${timeAgo(l.startTime)}` : ""}
                       <span className="ml-1 opacity-40 text-[10px]">edit</span>
                     </p>
                   )}
@@ -365,7 +376,7 @@ export default function StorePage() {
                       className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
                     >
                       <ChevronRight className="w-3.5 h-3.5" />
-                      Draft
+                      Edit
                     </Link>
                   </>
                 )}
