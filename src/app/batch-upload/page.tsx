@@ -918,9 +918,22 @@ export default function BatchUploadPage() {
                     >
                       {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                     </select>
-                    <p className="text-xs text-[var(--text-secondary)]">
-                      {result.brand} &middot; {result.color} &middot; {result.size}
-                    </p>
+                    <div className="flex gap-1 mt-1">
+                      <input
+                        className="input text-xs flex-1"
+                        placeholder="Brand"
+                        value={result.brand}
+                        disabled={!!draftIds[i]}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setResults((prev) => prev.map((r, j) => j === i ? { ...r, brand: val } : r));
+                        }}
+                      />
+                      <p className="text-xs text-[var(--text-secondary)] self-center px-1">&middot;</p>
+                      <p className="text-xs text-[var(--text-secondary)] self-center">{result.color}</p>
+                      <p className="text-xs text-[var(--text-secondary)] self-center px-1">&middot;</p>
+                      <p className="text-xs text-[var(--text-secondary)] self-center">{result.size}</p>
+                    </div>
                     <textarea
                       className="input w-full text-xs mt-1"
                       rows={2}
