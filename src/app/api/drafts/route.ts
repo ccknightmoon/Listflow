@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
         thumbnail_url: body.thumbnailUrl ?? null,
         photo_urls: body.photoUrls ?? null,
         item_type: body.itemType ?? null,
+        theme: body.theme ?? null,
         style: body.style ?? null,
         material: body.material ?? null,
         sleeve_length: body.sleeveLength ?? null,
