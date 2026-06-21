@@ -17,6 +17,16 @@ interface Draft {
 }
 
 type ListStatus = "idle" | "listing" | "done";
+
+function timeAgo(dateStr: string | null): string {
+  if (!dateStr) return "";
+  const d = Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+  if (d === 0) return "today";
+  if (d === 1) return "yesterday";
+  if (d < 7) return `${d}d ago`;
+  if (d < 30) return `${Math.floor(d / 7)}w ago`;
+  return `${Math.floor(d / 30)}mo ago`;
+}
 type SortKey = "newest" | "oldest" | "price-desc" | "price-asc";
 
 export default function DraftsPage() {
@@ -273,6 +283,7 @@ export default function DraftsPage() {
                     <p className="text-xs mt-0.5" style={{ color: d.suggested_price == null ? "#D97706" : "var(--text-secondary)" }}>
                       {d.suggested_price != null ? `$${d.suggested_price}` : "No price set"}
                       {d.condition ? ` · ${d.condition}` : ""}
+                      {d.created_at ? ` · ${timeAgo(d.created_at)}` : ""}
                     </p>
                   </div>
 

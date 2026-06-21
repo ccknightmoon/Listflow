@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw } from "lucide-react";
 
 const CONDITIONS = [
   "New with tags",
@@ -60,6 +60,15 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [needsConnect, setNeedsConnect] = useState(false);
   const [reanalyzePhotos, setReanalyzePhotos] = useState<Array<{ data: string; mediaType: string; previewUrl: string }>>([]);
   const [reanalyzing, setReanalyzing] = useState(false);
+  const [isHeavy, setIsHeavy] = useState(false);
+  const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
+  const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null);
+  const [refreshingPrice, setRefreshingPrice] = useState(false);
+  const pointerStart = useRef<{ x: number; y: number } | null>(null);
+  const dragIdxRef = useRef<number | null>(null);
+  const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const [title, setTitle] = useState("");
   const [brand, setBrand] = useState("");
@@ -94,6 +103,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         if (!res.ok) throw new Error(data.error || "Not found");
         const d: Draft = data.draft;
         setDraft(d);
+        setPhotoUrls(d.photo_urls ?? []);
         setTitle(str(d.title));
         setBrand(str(d.brand));
         setColor(str(d.color));
@@ -211,7 +221,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       const res = await fetch("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId: params.id, customSku: customSku || undefined }),
+        body: JSON.stringify({ draftId: params.id, customSku: customSku || undefined, isHeavy }),
       });
       const data = await res.json();
       if (data.connect) { setNeedsConnect(true); throw new Error(data.error); }
@@ -233,7 +243,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       }
       setListingUrl(data.url);
       setJustListed(true);
-      setTimeout(() => router.push("/drafts"), 1500);
+      setTimeout(() => router.push("/store"), 1500);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -281,6 +291,87 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
     } finally {
       setReanalyzing(false);
     }
+  }
+
+  async function handleRefreshPrice() {
+    setRefreshingPrice(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/pricing/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, brand, condition }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Pricing failed");
+      if (!data.noData) {
+        if (data.suggestedPrice) setPrice(String(data.suggestedPrice));
+        setDraft((prev) => prev ? { ...prev, avg_sold: data.avgSold ?? prev.avg_sold, sell_odds: data.sellOdds ?? prev.sell_odds } : prev);
+        await fetch(`/api/drafts/${params.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title, brand, color, size, condition, flaws,
+            suggestedPrice: data.suggestedPrice ?? (price ? Number(price) : null),
+            customSku, itemType, style, material, theme,
+            sleevLength, neckline, fit, pattern, description,
+            vintage, character, characterFamily, yearManufactured, season,
+            avgSold: data.avgSold ?? null,
+            sellOdds: data.sellOdds ?? null,
+          }),
+        });
+      }
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRefreshingPrice(false);
+    }
+  }
+
+  function onPhotoPDown(e: React.PointerEvent, idx: number) {
+    pointerStart.current = { x: e.clientX, y: e.clientY };
+    dragIdxRef.current = idx;
+    setDragIdx(idx);
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function onPhotoPMove(e: React.PointerEvent) {
+    if (dragIdxRef.current === null) return;
+    e.preventDefault();
+    for (let i = 0; i < photoRefs.current.length; i++) {
+      const el = photoRefs.current[i];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (e.clientX >= rect.left && e.clientX <= rect.right) {
+        setDropIdx(i);
+        return;
+      }
+    }
+  }
+
+  async function onPhotoPUp(e: React.PointerEvent, url: string) {
+    const start = pointerStart.current;
+    const moved = start && (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8);
+    const currentDrag = dragIdxRef.current;
+    dragIdxRef.current = null;
+
+    if (!moved) {
+      setZoomedPhoto(url);
+    } else if (currentDrag !== null && dropIdx !== null && currentDrag !== dropIdx) {
+      const next = [...photoUrls];
+      const [item] = next.splice(currentDrag, 1);
+      next.splice(dropIdx, 0, item);
+      setPhotoUrls(next);
+      await fetch(`/api/drafts/${params.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] }),
+      });
+    }
+
+    setDragIdx(null);
+    setDropIdx(null);
+    pointerStart.current = null;
   }
 
   async function handleDelete() {
@@ -348,26 +439,59 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         </div>
       )}
 
-      {draft?.photo_urls && draft.photo_urls.length > 0 ? (
-        <div className="flex gap-2 overflow-x-auto -mx-5 px-5 mb-4 snap-x snap-mandatory">
-          {draft.photo_urls.map((url, i) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
+      {zoomedPhoto && (
+        <div
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
+          onClick={() => setZoomedPhoto(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={zoomedPhoto} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
+          <button
+            onClick={() => setZoomedPhoto(null)}
+            className="absolute top-4 right-4 p-2 text-white bg-black/40 rounded-full"
+          >
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+      )}
+
+      {photoUrls.length > 0 ? (
+        <div className="flex gap-2 overflow-x-auto -mx-5 px-5 mb-4">
+          {photoUrls.map((url, i) => (
+            <div
               key={i}
-              src={url}
-              alt={`Photo ${i + 1}`}
-              className="h-52 w-52 object-cover rounded-xl flex-shrink-0 snap-start"
-            />
+              ref={(el) => { photoRefs.current[i] = el; }}
+              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none transition-all${dragIdx === i ? " opacity-40 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--brand-600)]" : ""}`}
+              style={{ width: 208, height: 208, touchAction: "none" }}
+              onPointerDown={(e) => onPhotoPDown(e, i)}
+              onPointerMove={onPhotoPMove}
+              onPointerUp={(e) => onPhotoPUp(e, url)}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" draggable={false} />
+              {photoUrls.length > 1 && (
+                <div className="absolute bottom-1 right-1 bg-black/50 rounded-full px-1.5 py-0.5">
+                  <span className="text-white text-[10px]">{i + 1}/{photoUrls.length}</span>
+                </div>
+              )}
+              {i === 0 && photoUrls.length > 1 && (
+                <div className="absolute top-1 left-1 bg-black/50 rounded px-1.5 py-0.5">
+                  <span className="text-white text-[10px]">Main</span>
+                </div>
+              )}
+            </div>
           ))}
         </div>
       ) : draft?.thumbnail_url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={draft.thumbnail_url}
-          alt={title}
-          className="w-full object-cover rounded-xl mb-4"
-          style={{ maxHeight: 240, objectFit: "cover" }}
-        />
+        <div className="w-full mb-4 cursor-zoom-in" onClick={() => setZoomedPhoto(draft!.thumbnail_url!)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={draft.thumbnail_url}
+            alt={title}
+            className="w-full object-cover rounded-xl"
+            style={{ maxHeight: 240, objectFit: "cover" }}
+          />
+        </div>
       ) : (
         <div className="card flex items-center justify-center mb-4" style={{ height: 160 }}>
           <Shirt className="w-10 h-10 text-[var(--text-tertiary)]" />
@@ -410,19 +534,32 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       </div>
 
       {draft?.avg_sold != null && (
-        <div className="card p-3 mb-4 flex gap-4 text-sm">
-          <div>
-            <p className="text-xs text-[var(--text-secondary)]">Avg sold</p>
-            <p className="font-medium">${draft.avg_sold}</p>
-          </div>
-          {draft.sell_odds && (
+        <div className="card p-3 mb-4 flex items-center gap-4 text-sm">
+          <div className="flex gap-4 flex-1">
             <div>
-              <p className="text-xs text-[var(--text-secondary)]">Sell odds</p>
-              <p className="font-medium" style={{ color: draft.sell_odds === "High" ? "#3B6D11" : undefined }}>
-                {draft.sell_odds}
-              </p>
+              <p className="text-xs text-[var(--text-secondary)]">Avg sold</p>
+              <p className="font-medium">${draft.avg_sold}</p>
             </div>
-          )}
+            {draft.sell_odds && (
+              <div>
+                <p className="text-xs text-[var(--text-secondary)]">Sell odds</p>
+                <p className="font-medium" style={{ color: draft.sell_odds === "High" ? "#3B6D11" : undefined }}>
+                  {draft.sell_odds}
+                </p>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={handleRefreshPrice}
+            disabled={refreshingPrice}
+            className="p-1.5 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
+            title="Refresh pricing"
+          >
+            {refreshingPrice
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--text-secondary)]" />
+              : <RefreshCw className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+            }
+          </button>
         </div>
       )}
 
@@ -471,6 +608,18 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           <select className="input w-full" value={condition} onChange={(e) => setCondition(e.target.value)}>
             {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
+        </div>
+        <div className="flex items-center gap-2 py-1">
+          <input
+            type="checkbox"
+            id="heavy"
+            checked={isHeavy}
+            onChange={(e) => setIsHeavy(e.target.checked)}
+            className="w-4 h-4 rounded accent-[var(--brand-600)]"
+          />
+          <label htmlFor="heavy" className="text-sm text-[var(--text-primary)] cursor-pointer">
+            Heavy item — uses heavy shipping rate
+          </label>
         </div>
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Flaws</label>
@@ -612,7 +761,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
                 style={{ color: "#3B6D11" }}
               >
                 <BadgeCheck className="w-4 h-4" />
-                {justListed ? "Listed! Returning to drafts…" : "Live on eBay — tap to view"}
+                {justListed ? "Listed! Returning to store…" : "Live on eBay — tap to view"}
                 {!justListed && <ExternalLink className="w-3 h-3" />}
               </a>
             </div>

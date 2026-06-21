@@ -51,6 +51,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       year_manufactured: body.yearManufactured ?? null,
       season: body.season ?? null,
       ...(body.ebayListingId !== undefined && { ebay_listing_id: body.ebayListingId }),
+      ...(body.photoUrls !== undefined && { photo_urls: body.photoUrls }),
+      ...(body.thumbnailUrl !== undefined && { thumbnail_url: body.thumbnailUrl }),
+      ...(body.avgSold !== undefined && { avg_sold: body.avgSold }),
+      ...(body.sellOdds !== undefined && { sell_odds: body.sellOdds }),
     })
     .eq("id", params.id)
     .select()
