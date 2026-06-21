@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Shirt, TrendingUp } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, Shirt, TrendingUp } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 type DayRange = 7 | 30 | 90;
@@ -119,7 +119,19 @@ export default function SalesPage() {
                   {s.qty > 1 ? ` · Qty ${s.qty}` : ""}
                 </p>
               </div>
-              <p className="text-sm font-medium text-green-600 flex-shrink-0">${s.total.toFixed(2)}</p>
+              <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                <p className="text-sm font-medium text-green-600">${s.total.toFixed(2)}</p>
+                <a
+                  href={`https://www.ebay.com/itm/${s.listingId}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="flex items-center gap-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--brand-600)]"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  eBay
+                </a>
+              </div>
             </div>
           ))}
         </div>

@@ -121,6 +121,7 @@ export default function NewListingPage() {
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [isHeavy, setIsHeavy] = useState(false);
   const [customPrice, setCustomPrice] = useState("");
+  const [brand, setBrand] = useState("");
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -193,6 +194,7 @@ export default function NewListingPage() {
       setTitle(data.suggestedTitle ?? title);
       setCondition(data.condition ?? condition);
       setFlaws(data.flaws ?? flaws);
+      setBrand(data.brand ?? "");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -226,7 +228,7 @@ export default function NewListingPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title,
-          brand: aiResult?.brand ?? null,
+          brand: brand || aiResult?.brand || null,
           color: aiResult?.color ?? null,
           size: aiResult?.size ?? null,
           condition,
@@ -282,7 +284,7 @@ export default function NewListingPage() {
         await fetch(`/api/drafts/${draftId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, condition, flaws, suggestedPrice: finalPrice }),
+          body: JSON.stringify({ title, brand: brand || aiResult?.brand || null, condition, flaws, suggestedPrice: finalPrice }),
         });
       }
       const res = await fetch("/api/ebay/list", {
@@ -407,7 +409,15 @@ export default function NewListingPage() {
           </p>
           <div className="grid grid-cols-2 gap-2 text-sm">
             <DetectedField label="Item type" value={aiResult.itemType} />
-            <DetectedField label="Brand" value={aiResult.brand} />
+            <div>
+              <p className="text-[11px] text-[var(--text-tertiary)]">Brand</p>
+              <input
+                className="input w-full text-sm py-0.5 px-1.5 mt-0.5"
+                value={brand}
+                onChange={(e) => setBrand(e.target.value)}
+                placeholder="Brand"
+              />
+            </div>
             <DetectedField label="Color" value={aiResult.color} />
             <DetectedField label="Size" value={aiResult.size} />
             {aiResult.material && <DetectedField label="Material" value={aiResult.material} />}
