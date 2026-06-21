@@ -41,7 +41,9 @@ export async function GET() {
         body.match(/<LongMessage>([\s\S]*?)<\/LongMessage>/)?.[1] ??
         body.match(/<ShortMessage>([\s\S]*?)<\/ShortMessage>/)?.[1] ??
         body.slice(0, 300);
-      return NextResponse.json({ error: `eBay error: ${errMsg}` }, { status: 502 });
+      const notConnected = !process.env.EBAY_OAUTH_REFRESH_TOKEN;
+      const isAuth = !notConnected && (errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission"));
+      return NextResponse.json({ error: `eBay error: ${errMsg}`, connect: notConnected, reconnect: isAuth }, { status: 502 });
     }
 
     const totalStr = xmlFind(body, "TotalNumberOfEntries");

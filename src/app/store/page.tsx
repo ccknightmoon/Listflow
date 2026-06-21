@@ -32,6 +32,8 @@ export default function StorePage() {
   const [loading, setLoading] = useState(true);
   const [ebayLoading, setEbayLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [needsConnect, setNeedsConnect] = useState(false);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
@@ -81,7 +83,11 @@ export default function StorePage() {
     try {
       const res = await fetch("/api/ebay/store");
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to load store");
+      if (!res.ok) {
+        setNeedsConnect(!!data.connect);
+        setNeedsReconnect(!!data.reconnect);
+        throw new Error(data.error || "Failed to load store");
+      }
       const ebayListings: StoreListing[] = data.listings ?? [];
       const total: number = data.total ?? ebayListings.length;
       const allActiveIds = new Set(ebayListings.map((l) => l.listingId));
@@ -283,7 +289,11 @@ export default function StorePage() {
       )}
 
       {error && (
-        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>{error}</div>
+        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
+          {error}
+          {needsConnect && <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>}
+          {needsReconnect && <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>}
+        </div>
       )}
       {bulkSuccessMsg && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "#3B6D11" }}>{bulkSuccessMsg}</div>
