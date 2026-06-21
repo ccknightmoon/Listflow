@@ -41,6 +41,7 @@ export default function StorePage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPrice, setBulkPrice] = useState("");
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [bulkSuccessMsg, setBulkSuccessMsg] = useState("");
 
   useEffect(() => { loadAll(); }, []);
 
@@ -173,10 +174,15 @@ export default function StorePage() {
       } catch { failed++; }
     }
     setBulkSaving(false);
+    const succeeded = targets.length - failed;
     setSelected(new Set());
     setSelectMode(false);
     setBulkPrice("");
     if (failed > 0) setError(`${failed} item(s) failed to update`);
+    if (succeeded > 0) {
+      setBulkSuccessMsg(`Updated ${succeeded} item${succeeded !== 1 ? "s" : ""}`);
+      setTimeout(() => setBulkSuccessMsg(""), 3000);
+    }
   }
 
   const q = search.trim().toLowerCase();
@@ -266,6 +272,9 @@ export default function StorePage() {
 
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>{error}</div>
+      )}
+      {bulkSuccessMsg && (
+        <div className="card p-3 mb-4 text-sm" style={{ color: "#3B6D11" }}>{bulkSuccessMsg}</div>
       )}
 
       {loading && (

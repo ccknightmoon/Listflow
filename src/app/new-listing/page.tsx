@@ -122,6 +122,7 @@ export default function NewListingPage() {
   const [isHeavy, setIsHeavy] = useState(false);
   const [customPrice, setCustomPrice] = useState("");
   const [brand, setBrand] = useState("");
+  const [size, setSize] = useState("");
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -195,6 +196,7 @@ export default function NewListingPage() {
       setCondition(data.condition ?? condition);
       setFlaws(data.flaws ?? flaws);
       setBrand(data.brand ?? "");
+      setSize(data.size ?? "");
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -230,7 +232,7 @@ export default function NewListingPage() {
           title,
           brand: brand || aiResult?.brand || null,
           color: aiResult?.color ?? null,
-          size: aiResult?.size ?? null,
+          size: size || aiResult?.size || null,
           condition,
           flaws,
           suggestedPrice: finalPrice,
@@ -284,7 +286,7 @@ export default function NewListingPage() {
         await fetch(`/api/drafts/${draftId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, brand: brand || aiResult?.brand || null, condition, flaws, suggestedPrice: finalPrice }),
+          body: JSON.stringify({ title, brand: brand || aiResult?.brand || null, size: size || aiResult?.size || null, condition, flaws, suggestedPrice: finalPrice }),
         });
       }
       const res = await fetch("/api/ebay/list", {
@@ -419,7 +421,15 @@ export default function NewListingPage() {
               />
             </div>
             <DetectedField label="Color" value={aiResult.color} />
-            <DetectedField label="Size" value={aiResult.size} />
+            <div>
+              <p className="text-[11px] text-[var(--text-tertiary)]">Size</p>
+              <input
+                className="input w-full text-sm py-0.5 px-1.5 mt-0.5"
+                value={size}
+                onChange={(e) => setSize(e.target.value)}
+                placeholder="Size"
+              />
+            </div>
             {aiResult.material && <DetectedField label="Material" value={aiResult.material} />}
             {aiResult.style && <DetectedField label="Style" value={aiResult.style} />}
             {aiResult.pattern && <DetectedField label="Pattern" value={aiResult.pattern} />}
