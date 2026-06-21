@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, ChevronRight } from "lucide-react";
+import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { supabase } from "@/lib/supabase";
 
@@ -16,6 +16,7 @@ interface Stats {
 export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [statsLoaded, setStatsLoaded] = useState(false);
+  const [shipCount, setShipCount] = useState<number | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
 
   useEffect(() => {
@@ -24,6 +25,11 @@ export default function DashboardPage() {
       .then((data) => setStats(data))
       .catch(() => {})
       .finally(() => setStatsLoaded(true));
+
+    fetch("/api/ebay/ship")
+      .then((r) => r.json())
+      .then((data) => { if (!data.error) setShipCount(data.count ?? 0); })
+      .catch(() => {});
 
     supabase.auth.getUser().then(({ data }) => {
       const user = data.user;
@@ -94,6 +100,19 @@ export default function DashboardPage() {
           title="Sales history"
           subtitle="See what you've sold"
         />
+        <QuickAction
+          href="/ship"
+          icon={Package}
+          title="To ship"
+          subtitle={
+            shipCount === null
+              ? "Check pending shipments"
+              : shipCount === 0
+              ? "All caught up"
+              : `${shipCount} item${shipCount !== 1 ? "s" : ""} awaiting shipment`
+          }
+          urgent={shipCount !== null && shipCount > 0}
+        />
       </div>
 
       <BottomNav />
@@ -116,18 +135,22 @@ function QuickAction({
   icon: Icon,
   title,
   subtitle,
+  urgent,
 }: {
   href: string;
   icon: React.ElementType;
   title: string;
   subtitle: string;
+  urgent?: boolean;
 }) {
   return (
     <Link href={href} className="card flex items-center gap-3 p-3">
-      <Icon className="w-5 h-5 text-[var(--text-secondary)]" />
+      <Icon className={`w-5 h-5 ${urgent ? "text-[var(--brand-600)]" : "text-[var(--text-secondary)]"}`} />
       <div className="flex-1">
         <p className="text-sm font-medium">{title}</p>
-        <p className="text-xs text-[var(--text-secondary)]">{subtitle}</p>
+        <p className={`text-xs ${urgent ? "text-[var(--brand-600)] font-medium" : "text-[var(--text-secondary)]"}`}>
+          {subtitle}
+        </p>
       </div>
       <ChevronRight className="w-4 h-4 text-[var(--text-tertiary)]" />
     </Link>
