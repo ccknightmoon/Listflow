@@ -2,6 +2,7 @@
 
 import { useState, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Camera,
@@ -102,6 +103,7 @@ function resizeImage(file: File): Promise<{ dataUrl: string; mediaType: string }
 }
 
 export default function NewListingPage() {
+  const router = useRouter();
   const [photos, setPhotos] = useState<Record<string, SlotImage>>({});
   const [title, setTitle] = useState("");
   const [condition, setCondition] = useState<Condition>("Excellent used");
@@ -115,6 +117,9 @@ export default function NewListingPage() {
   const [savedDraftId, setSavedDraftId] = useState<string | null>(null);
   const [listStatus, setListStatus] = useState<"idle" | "listing" | "listed" | "error">("idle");
   const [listError, setListError] = useState<string | null>(null);
+  const [needsConnect, setNeedsConnect] = useState(false);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
+  const [isHeavy, setIsHeavy] = useState(false);
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -263,21 +268,31 @@ export default function NewListingPage() {
   async function handleListOnEbay() {
     setListStatus("listing");
     setListError(null);
+    setNeedsConnect(false);
+    setNeedsReconnect(false);
     try {
       const draftId = await handleSaveDraft();
       if (!draftId) throw new Error("Could not save draft before listing");
       const res = await fetch("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId }),
+        body: JSON.stringify({ draftId, isHeavy }),
       });
       const data = await res.json();
+      if (data.connect) { setNeedsConnect(true); throw new Error(data.error); }
+      if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error); }
       if (!res.ok) throw new Error(data.error || "Failed to list on eBay");
       setListStatus("listed");
+      setTimeout(() => router.push("/store"), 1500);
     } catch (err) {
       setListStatus("error");
       setListError((err as Error).message);
     }
+  }
+
+  async function handleSaveDraftAndRedirect() {
+    const id = await handleSaveDraft();
+    if (id) setTimeout(() => router.push("/drafts"), 1200);
   }
 
   return (
@@ -329,6 +344,19 @@ export default function NewListingPage() {
             </option>
           ))}
         </select>
+
+        <div className="flex items-center gap-2 py-1">
+          <input
+            type="checkbox"
+            id="heavy"
+            checked={isHeavy}
+            onChange={(e) => setIsHeavy(e.target.checked)}
+            className="w-4 h-4 rounded accent-[var(--brand-600)]"
+          />
+          <label htmlFor="heavy" className="text-sm text-[var(--text-primary)] cursor-pointer">
+            Heavy item — uses heavy shipping rate
+          </label>
+        </div>
 
         <textarea
           className="input"
@@ -425,12 +453,20 @@ export default function NewListingPage() {
               )}
 
               {listError && (
-                <p className="text-xs mb-2" style={{ color: "#B3261E" }}>{listError}</p>
+                <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
+                  {listError}
+                  {needsConnect && (
+                    <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
+                  )}
+                  {needsReconnect && (
+                    <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>
+                  )}
+                </p>
               )}
               <div className="flex gap-2">
                 <button
                   className="btn flex-1"
-                  onClick={() => handleSaveDraft()}
+                  onClick={handleSaveDraftAndRedirect}
                   disabled={saveStatus === "saving" || saveStatus === "saved" || listStatus === "listing"}
                 >
                   {saveStatus === "saving" ? (
