@@ -22,28 +22,71 @@ function xmlFindAll(xml: string, tag: string): string[] {
   return results;
 }
 
+function decodeXml(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function makeSalesXml(from: string, to: string) {
+  return `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetSellerTransactionsRequest>`;
+}
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const days = Math.min(parseInt(searchParams.get("days") ?? "30", 10), 90);
 
-  const from = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  const to = new Date().toISOString();
-
-  const result = await tradingRequest(
-    "GetSellerTransactions",
-    `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetSellerTransactionsRequest>`
-  );
-
-  if (!result.body.includes("<Ack>Success</Ack>")) {
-    const errMsg = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
-    const notConnected = !process.env.EBAY_OAUTH_REFRESH_TOKEN;
-    const isAuth = !notConnected && (errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission"));
-    return NextResponse.json({ error: errMsg, sales: [], connect: notConnected, reconnect: isAuth }, { status: 200 });
+  // eBay caps ModTimeFrom/ModTimeTo at 30 days — split longer ranges into windows
+  const MS_PER_DAY = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const windows: Array<{ from: string; to: string }> = [];
+  let remaining = days;
+  let windowEnd = now;
+  while (remaining > 0) {
+    const chunk = Math.min(remaining, 30);
+    const windowStart = windowEnd - chunk * MS_PER_DAY;
+    windows.push({
+      from: new Date(windowStart).toISOString(),
+      to: new Date(windowEnd).toISOString(),
+    });
+    remaining -= chunk;
+    windowEnd = windowStart;
   }
 
-  const txBlocks = xmlFindAll(result.body, "Transaction");
+  const responses = await Promise.all(
+    windows.map((w) => tradingRequest("GetSellerTransactions", makeSalesXml(w.from, w.to)))
+  );
 
-  const sales = txBlocks.map((tx) => {
+  // Report the first auth/connection error encountered
+  for (const result of responses) {
+    if (!result.body.includes("<Ack>Success</Ack>")) {
+      const raw = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
+      const errMsg = decodeXml(decodeXml(raw));
+      const notConnected = !process.env.EBAY_OAUTH_REFRESH_TOKEN;
+      const isAuth = !notConnected && (errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission"));
+      return NextResponse.json({ error: errMsg, sales: [], connect: notConnected, reconnect: isAuth }, { status: 200 });
+    }
+  }
+
+  // Merge transactions from all windows, dedup by TransactionID
+  const seen = new Set<string>();
+  const allTxBlocks: string[] = [];
+  for (const result of responses) {
+    for (const tx of xmlFindAll(result.body, "Transaction")) {
+      const txId = xmlFind(tx, "TransactionID");
+      const itemId = xmlFind(xmlFind(tx, "Item"), "ItemID");
+      const key = `${itemId}-${txId}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        allTxBlocks.push(tx);
+      }
+    }
+  }
+
+  const sales = allTxBlocks.map((tx) => {
     const itemBlock = xmlFind(tx, "Item");
     const title = xmlFind(itemBlock, "Title") || xmlFind(tx, "Title");
     const listingId = xmlFind(itemBlock, "ItemID");
