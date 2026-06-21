@@ -54,6 +54,8 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       ...(body.photoUrls !== undefined && { photo_urls: body.photoUrls }),
       ...(body.thumbnailUrl !== undefined && { thumbnail_url: body.thumbnailUrl }),
       ...(body.avgSold !== undefined && { avg_sold: body.avgSold }),
+      ...(body.activeRangeLow !== undefined && { active_range_low: body.activeRangeLow }),
+      ...(body.activeRangeHigh !== undefined && { active_range_high: body.activeRangeHigh }),
       ...(body.sellOdds !== undefined && { sell_odds: body.sellOdds }),
     })
     .eq("id", params.id)
