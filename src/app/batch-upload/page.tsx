@@ -482,7 +482,7 @@ export default function BatchUploadPage() {
         getPriceSuggestion(result.condition, Boolean(result.flaws && result.flaws.trim().length > 0));
       const finalPrice = hasRealPricing
         ? suggestion.suggestedPrice
-        : customPrices[index] ? Number(customPrices[index]) : null;
+        : customPrices[index] ? Number(customPrices[index]) : suggestion.suggestedPrice;
 
       // Upload all photos in the group; first becomes the thumbnail
       const photoUrls: string[] = [];
