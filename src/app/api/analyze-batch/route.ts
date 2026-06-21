@@ -26,6 +26,10 @@ respond with ONLY a JSON object (no markdown, no extra text) in this exact shape
   "characterFamily": "franchise/brand of character if any, e.g. 'Disney', 'Nickelodeon', 'Looney Tunes', 'Marvel', 'DC Comics'. Empty string if no character.",
   "yearManufactured": "estimated decade range — one of: Pre-1960, 1960-1969, 1970-1979, 1980-1989, 1990-1999, 2000-2009, 2010-2019, 2020-2029. Base on style, font, printing technique, tag style. Empty string if truly unknown.",
   "season": "one of: All Seasons, Fall, Spring, Summer, Winter. Default to 'All Seasons' for most clothing.",
+  "pitToPit": "TOPS ONLY — armpit to armpit (chest width) read from the measuring tape in the photo, e.g. '22 inches'. Read the tape carefully. Empty string if no tape visible, not a top, or unclear.",
+  "length": "TOPS ONLY — shoulder seam to bottom hem read from the measuring tape, e.g. '28 inches'. Empty string if not visible or not a top.",
+  "waist": "BOTTOMS ONLY — waist measurement from tape. If tape is folded flat across the waistband, double the value shown. Return the full circumference, e.g. '32 inches'. Empty string if not a bottom or not visible.",
+  "inseam": "BOTTOMS ONLY — inseam length read from tape, e.g. '30 inches'. Empty string if not visible or not a bottom.",
   "description": "2-3 sentences, buyer-facing. Describe what the item is, notable design details, who would wear it, and any key selling points. No filler phrases.",
   "suggestedTitle": "eBay listing title — keyword-rich, MAXIMUM 80 characters (count carefully, never exceed 80). Pack in: Brand + Men's/Women's/Unisex + Item Type + Color + Size + keywords like Vintage, Y2K, 90s, Graphic Tee, Band Tee, Streetwear, Distressed, Oversized. No filler phrases. Aim for all 80 characters."
 }`;

@@ -53,6 +53,19 @@ interface AiResult {
   characterFamily?: string;
   yearManufactured?: string;
   season?: string;
+  pitToPit?: string;
+  length?: string;
+  waist?: string;
+  inseam?: string;
+}
+
+function formatMeasurements(r: AiResult): string {
+  const parts: string[] = [];
+  if (r.pitToPit) parts.push(`Pit to pit: ${r.pitToPit}`);
+  if (r.length) parts.push(`Length: ${r.length}`);
+  if (r.waist) parts.push(`Waist: ${r.waist}`);
+  if (r.inseam) parts.push(`Inseam: ${r.inseam}`);
+  return parts.length > 0 ? `Measurements: ${parts.join(", ")}.` : "";
 }
 
 const SLOTS = [
@@ -199,6 +212,13 @@ export default function NewListingPage() {
       setBrand(data.brand ?? "");
       setSize(data.size ?? "");
       setColor(data.color ?? "");
+      // Prepend measurements to description when tape values are detected
+      const measLine = formatMeasurements(data);
+      if (measLine && data.description) {
+        data.description = `${measLine}\n\n${data.description}`;
+      } else if (measLine) {
+        data.description = measLine;
+      }
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -446,6 +466,10 @@ export default function NewListingPage() {
             {aiResult.sleeveLength && <DetectedField label="Sleeve" value={aiResult.sleeveLength} />}
             {aiResult.vintage === "Yes" && <DetectedField label="Vintage" value="Yes" />}
             {aiResult.theme && <DetectedField label="Theme" value={aiResult.theme} />}
+            {aiResult.pitToPit && <DetectedField label="Pit to pit" value={aiResult.pitToPit} />}
+            {aiResult.length && <DetectedField label="Length" value={aiResult.length} />}
+            {aiResult.waist && <DetectedField label="Waist" value={aiResult.waist} />}
+            {aiResult.inseam && <DetectedField label="Inseam" value={aiResult.inseam} />}
           </div>
           {aiResult.description && (
             <p className="text-xs text-[var(--text-secondary)] mt-3 pt-3 border-t border-[var(--border)] leading-relaxed">

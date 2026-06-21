@@ -47,8 +47,21 @@ interface AiResult {
   characterFamily?: string;
   yearManufactured?: string;
   season?: string;
+  pitToPit?: string;
+  length?: string;
+  waist?: string;
+  inseam?: string;
   pricing?: PriceSuggestion;
   error?: string;
+}
+
+function formatMeasurements(r: AiResult): string {
+  const parts: string[] = [];
+  if (r.pitToPit) parts.push(`Pit to pit: ${r.pitToPit}`);
+  if (r.length) parts.push(`Length: ${r.length}`);
+  if (r.waist) parts.push(`Waist: ${r.waist}`);
+  if (r.inseam) parts.push(`Inseam: ${r.inseam}`);
+  return parts.length > 0 ? `Measurements: ${parts.join(", ")}.` : "";
 }
 
 interface Thumbnail {
@@ -533,7 +546,12 @@ export default function BatchUploadPage() {
           neckline: result.neckline ?? null,
           fit: result.fit ?? null,
           pattern: result.pattern ?? null,
-          description: result.description ?? null,
+          description: (() => {
+            const measLine = formatMeasurements(result);
+            if (measLine && result.description) return `${measLine}\n\n${result.description}`;
+            if (measLine) return measLine;
+            return result.description ?? null;
+          })(),
           vintage: result.vintage ?? null,
           theme: result.theme ?? null,
           character: result.character ?? null,
