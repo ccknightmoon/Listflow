@@ -82,8 +82,10 @@ export default function StorePage() {
       const res = await fetch("/api/ebay/store");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load store");
-      const allActiveIds = new Set((data.listings ?? []).map((l: StoreListing) => l.listingId));
-      const ebayItems: StoreListing[] = (data.listings ?? [])
+      const ebayListings: StoreListing[] = data.listings ?? [];
+      const total: number = data.total ?? ebayListings.length;
+      const allActiveIds = new Set(ebayListings.map((l) => l.listingId));
+      const ebayItems: StoreListing[] = ebayListings
         .filter((l: StoreListing) => !supabaseListingIds.has(l.listingId))
         .map((l: StoreListing) => ({
           listingId: l.listingId,
@@ -94,11 +96,16 @@ export default function StorePage() {
           startTime: l.startTime,
           draftId: null,
         }));
-      // Remove Supabase items that are no longer active on eBay (sold/ended)
-      setListings((prev) => [
-        ...prev.filter((l) => allActiveIds.has(l.listingId)),
-        ...ebayItems,
-      ]);
+      // Only filter out sold items when we have the complete eBay listing set
+      // (skip if paginated response is incomplete to avoid false negatives)
+      if (total <= ebayListings.length) {
+        setListings((prev) => [
+          ...prev.filter((l) => allActiveIds.has(l.listingId)),
+          ...ebayItems,
+        ]);
+      } else {
+        setListings((prev) => [...prev, ...ebayItems]);
+      }
     } catch (err) {
       // Only show error if Supabase also returned nothing
       setListings((prev) => {
