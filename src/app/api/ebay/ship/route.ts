@@ -57,6 +57,8 @@ export async function GET() {
       const transactionId = xmlFind(tx, "TransactionID");
       const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
       const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
+      const pictureDetails = xmlFind(itemBlock, "PictureDetails");
+      const galleryUrl = xmlFind(pictureDetails, "GalleryURL") || xmlFind(itemBlock, "GalleryURL") || null;
 
       const buyerBlock = xmlFind(tx, "Buyer");
       const buyerInfoBlock = xmlFind(buyerBlock, "BuyerInfo");
@@ -83,6 +85,7 @@ export async function GET() {
         paidAt: paidTime,
         address,
         thumbnail: null as string | null,
+        galleryUrl,
       };
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -98,7 +101,11 @@ export async function GET() {
     if (drafts?.length) {
       const thumbMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.thumbnail_url as string | null]));
       for (const item of items) {
-        item.thumbnail = thumbMap.get(item.listingId) ?? null;
+        item.thumbnail = thumbMap.get(item.listingId) ?? item.galleryUrl;
+      }
+    } else {
+      for (const item of items) {
+        item.thumbnail = item.galleryUrl;
       }
     }
   }

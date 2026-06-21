@@ -50,10 +50,12 @@ export async function GET(req: Request) {
     const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
     const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
     const soldAt = xmlFind(tx, "CreatedDate");
-    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null };
+    const pictureDetails = xmlFind(itemBlock, "PictureDetails");
+    const galleryUrl = xmlFind(pictureDetails, "GalleryURL") || xmlFind(itemBlock, "GalleryURL") || null;
+    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null, galleryUrl };
   }).filter((s) => s.price > 0);
 
-  // Look up thumbnails from Supabase for items listed through Listflow
+  // Look up thumbnails from Supabase; fall back to eBay gallery image
   if (sales.length > 0) {
     const listingIds = sales.map((s) => s.listingId).filter(Boolean);
     const { data: drafts } = await supabase
@@ -64,7 +66,11 @@ export async function GET(req: Request) {
     if (drafts && drafts.length > 0) {
       const thumbMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.thumbnail_url as string | null]));
       for (const sale of sales) {
-        sale.thumbnail = thumbMap.get(sale.listingId) ?? null;
+        sale.thumbnail = thumbMap.get(sale.listingId) ?? sale.galleryUrl;
+      }
+    } else {
+      for (const sale of sales) {
+        sale.thumbnail = sale.galleryUrl;
       }
     }
   }
