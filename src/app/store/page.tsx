@@ -119,6 +119,7 @@ export default function StorePage() {
       const data = await res.json();
       if (res.ok) {
         setListings((prev) => prev.filter((l) => l.listingId !== listing.listingId));
+        window.dispatchEvent(new Event("listflow:counts-changed"));
       } else {
         setError(data.error ?? "Failed to delist");
       }

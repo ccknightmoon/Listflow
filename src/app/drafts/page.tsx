@@ -127,6 +127,7 @@ export default function DraftsPage() {
     }
 
     setListStatus("done");
+    window.dispatchEvent(new Event("listflow:counts-changed"));
     await loadDrafts();
     setTimeout(() => {
       setListStatus("idle");

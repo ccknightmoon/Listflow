@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Home, FileText, Store, LogOut } from "lucide-react";
 import { createBrowserClient } from "@supabase/ssr";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const navItems = [
   { href: "/dashboard", icon: Home, label: "Home" },
@@ -22,17 +22,24 @@ export default function BottomNav() {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
   );
 
+  async function fetchCounts() {
+    const [draftsRes, storeRes] = await Promise.all([
+      supabase.from("drafts").select("id", { count: "exact", head: true }).is("ebay_listing_id", null),
+      supabase.from("drafts").select("id", { count: "exact", head: true }).not("ebay_listing_id", "is", null),
+    ]);
+    setCounts({ drafts: draftsRes.count ?? 0, store: storeRes.count ?? 0 });
+  }
+
+  const fetchCountsRef = useRef(fetchCounts);
+  fetchCountsRef.current = fetchCounts;
+
+  useEffect(() => { fetchCounts(); }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
-    async function fetchCounts() {
-      const [draftsRes, storeRes] = await Promise.all([
-        supabase.from("drafts").select("id", { count: "exact", head: true }).is("ebay_listing_id", null),
-        supabase.from("drafts").select("id", { count: "exact", head: true }).not("ebay_listing_id", "is", null),
-      ]);
-      setCounts({ drafts: draftsRes.count ?? 0, store: storeRes.count ?? 0 });
-    }
-    fetchCounts();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pathname]);
+    const handler = () => fetchCountsRef.current();
+    window.addEventListener("listflow:counts-changed", handler);
+    return () => window.removeEventListener("listflow:counts-changed", handler);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSignOut() {
     await supabase.auth.signOut();

@@ -246,6 +246,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       setListingUrl(data.url);
       setJustListed(true);
       localStorage.removeItem(`heavy-${params.id}`);
+      window.dispatchEvent(new Event("listflow:counts-changed"));
       setTimeout(() => router.push("/store"), 1500);
     } catch (err) {
       setError((err as Error).message);

@@ -571,6 +571,7 @@ export default function BatchUploadPage() {
       if (data.reconnect) { setNeedsEbayReconnect(true); throw new Error(data.error ?? "Listing failed"); }
       if (!res.ok) throw new Error(data.error ?? "Listing failed");
       setListStatus((prev) => ({ ...prev, [index]: "listed" }));
+      window.dispatchEvent(new Event("listflow:counts-changed"));
       return true;
     } catch (err) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
@@ -889,7 +890,15 @@ export default function BatchUploadPage() {
                 )}
                 <div className="px-4 pb-4">
                   <div className="mb-3 mt-2">
-                    <p className="text-sm font-medium">{result.suggestedTitle}</p>
+                    <input
+                      className="input w-full text-sm font-medium mb-1"
+                      value={result.suggestedTitle}
+                      disabled={!!draftIds[i]}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setResults((prev) => prev.map((r, j) => j === i ? { ...r, suggestedTitle: val } : r));
+                      }}
+                    />
                     <p className="text-xs text-[var(--text-secondary)]">
                       {result.brand} &middot; {result.color} &middot; {result.size}
                     </p>

@@ -285,6 +285,7 @@ export default function NewListingPage() {
       if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error); }
       if (!res.ok) throw new Error(data.error || "Failed to list on eBay");
       setListStatus("listed");
+      window.dispatchEvent(new Event("listflow:counts-changed"));
       setTimeout(() => router.push("/store"), 1500);
     } catch (err) {
       setListStatus("error");
