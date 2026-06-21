@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Loader2, Shirt, TrendingUp } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, RefreshCw, Shirt, TrendingUp } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 
 type DayRange = 7 | 30 | 90;
@@ -53,6 +53,16 @@ export default function SalesPage() {
             <p className="text-xs text-[var(--text-secondary)]">{sales.length} sale{sales.length !== 1 ? "s" : ""} in last {days} days</p>
           )}
         </div>
+        <button
+          onClick={() => load(days)}
+          disabled={loading}
+          className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
+        >
+          {loading
+            ? <Loader2 className="w-4 h-4 animate-spin text-[var(--text-secondary)]" />
+            : <RefreshCw className="w-4 h-4 text-[var(--text-secondary)]" />
+          }
+        </button>
       </div>
 
       <div className="flex gap-2 mb-4">

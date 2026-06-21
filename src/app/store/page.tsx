@@ -82,6 +82,7 @@ export default function StorePage() {
       const res = await fetch("/api/ebay/store");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load store");
+      const allActiveIds = new Set((data.listings ?? []).map((l: StoreListing) => l.listingId));
       const ebayItems: StoreListing[] = (data.listings ?? [])
         .filter((l: StoreListing) => !supabaseListingIds.has(l.listingId))
         .map((l: StoreListing) => ({
@@ -93,7 +94,11 @@ export default function StorePage() {
           startTime: l.startTime,
           draftId: null,
         }));
-      setListings((prev) => [...prev, ...ebayItems]);
+      // Remove Supabase items that are no longer active on eBay (sold/ended)
+      setListings((prev) => [
+        ...prev.filter((l) => allActiveIds.has(l.listingId)),
+        ...ebayItems,
+      ]);
     } catch (err) {
       // Only show error if Supabase also returned nothing
       setListings((prev) => {
