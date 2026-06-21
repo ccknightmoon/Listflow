@@ -133,7 +133,8 @@ export default function DraftsPage() {
       setListStatus("idle");
       setListProgress(0);
       setSelected(new Set());
-    }, 2500);
+      router.push("/store");
+    }, 1500);
   }
 
   const q = search.trim().toLowerCase();

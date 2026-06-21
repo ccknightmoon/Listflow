@@ -921,6 +921,17 @@ export default function BatchUploadPage() {
                     <p className="text-xs text-[var(--text-secondary)]">
                       {result.brand} &middot; {result.color} &middot; {result.size}
                     </p>
+                    <textarea
+                      className="input w-full text-xs mt-1"
+                      rows={2}
+                      placeholder="Flaws (e.g. small stain on sleeve)"
+                      value={result.flaws}
+                      disabled={!!draftIds[i]}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setResults((prev) => prev.map((r, j) => j === i ? { ...r, flaws: val } : r));
+                      }}
+                    />
                   </div>
 
                   <div className="flex items-baseline gap-2 mb-2">
