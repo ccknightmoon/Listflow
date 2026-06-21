@@ -273,8 +273,18 @@ export default function NewListingPage() {
     setNeedsConnect(false);
     setNeedsReconnect(false);
     try {
+      const existingId = savedDraftId;
       const draftId = await handleSaveDraft();
       if (!draftId) throw new Error("Could not save draft before listing");
+      if (existingId) {
+        const { suggestedPrice } = result ?? {};
+        const finalPrice = suggestedPrice ?? (customPrice ? Number(customPrice) : null);
+        await fetch(`/api/drafts/${draftId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, condition, flaws, suggestedPrice: finalPrice }),
+        });
+      }
       const res = await fetch("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
