@@ -394,7 +394,10 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   if (loading) {
     return (
       <main className="min-h-screen max-w-md mx-auto px-5 pt-6">
-        <div className="card p-8 text-center mt-8">
+        <Link href="/drafts" className="inline-flex mb-4">
+          <ArrowLeft className="w-5 h-5" />
+        </Link>
+        <div className="card p-8 text-center">
           <Loader2 className="w-6 h-6 mx-auto animate-spin" />
         </div>
       </main>
@@ -404,7 +407,10 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   if (error && !draft) {
     return (
       <main className="min-h-screen max-w-md mx-auto px-5 pt-6">
-        <div className="card p-4 mt-8" style={{ color: "#B3261E" }}>{error}</div>
+        <Link href="/drafts" className="inline-flex mb-4">
+          <ArrowLeft className="w-5 h-5" />
+        </Link>
+        <div className="card p-4" style={{ color: "#B3261E" }}>{error}</div>
       </main>
     );
   }

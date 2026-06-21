@@ -931,7 +931,16 @@ export default function BatchUploadPage() {
                         }}
                       />
                       <p className="text-xs text-[var(--text-secondary)] self-center px-1">&middot;</p>
-                      <p className="text-xs text-[var(--text-secondary)] self-center">{result.color}</p>
+                      <input
+                        className="input text-xs w-20"
+                        placeholder="Color"
+                        value={result.color}
+                        disabled={!!draftIds[i]}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setResults((prev) => prev.map((r, j) => j === i ? { ...r, color: val } : r));
+                        }}
+                      />
                       <p className="text-xs text-[var(--text-secondary)] self-center px-1">&middot;</p>
                       <input
                         className="input text-xs w-16"
