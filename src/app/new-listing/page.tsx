@@ -120,6 +120,7 @@ export default function NewListingPage() {
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [isHeavy, setIsHeavy] = useState(false);
+  const [customPrice, setCustomPrice] = useState("");
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -218,6 +219,7 @@ export default function NewListingPage() {
       }
 
       const { suggestedPrice, avgSold, activeRangeLow, activeRangeHigh, sellOdds } = result ?? {};
+      const finalPrice = suggestedPrice ?? (customPrice ? Number(customPrice) : null);
 
       const res = await fetch("/api/drafts", {
         method: "POST",
@@ -229,7 +231,7 @@ export default function NewListingPage() {
           size: aiResult?.size ?? null,
           condition,
           flaws,
-          suggestedPrice: suggestedPrice ?? null,
+          suggestedPrice: finalPrice,
           avgSold: avgSold ?? null,
           activeRangeLow: activeRangeLow ?? null,
           activeRangeHigh: activeRangeHigh ?? null,
@@ -426,9 +428,21 @@ export default function NewListingPage() {
           ) : result ? (
             <>
               {result.noData ? (
-                <p className="text-sm text-[var(--text-secondary)] py-2 mb-3">
-                  No eBay comps found for this item. Set your own price.
-                </p>
+                <div className="py-2 mb-3">
+                  <p className="text-sm text-[var(--text-secondary)] mb-2">No eBay comps found. Set your own price:</p>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={customPrice}
+                      onChange={(e) => setCustomPrice(e.target.value)}
+                      className="input w-full pl-6"
+                    />
+                  </div>
+                </div>
               ) : (
                 <>
                   <p className="text-2xl font-medium mb-3">${result.suggestedPrice}</p>

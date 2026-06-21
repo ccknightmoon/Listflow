@@ -136,6 +136,8 @@ export default function BatchUploadPage() {
   const [draftIds, setDraftIds] = useState<Record<number, string>>({});
   const [listStatus, setListStatus] = useState<Record<number, "idle" | "saving" | "listing" | "listed" | "error">>({});
   const [listErrors, setListErrors] = useState<Record<number, string>>({});
+  const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
+  const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
   const [listingAll, setListingAll] = useState(false);
   const [listingAllProgress, setListingAllProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -560,6 +562,8 @@ export default function BatchUploadPage() {
         body: JSON.stringify({ draftId: id }),
       });
       const data = await res.json();
+      if (data.connect) { setNeedsEbayConnect(true); throw new Error(data.error ?? "Listing failed"); }
+      if (data.reconnect) { setNeedsEbayReconnect(true); throw new Error(data.error ?? "Listing failed"); }
       if (!res.ok) throw new Error(data.error ?? "Listing failed");
       setListStatus((prev) => ({ ...prev, [index]: "listed" }));
     } catch (err) {
@@ -929,6 +933,12 @@ export default function BatchUploadPage() {
                   {listStatus[i] === "error" && listErrors[i] && (
                     <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
                       {listErrors[i]}
+                      {needsEbayConnect && (
+                        <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
+                      )}
+                      {needsEbayReconnect && (
+                        <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>
+                      )}
                     </p>
                   )}
 
