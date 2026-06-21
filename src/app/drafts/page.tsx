@@ -127,6 +127,7 @@ export default function DraftsPage() {
     }
 
     setListStatus("done");
+    await loadDrafts();
     setTimeout(() => {
       setListStatus("idle");
       setListProgress(0);

@@ -104,6 +104,8 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         const d: Draft = data.draft;
         setDraft(d);
         setPhotoUrls(d.photo_urls ?? []);
+        const savedHeavy = localStorage.getItem(`heavy-${params.id}`);
+        if (savedHeavy) setIsHeavy(JSON.parse(savedHeavy));
         setTitle(str(d.title));
         setBrand(str(d.brand));
         setColor(str(d.color));
@@ -243,6 +245,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       }
       setListingUrl(data.url);
       setJustListed(true);
+      localStorage.removeItem(`heavy-${params.id}`);
       setTimeout(() => router.push("/store"), 1500);
     } catch (err) {
       setError((err as Error).message);
@@ -533,6 +536,20 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         </button>
       </div>
 
+      {draft?.avg_sold == null && title && (
+        <button
+          onClick={handleRefreshPrice}
+          disabled={refreshingPrice}
+          className="card p-3 mb-4 w-full flex items-center gap-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+        >
+          {refreshingPrice
+            ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            : <RefreshCw className="w-3.5 h-3.5" />
+          }
+          {refreshingPrice ? "Getting pricing..." : "Get pricing estimate"}
+        </button>
+      )}
+
       {draft?.avg_sold != null && (
         <div className="card p-3 mb-4 flex items-center gap-4 text-sm">
           <div className="flex gap-4 flex-1">
@@ -614,7 +631,10 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             type="checkbox"
             id="heavy"
             checked={isHeavy}
-            onChange={(e) => setIsHeavy(e.target.checked)}
+            onChange={(e) => {
+              setIsHeavy(e.target.checked);
+              localStorage.setItem(`heavy-${params.id}`, JSON.stringify(e.target.checked));
+            }}
             className="w-4 h-4 rounded accent-[var(--brand-600)]"
           />
           <label htmlFor="heavy" className="text-sm text-[var(--text-primary)] cursor-pointer">
