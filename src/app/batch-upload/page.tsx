@@ -147,6 +147,7 @@ export default function BatchUploadPage() {
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
   const [customPrices, setCustomPrices] = useState<Record<number, string>>({});
+  const [heavyItems, setHeavyItems] = useState<Record<number, boolean>>({});
   const [listingAll, setListingAll] = useState(false);
   const [listingAllProgress, setListingAllProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -573,7 +574,7 @@ export default function BatchUploadPage() {
       const res = await fetch("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId: id }),
+        body: JSON.stringify({ draftId: id, isHeavy: heavyItems[index] ?? false }),
       });
       const data = await res.json();
       if (data.connect) { setNeedsEbayConnect(true); throw new Error(data.error ?? "Listing failed"); }
@@ -964,6 +965,19 @@ export default function BatchUploadPage() {
                         setResults((prev) => prev.map((r, j) => j === i ? { ...r, flaws: val } : r));
                       }}
                     />
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        type="checkbox"
+                        id={`heavy-${i}`}
+                        checked={heavyItems[i] ?? false}
+                        disabled={!!draftIds[i]}
+                        onChange={(e) => setHeavyItems((prev) => ({ ...prev, [i]: e.target.checked }))}
+                        className="w-4 h-4 rounded accent-[var(--brand-600)]"
+                      />
+                      <label htmlFor={`heavy-${i}`} className="text-xs text-[var(--text-secondary)] cursor-pointer">
+                        Heavy item — uses heavy shipping rate
+                      </label>
+                    </div>
                   </div>
 
                   <div className="flex items-baseline gap-2 mb-2">
