@@ -9,7 +9,7 @@ AI-powered eBay listing assistant for resellers. Snap photos of items → AI ide
 | Framework | Next.js 14 (App Router, TypeScript) |
 | Styling | Tailwind CSS |
 | Icons | Lucide React |
-| AI | OpenAI GPT-4o (vision) |
+| AI | OpenAI GPT-4o-mini (vision) |
 | Database | Supabase (PostgreSQL) |
 | Deployment | Vercel |
 
@@ -17,38 +17,60 @@ Environment variables required:
 - `OPENAI_API_KEY` — server-side only
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `EBAY_CLIENT_ID`, `EBAY_CLIENT_SECRET`, `EBAY_OAUTH_REFRESH_TOKEN`, `EBAY_RUNAME`
+- `EBAY_SHIPPING_FREE_ID`, `EBAY_SHIPPING_HEAVY_ID`, `EBAY_RETURN_POLICY_ID`
 
 ## What's Built
 
 ### Pages
 - `/` — Landing/splash page
-- `/login` — Sign-in form (static, bypasses to dashboard)
-- `/dashboard` — Stats overview (drafts, active listings, weekly revenue) + quick action cards
-- `/new-listing` — Single item flow: 3-photo slots (front, measurements, flaws) → AI analysis → pricing
-- `/batch-upload` — Multi-item workflow with AI photo grouping → manual review → bulk analysis → results
-- `/drafts` — Draft management with thumbnails and pricing info
-- `/membership` — Pricing plans (Starter free / Pro $29 / Power $59), UI only
+- `/login` — Supabase sign-in/sign-up
+- `/dashboard` — Live stats (drafts, active listings, weekly revenue + sold count) + quick action cards. "To ship" card shows urgent badge when items are awaiting shipment.
+- `/new-listing` — Single item flow: 3-photo slots (front, measurements, flaws) → AI analysis + live pricing in parallel → save draft / list on eBay
+- `/batch-upload` — Multi-item workflow: upload → AI photo grouping → manual review → bulk analysis → results with bulk list/save actions
+- `/drafts` — Unlisted drafts with thumbnails, pricing info, no-price warning, bulk delete, bulk list with price guard
+- `/drafts/[id]` — Edit draft, AI suggest specifics, re-analyze with new photos, list / relist on eBay
+- `/store` — All active eBay listings (Supabase + eBay merged). Search, sort, inline price edit, bulk price update, delist.
+- `/sales` — Sales history with 7d/30d/90d toggle, total revenue, per-item thumbnails
+- `/ship` — Items paid but not yet shipped: buyer name/address, days-since-payment badge, Ship → link to eBay order
+- `/membership` — Pricing plans UI only (Stripe deferred)
 
 ### API Routes
-- `POST /api/analyze-item` — GPT-4o vision analysis of 1–3 photos; returns item type, brand, color, size, condition, flaws, suggested title
+- `POST /api/analyze-item` — GPT-4o-mini vision, 1–3 photos; returns itemType, brand, color, size, condition, flaws, title, style, material, pattern, fit, vintage, theme, character, yearManufactured, season, description, and measurements (pitToPit, length, waist, inseam read from measuring tape in photo)
 - `POST /api/analyze-batch` — Sequential batch analysis with rate limit handling and retry logic
-- `POST /api/group-photos` — AI clusters mixed uploaded photos into per-item groups (15-photo chunks)
-- `GET|POST /api/drafts` — Supabase CRUD for saved drafts
+- `POST /api/group-photos` — GPT-4o clusters mixed uploaded photos into per-item groups
+- `GET|POST|DELETE /api/drafts` — Supabase CRUD for saved drafts
+- `GET /api/drafts/[id]` / `PATCH /api/drafts/[id]` / `DELETE /api/drafts/[id]`
+- `POST /api/ai/suggest-specifics` — fills eBay item specifics from existing draft fields
+- `POST /api/pricing/suggest` — live pricing via eBay Browse API (image search → text fallback → condition-adjusted median)
+- `GET /api/ebay/ship` — paid-but-unshipped orders from GetSellerTransactions
+- `GET /api/ebay/sales?days=7|30|90` — sales history (multi-window for 90d eBay cap)
+- `GET /api/ebay/store` — active listings via GetMyeBaySelling
+- `GET /api/ebay/inventory` — Supabase-sourced listings (instant load for store page)
+- `POST /api/ebay/list` — full listing flow: upsert inventory → create/update offer → publish
+- `POST /api/ebay/delist` — end listing, clear from Supabase
+- `POST /api/ebay/update-price` — ReviseFixedPriceItem + update Supabase
+- `GET /api/ebay/connect` / `GET /api/ebay/callback` — OAuth flow
+- `GET /api/dashboard/stats` — aggregated stats for dashboard
 
 ### Notable Implementation Details
+- **node:https for all eBay + OpenAI calls** — Next.js 14 patches `globalThis.fetch` which breaks repeated outbound HTTPS. All external API calls use `node:https` directly. Every route using it must export `runtime = "nodejs"`.
+- **eBay Trading API URL**: `https://api.ebay.com/ws/api.dll` (not `/ws/services`)
 - Client-side image resizing before upload (max 1568px) to reduce API token cost
 - Batch upload uses explicit step state machine: `upload → grouping → review → analyzing → results`
 - Sequential (not parallel) batch processing to respect OpenAI rate limits; 3 retries with 15s delay on rate-limit errors
-- `src/lib/pricing.ts` exports `getPriceSuggestion()` — currently returns mock data, designed to be swapped for real eBay API calls without touching UI code
-- `src/lib/supabase.ts` — Supabase client
-- `drafts` table stores title, brand, color, size, condition, flaws, suggested_price, avg_sold, thumbnail URL
+- AI measurements injected as first line of `description` field — not stored as separate DB columns
+- GetSellerTransactions requires `<DetailLevel>ReturnAll</DetailLevel>` to return GalleryURL
+- GetSellerTransactions ModTime cap is 30 days — 90d history uses parallel window calls merged with dedup
+- Shipping is binary: free (`EBAY_SHIPPING_FREE_ID`) or heavy (`EBAY_SHIPPING_HEAVY_ID`) flat rate
+- All eBay-dependent pages return `connect`/`reconnect` flags for missing/expired token UI
 
-## What's Missing
+### Supabase drafts table columns
+id, title, brand, color, size, condition, flaws, suggested_price, avg_sold, sell_odds, thumbnail_url, custom_sku, item_type, style, material, theme, sleeve_length, neckline, fit, pattern, description, ebay_listing_id, photo_urls, vintage, character, character_family, year_manufactured, season, created_at
 
-| Feature | Status | Notes |
-|---|---|---|
-| **Auth** | Not wired up | Login page is static; needs Supabase auth integrated |
-| **Real pricing** | Mock data | Replace `getPriceSuggestion()` in `src/lib/pricing.ts` with eBay Browse API + Marketplace Insights API |
-| **eBay posting** | UI only | "List on eBay" button exists; needs eBay Inventory API + OAuth flow |
-| **Stripe billing** | UI only | Membership page shows plans but has no payment integration |
-| **Cloud photo storage** | Not implemented | Photos are currently base64 in-memory; needs Supabase Storage, S3, or Cloudflare R2 |
+## Deferred
+
+| Feature | Notes |
+|---|---|
+| **Stripe billing** | Membership page is UI only — deferred until all features are working |
+| **Heavy shipping per-item cost** | Currently a flat rate; next session: decide between flat rate vs per-item price input field |
