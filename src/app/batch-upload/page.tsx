@@ -932,7 +932,16 @@ export default function BatchUploadPage() {
                       <p className="text-xs text-[var(--text-secondary)] self-center px-1">&middot;</p>
                       <p className="text-xs text-[var(--text-secondary)] self-center">{result.color}</p>
                       <p className="text-xs text-[var(--text-secondary)] self-center px-1">&middot;</p>
-                      <p className="text-xs text-[var(--text-secondary)] self-center">{result.size}</p>
+                      <input
+                        className="input text-xs w-16"
+                        placeholder="Size"
+                        value={result.size}
+                        disabled={!!draftIds[i]}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setResults((prev) => prev.map((r, j) => j === i ? { ...r, size: val } : r));
+                        }}
+                      />
                     </div>
                     <textarea
                       className="input w-full text-xs mt-1"

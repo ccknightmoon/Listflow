@@ -108,6 +108,7 @@ export default function DraftsPage() {
     setListStatus("listing");
     setListProgress(0);
 
+    let successCount = 0;
     for (let i = 0; i < ids.length; i++) {
       try {
         const res = await fetch("/api/ebay/list", {
@@ -118,6 +119,8 @@ export default function DraftsPage() {
         if (!res.ok) {
           const data = await res.json();
           setError(`Item ${i + 1} failed: ${data.error ?? "Unknown error"}`);
+        } else {
+          successCount++;
         }
       } catch {
         setError(`Item ${i + 1} failed: network error`);
@@ -133,7 +136,7 @@ export default function DraftsPage() {
       setListStatus("idle");
       setListProgress(0);
       setSelected(new Set());
-      router.push("/store");
+      if (successCount > 0) router.push("/store");
     }, 1500);
   }
 
