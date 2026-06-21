@@ -138,6 +138,7 @@ export default function BatchUploadPage() {
   const [listErrors, setListErrors] = useState<Record<number, string>>({});
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
+  const [customPrices, setCustomPrices] = useState<Record<number, string>>({});
   const [listingAll, setListingAll] = useState(false);
   const [listingAllProgress, setListingAllProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -475,9 +476,13 @@ export default function BatchUploadPage() {
       const result = results[index];
       const group = groups[index] ?? [];
 
+      const hasRealPricing = result.pricing && !result.pricing.noData;
       const suggestion: PriceSuggestion =
-        result.pricing ??
+        (hasRealPricing ? result.pricing : null) ??
         getPriceSuggestion(result.condition, Boolean(result.flaws && result.flaws.trim().length > 0));
+      const finalPrice = hasRealPricing
+        ? suggestion.suggestedPrice
+        : customPrices[index] ? Number(customPrices[index]) : null;
 
       // Upload all photos in the group; first becomes the thumbnail
       const photoUrls: string[] = [];
@@ -504,11 +509,11 @@ export default function BatchUploadPage() {
           size: result.size,
           condition: result.condition,
           flaws: result.flaws,
-          suggestedPrice: suggestion.suggestedPrice,
-          avgSold: suggestion.avgSold,
-          activeRangeLow: suggestion.activeRangeLow,
-          activeRangeHigh: suggestion.activeRangeHigh,
-          sellOdds: suggestion.sellOdds,
+          suggestedPrice: finalPrice,
+          avgSold: hasRealPricing ? suggestion.avgSold : null,
+          activeRangeLow: hasRealPricing ? suggestion.activeRangeLow : null,
+          activeRangeHigh: hasRealPricing ? suggestion.activeRangeHigh : null,
+          sellOdds: hasRealPricing ? suggestion.sellOdds : null,
           thumbnailUrl,
           photoUrls: photoUrls.length > 0 ? photoUrls : null,
           itemType: result.itemType ?? null,
@@ -541,7 +546,7 @@ export default function BatchUploadPage() {
     }
   }
 
-  async function handleListOnEbay(index: number) {
+  async function handleListOnEbay(index: number): Promise<boolean> {
     let id = draftIds[index];
     if (!id) {
       setListStatus((prev) => ({ ...prev, [index]: "saving" }));
@@ -549,7 +554,7 @@ export default function BatchUploadPage() {
       if (!saved) {
         setListStatus((prev) => ({ ...prev, [index]: "error" }));
         setListErrors((prev) => ({ ...prev, [index]: "Failed to save draft" }));
-        return;
+        return false;
       }
       id = saved;
     }
@@ -566,9 +571,11 @@ export default function BatchUploadPage() {
       if (data.reconnect) { setNeedsEbayReconnect(true); throw new Error(data.error ?? "Listing failed"); }
       if (!res.ok) throw new Error(data.error ?? "Listing failed");
       setListStatus((prev) => ({ ...prev, [index]: "listed" }));
+      return true;
     } catch (err) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
       setListErrors((prev) => ({ ...prev, [index]: (err as Error).message }));
+      return false;
     }
   }
 
@@ -580,14 +587,17 @@ export default function BatchUploadPage() {
     setListingAll(true);
     setListingAllProgress({ done: 0, total: indices.length });
 
+    let successCount = 0;
     for (let n = 0; n < indices.length; n++) {
-      await handleListOnEbay(indices[n]);
+      const ok = await handleListOnEbay(indices[n]);
+      if (ok) successCount++;
       setListingAllProgress({ done: n + 1, total: indices.length });
       if (n < indices.length - 1) await delay(1000);
     }
 
     setListingAll(false);
     setListingAllProgress(null);
+    if (successCount > 0) setTimeout(() => router.push("/store"), 1500);
   }
 
   return (
@@ -911,6 +921,21 @@ export default function BatchUploadPage() {
                       </>
                     )}
                   </div>
+
+                  {pricingNoData && (
+                    <div className="relative mb-3">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="Set your price"
+                        value={customPrices[i] ?? ""}
+                        onChange={(e) => setCustomPrices((prev) => ({ ...prev, [i]: e.target.value }))}
+                        className="input w-full pl-6"
+                      />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-3 gap-2 mb-3">
                     <MiniStat label="Market price" value={pricingReady ? `$${suggestion.avgSold}` : "—"} />
