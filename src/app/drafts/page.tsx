@@ -40,6 +40,7 @@ export default function DraftsPage() {
   const [listProgress, setListProgress] = useState(0);
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
+  const [heavyIds, setHeavyIds] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
 
@@ -52,7 +53,9 @@ export default function DraftsPage() {
       const res = await fetch("/api/drafts");
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load drafts");
-      setDrafts((data.drafts ?? []).filter((d: { ebay_listing_id?: string | null }) => !d.ebay_listing_id) as Draft[]);
+      const loaded = (data.drafts ?? []).filter((d: { ebay_listing_id?: string | null }) => !d.ebay_listing_id) as Draft[];
+      setDrafts(loaded);
+      setHeavyIds(new Set(loaded.filter((d) => JSON.parse(localStorage.getItem(`heavy-${d.id}`) ?? "false")).map((d) => d.id)));
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -116,7 +119,7 @@ export default function DraftsPage() {
         const res = await fetch("/api/ebay/list", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ draftId: ids[i] }),
+          body: JSON.stringify({ draftId: ids[i], isHeavy: heavyIds.has(ids[i]) }),
         });
         if (!res.ok) {
           const data = await res.json();
@@ -255,6 +258,7 @@ export default function DraftsPage() {
           <div className="flex flex-col gap-2 mb-6">
             {filtered.map((d) => {
               const isSelected = selected.has(d.id);
+              const isHeavy = heavyIds.has(d.id);
               return (
                 <div
                   key={d.id}
@@ -293,6 +297,9 @@ export default function DraftsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium truncate">{d.title ?? "Untitled item"}</p>
+                      {isHeavy && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-medium" style={{ background: "#F3F4F6", color: "var(--text-secondary)" }}>Heavy</span>
+                      )}
                     </div>
                     <p className="text-xs mt-0.5" style={{ color: d.suggested_price == null ? "#D97706" : "var(--text-secondary)" }}>
                       {d.suggested_price != null ? `$${d.suggested_price}` : "No price set"}
