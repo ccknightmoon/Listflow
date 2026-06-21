@@ -296,6 +296,27 @@ export default function StorePage() {
         </div>
       )}
 
+      {selectMode && (
+        <div className="flex items-center justify-between mb-3">
+          <button
+            onClick={() => {
+              const allSelected = sorted.every((l) => selected.has(l.listingId));
+              if (allSelected) {
+                setSelected(new Set());
+              } else {
+                setSelected(new Set(sorted.map((l) => l.listingId)));
+              }
+            }}
+            className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          >
+            {sorted.every((l) => selected.has(l.listingId)) ? "Deselect all" : "Select all"}
+          </button>
+          {selected.size > 0 && (
+            <p className="text-xs text-[var(--text-secondary)]">{selected.size} selected</p>
+          )}
+        </div>
+      )}
+
       {!loading && sorted.length > 0 && (
         <div className="flex flex-col gap-2">
           {sorted.map((l) => (
@@ -407,27 +428,6 @@ export default function StorePage() {
               </div>
             </div>
           ))}
-        </div>
-      )}
-
-      {selectMode && (
-        <div className="flex items-center justify-between mb-3">
-          <button
-            onClick={() => {
-              const allSelected = sorted.every((l) => selected.has(l.listingId));
-              if (allSelected) {
-                setSelected(new Set());
-              } else {
-                setSelected(new Set(sorted.map((l) => l.listingId)));
-              }
-            }}
-            className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-          >
-            {sorted.every((l) => selected.has(l.listingId)) ? "Deselect all" : "Select all"}
-          </button>
-          {selected.size > 0 && (
-            <p className="text-xs text-[var(--text-secondary)]">{selected.size} selected</p>
-          )}
         </div>
       )}
 

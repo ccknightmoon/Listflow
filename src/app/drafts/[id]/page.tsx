@@ -312,7 +312,13 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       if (!res.ok) throw new Error(data.error || "Pricing failed");
       if (!data.noData) {
         if (data.suggestedPrice) setPrice(String(data.suggestedPrice));
-        setDraft((prev) => prev ? { ...prev, avg_sold: data.avgSold ?? prev.avg_sold, sell_odds: data.sellOdds ?? prev.sell_odds } : prev);
+        setDraft((prev) => prev ? {
+          ...prev,
+          avg_sold: data.avgSold ?? prev.avg_sold,
+          active_range_low: data.activeRangeLow ?? prev.active_range_low,
+          active_range_high: data.activeRangeHigh ?? prev.active_range_high,
+          sell_odds: data.sellOdds ?? prev.sell_odds,
+        } : prev);
         await fetch(`/api/drafts/${params.id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -323,6 +329,8 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             sleeveLength, neckline, fit, pattern, description,
             vintage, character, characterFamily, yearManufactured, season,
             avgSold: data.avgSold ?? null,
+            activeRangeLow: data.activeRangeLow ?? null,
+            activeRangeHigh: data.activeRangeHigh ?? null,
             sellOdds: data.sellOdds ?? null,
           }),
         });
