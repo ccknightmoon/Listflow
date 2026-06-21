@@ -170,7 +170,7 @@ export default function DraftsPage() {
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <h1 className="text-xl font-medium">Drafts ({drafts.length})</h1>
+        <h1 className="text-xl font-medium">Drafts ({q ? `${filtered.length}/` : ""}{drafts.length})</h1>
       </div>
 
       {!loading && drafts.length > 0 && (

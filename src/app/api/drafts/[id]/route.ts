@@ -40,7 +40,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       ...(body.style !== undefined && { style: body.style }),
       ...(body.material !== undefined && { material: body.material }),
       ...(body.theme !== undefined && { theme: body.theme }),
-      ...(body.sleevLength !== undefined && { sleeve_length: body.sleevLength }),
+      ...(body.sleeveLength !== undefined && { sleeve_length: body.sleeveLength }),
       ...(body.neckline !== undefined && { neckline: body.neckline }),
       ...(body.fit !== undefined && { fit: body.fit }),
       ...(body.pattern !== undefined && { pattern: body.pattern }),

@@ -23,6 +23,8 @@ interface Draft {
   flaws: string | null;
   suggested_price: number | null;
   avg_sold: number | null;
+  active_range_low: number | null;
+  active_range_high: number | null;
   sell_odds: string | null;
   thumbnail_url: string | null;
   photo_urls: string[] | null;
@@ -82,7 +84,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   const [style, setStyle] = useState("");
   const [material, setMaterial] = useState("");
   const [theme, setTheme] = useState("");
-  const [sleevLength, setSleevLength] = useState("");
+  const [sleeveLength, setSleeveLength] = useState("");
   const [neckline, setNeckline] = useState("");
   const [fit, setFit] = useState("");
   const [pattern, setPattern] = useState("");
@@ -118,7 +120,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         setStyle(str(d.style));
         setMaterial(str(d.material));
         setTheme(str(d.theme));
-        setSleevLength(str(d.sleeve_length));
+        setSleeveLength(str(d.sleeve_length));
         setNeckline(str(d.neckline));
         setFit(str(d.fit));
         setPattern(str(d.pattern));
@@ -155,7 +157,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       if (ok(data.style)) setStyle(data.style);
       if (ok(data.material)) setMaterial(data.material);
       if (ok(data.theme)) setTheme(data.theme);
-      if (ok(data.sleeve_length)) setSleevLength(data.sleeve_length);
+      if (ok(data.sleeve_length)) setSleeveLength(data.sleeve_length);
       if (ok(data.neckline)) setNeckline(data.neckline);
       if (ok(data.fit)) setFit(data.fit);
       if (ok(data.pattern)) setPattern(data.pattern);
@@ -183,7 +185,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           title, brand, color, size, condition, flaws,
           suggestedPrice: price ? Number(price) : null,
           customSku, itemType, style, material, theme,
-          sleevLength, neckline, fit, pattern, description,
+          sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
         }),
       });
@@ -215,7 +217,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           title, brand, color, size, condition, flaws,
           suggestedPrice: price ? Number(price) : null,
           customSku, itemType, style, material, theme,
-          sleevLength, neckline, fit, pattern, description,
+          sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
         }),
       });
@@ -238,7 +240,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             title, brand, color, size, condition, flaws,
             suggestedPrice: price ? Number(price) : null,
             customSku, itemType, style, material, theme,
-            sleevLength, neckline, fit, pattern, description,
+            sleeveLength, neckline, fit, pattern, description,
             ebayListingId: String(data.listingId),
           }),
         });
@@ -318,7 +320,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             title, brand, color, size, condition, flaws,
             suggestedPrice: data.suggestedPrice ?? (price ? Number(price) : null),
             customSku, itemType, style, material, theme,
-            sleevLength, neckline, fit, pattern, description,
+            sleeveLength, neckline, fit, pattern, description,
             vintage, character, characterFamily, yearManufactured, season,
             avgSold: data.avgSold ?? null,
             sellOdds: data.sellOdds ?? null,
@@ -564,6 +566,12 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
               <p className="text-xs text-[var(--text-secondary)]">Avg sold</p>
               <p className="font-medium">${draft.avg_sold}</p>
             </div>
+            {draft.active_range_low != null && draft.active_range_high != null && (
+              <div>
+                <p className="text-xs text-[var(--text-secondary)]">Active range</p>
+                <p className="font-medium">${draft.active_range_low}–${draft.active_range_high}</p>
+              </div>
+            )}
             {draft.sell_odds && (
               <div>
                 <p className="text-xs text-[var(--text-secondary)]">Sell odds</p>
@@ -700,7 +708,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Sleeve Length</label>
-              <input className="input w-full" placeholder="Short Sleeve..." value={sleevLength} onChange={(e) => setSleevLength(e.target.value)} />
+              <input className="input w-full" placeholder="Short Sleeve..." value={sleeveLength} onChange={(e) => setSleeveLength(e.target.value)} />
             </div>
             <div>
               <label className="text-xs text-[var(--text-secondary)] mb-1 block">Neckline</label>
