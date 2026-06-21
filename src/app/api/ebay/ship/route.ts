@@ -33,9 +33,10 @@ export async function GET() {
 
   if (!result.body.includes("<Ack>Success</Ack>")) {
     const errMsg = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
-    const isAuth = errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission");
+    const notConnected = !process.env.EBAY_OAUTH_REFRESH_TOKEN;
+    const isAuth = !notConnected && (errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission"));
     return NextResponse.json(
-      { error: errMsg, items: [], count: 0, connect: !isAuth, reconnect: isAuth },
+      { error: errMsg, items: [], count: 0, connect: notConnected, reconnect: isAuth },
       { status: 200 }
     );
   }

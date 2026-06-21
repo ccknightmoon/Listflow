@@ -36,7 +36,9 @@ export async function GET(req: Request) {
 
   if (!result.body.includes("<Ack>Success</Ack>")) {
     const errMsg = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
-    return NextResponse.json({ error: errMsg, sales: [] }, { status: 200 });
+    const notConnected = !process.env.EBAY_OAUTH_REFRESH_TOKEN;
+    const isAuth = !notConnected && (errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission"));
+    return NextResponse.json({ error: errMsg, sales: [], connect: notConnected, reconnect: isAuth }, { status: 200 });
   }
 
   const txBlocks = xmlFindAll(result.body, "Transaction");

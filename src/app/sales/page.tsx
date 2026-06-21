@@ -22,6 +22,8 @@ export default function SalesPage() {
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [needsConnect, setNeedsConnect] = useState(false);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const [days, setDays] = useState<DayRange>(30);
 
   useEffect(() => { load(days); }, [days]);
@@ -29,11 +31,17 @@ export default function SalesPage() {
   async function load(d: DayRange) {
     setLoading(true);
     setError(null);
+    setNeedsConnect(false);
+    setNeedsReconnect(false);
     try {
       const res = await fetch(`/api/ebay/sales?days=${d}`);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to load");
-      if (data.error) throw new Error(data.error);
+      if (data.error) {
+        setNeedsConnect(!!data.connect);
+        setNeedsReconnect(!!data.reconnect);
+        throw new Error(data.error);
+      }
       setSales(data.sales ?? []);
       setTotalRevenue(data.totalRevenue ?? 0);
     } catch (err) {
@@ -94,7 +102,11 @@ export default function SalesPage() {
       )}
 
       {error && (
-        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>{error}</div>
+        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
+          {error}
+          {needsConnect && <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>}
+          {needsReconnect && <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>}
+        </div>
       )}
 
       {loading && (
