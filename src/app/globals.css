@@ -1,7 +1,40 @@
-/* Placeholder stylesheet — the real globals.css wasn't available to stage
-   into this verification build (device file access was stale at the time).
-   This stub exists only so `next build` can resolve the import and validate
-   the rest of the app; it is NOT written back to the real project. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --brand-500: #185fa5;
+  --brand-600: #0f4f8a;
+  --bg-page: #f5f7fb;
+  --text-primary: #111827;
+  --text-secondary: #4b5563;
+  --text-tertiary: #6b7280;
+  --border: #e5e7eb;
+}
+
+html {
+  color-scheme: light;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
