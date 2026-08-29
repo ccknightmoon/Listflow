@@ -1,0 +1,7 @@
+/* Placeholder stylesheet — the real globals.css wasn't available to stage
+   into this verification build (device file access was stale at the time).
+   This stub exists only so `next build` can resolve the import and validate
+   the rest of the app; it is NOT written back to the real project. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

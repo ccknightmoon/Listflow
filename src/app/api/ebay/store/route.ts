@@ -1,0 +1,92 @@
+import { NextResponse } from "next/server";
+import { tradingRequest } from "@/lib/ebay-inventory";
+import { requireUser } from "@/lib/auth";
+
+export const runtime = "nodejs";
+
+function xmlFind(xml: string, tag: string): string {
+  const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
+  return m?.[1]?.trim() ?? "";
+}
+
+function extractItemBlocks(xml: string): string[] {
+  const arrayBlock = xmlFind(xml, "ItemArray");
+  if (!arrayBlock) return [];
+  const items: string[] = [];
+  const re = /<Item[^>]*>([\s\S]*?)<\/Item>/g;
+  let m;
+  while ((m = re.exec(arrayBlock)) !== null) items.push(m[1]);
+  return items;
+}
+
+const ENTRIES_PER_PAGE = 200;
+// Hard ceiling on how many pages we'll fetch in one request, purely as a
+// safety backstop against a runaway loop — 50 * 200 = 10,000 listings.
+const MAX_PAGES = 50;
+
+async function fetchPage(page: number) {
+  return tradingRequest(
+    "GetMyeBaySelling",
+    `<?xml version="1.0" encoding="utf-8"?><GetMyeBaySellingRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ActiveList><Include>true</Include><Pagination><EntriesPerPage>${ENTRIES_PER_PAGE}</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination></ActiveList><DetailLevel>ReturnSummary</DetailLevel></GetMyeBaySellingRequest>`
+  );
+}
+
+export async function GET() {
+  const auth = await requireUser();
+  if (!auth.user) return auth.unauthorized;
+
+  try {
+    const { status, body } = await fetchPage(1);
+
+    if (status >= 400) {
+      return NextResponse.json(
+        { error: `Trading API HTTP ${status}: ${body.slice(0, 300)}` },
+        { status: 502 }
+      );
+    }
+
+    if (body.includes("<Ack>Failure</Ack>")) {
+      const errMsg =
+        body.match(/<LongMessage>([\s\S]*?)<\/LongMessage>/)?.[1] ??
+        body.match(/<ShortMessage>([\s\S]*?)<\/ShortMessage>/)?.[1] ??
+        body.slice(0, 300);
+      const notConnected = !process.env.EBAY_OAUTH_REFRESH_TOKEN;
+      const isAuth = !notConnected && (errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission"));
+      return NextResponse.json({ error: `eBay error: ${errMsg}`, connect: notConnected, reconnect: isAuth }, { status: 502 });
+    }
+
+    const totalStr = xmlFind(body, "TotalNumberOfEntries");
+    const total = parseInt(totalStr || "0", 10);
+    const totalPagesStr = xmlFind(body, "TotalNumberOfPages");
+    const totalPages = Math.min(parseInt(totalPagesStr || "1", 10) || 1, MAX_PAGES);
+
+    let items = extractItemBlocks(body);
+
+    // Fetch remaining pages so accounts with >200 active listings don't
+    // silently lose everything past the first page.
+    if (totalPages > 1) {
+      const remainingPages = Array.from({ length: totalPages - 1 }, (_, i) => i + 2);
+      const remainingResults = await Promise.all(remainingPages.map((p) => fetchPage(p)));
+      for (const res of remainingResults) {
+        if (res.status < 400 && res.body.includes("<Ack>Success</Ack>")) {
+          items = items.concat(extractItemBlocks(res.body));
+        }
+      }
+    }
+
+    const listings = items.map((item) => {
+      const listingId = xmlFind(item, "ItemID");
+      const title = xmlFind(item, "Title") || "Untitled";
+      const priceStr = xmlFind(item, "CurrentPrice");
+      const price = priceStr ? parseFloat(priceStr) : null;
+      const thumbnail = xmlFind(item, "GalleryURL") || null;
+      const sku = xmlFind(item, "SKU") || null;
+      const startTime = xmlFind(item, "StartTime") || null;
+      return { listingId, title, price, thumbnail, sku, startTime };
+    });
+
+    return NextResponse.json({ listings, total: total || listings.length });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
+}
