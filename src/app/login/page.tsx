@@ -5,19 +5,21 @@ import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { Loader2 } from "lucide-react";
 
-// Sign-up is intentionally NOT offered from this page. Listflow has no
-// per-user data isolation — every signed-in account sees the same shared
-// drafts, listings, and connected eBay store (see CLAUDE.md's Supabase
-// section). An open "Create account" link here would let any stranger who
-// finds this URL sign up and get full read/write access to real eBay
-// listings, sales history, and buyer shipping addresses. The two existing
-// accounts were created directly in the Supabase dashboard; if a new one
-// is ever needed, create it there rather than reopening self-serve signup
-// on this page. This is a UI-level mitigation only — the authoritative
-// fix is disabling "Allow new users to sign up" in the Supabase dashboard
-// (Authentication -> Sign In / Providers -> Email), since that's enforced
-// by Supabase itself and can't be bypassed by calling its API directly
-// with the public anon key the way an app-level check here could be.
+// Sign-up is intentionally NOT offered from this page. Drafts, settings,
+// and photos are now genuinely private per account (see the multi-tenant
+// isolation migration in CLAUDE.md's Supabase section) — but every user
+// still lists through the ONE connected eBay store (that's the Phase 2
+// work: per-user eBay OAuth, not yet built). An open "Create account" link
+// here would let any stranger who finds this URL sign up and start listing
+// items into the real owner's actual eBay store. The two existing accounts
+// were created directly in the Supabase dashboard; if a new one is ever
+// needed before Phase 2 ships, create it there rather than reopening
+// self-serve signup on this page. This is a UI-level mitigation only — the
+// authoritative fix is disabling "Allow new users to sign up" in the
+// Supabase dashboard (Authentication -> Sign In / Providers -> Email),
+// since that's enforced by Supabase itself and can't be bypassed by
+// calling its API directly with the public anon key the way an app-level
+// check here could be.
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");

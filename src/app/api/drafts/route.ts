@@ -60,6 +60,9 @@ export async function POST(req: NextRequest) {
     .from("drafts")
     .insert([
       {
+        // Explicit stamp, even though the DB column also defaults to
+        // auth.uid() — defense-in-depth matches the rest of this codebase.
+        user_id: auth.user.id,
         title: body.title ?? null,
         brand: body.brand ?? null,
         color: body.color ?? null,
@@ -87,6 +90,8 @@ export async function POST(req: NextRequest) {
         character_family: body.characterFamily ?? null,
         year_manufactured: body.yearManufactured ?? null,
         season: body.season ?? null,
+        store_category_id: body.storeCategoryId ?? null,
+        store_category_name: body.storeCategoryName ?? null,
       },
     ])
     .select();
