@@ -6,6 +6,10 @@ import {
 } from "@/lib/ebay-inventory";
 import { invalidateAccessTokenCache } from "@/lib/ebay-oauth";
 import { requireUser } from "@/lib/auth";
+import { requireEbayConnection } from "@/lib/ebay-connection";
+import { ebayContext } from "@/lib/ebay-request-context";
+import { parseShippingMode } from "@/lib/shipping";
+import { setListingStoreCategory } from "@/lib/ebay-store-categories";
 
 export const runtime = "nodejs";
 
@@ -14,15 +18,29 @@ export async function POST(req: NextRequest) {
   if (!auth.user) return auth.unauthorized;
   const { supabase } = auth;
 
+  let body: { draftId?: string; shippingMode?: unknown; shippingCost?: unknown; customSku?: string };
   try {
-    const { draftId, isHeavy, shippingCost: rawShippingCost, customSku: requestCustomSku } = await req.json();
-    const shippingCost = typeof rawShippingCost === "number" && rawShippingCost > 0 ? rawShippingCost : undefined;
-    if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+  const { draftId, shippingMode: rawShippingMode, shippingCost: rawShippingCost, customSku: requestCustomSku } = body;
+  const shippingCost = typeof rawShippingCost === "number" && rawShippingCost > 0 ? rawShippingCost : undefined;
+  const shippingMode = parseShippingMode(rawShippingMode);
+  if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
-    if (!process.env.EBAY_OAUTH_REFRESH_TOKEN) {
-      return NextResponse.json({ error: "eBay not connected. Authorize your account to start listing.", connect: true }, { status: 400 });
-    }
+  const connection = await requireEbayConnection(auth);
+  if (!connection) {
+    return NextResponse.json({ error: "eBay not connected. Authorize your account to start listing.", connect: true }, { status: 400 });
+  }
+  if (shippingMode === "calculated" && !connection.policies.shippingCalculatedId) {
+    return NextResponse.json({
+      error: "Calculated shipping isn't set up yet — pick your Calculated shipping policy in Settings → eBay Connection (create a \"Calculated: cost varies by buyer location\" shipping policy in eBay Seller Hub first if you haven't).",
+    }, { status: 400 });
+  }
 
+  return ebayContext.run(connection, async () => {
+  try {
     const { data: draft, error: dbError } = await supabase
       .from("drafts")
       .select("*")
@@ -60,7 +78,6 @@ export async function POST(req: NextRequest) {
     const legacyShortSku = `listflow${draftId.replace(/-/g, "").slice(0, 8)}`;
     const legacyHyphenSku = `listflow-${draftId}`;
     const categoryId = await getCategoryIdForTitle(draft.title || "", draft.item_type || undefined);
-    const heavy = isHeavy ?? false;
 
     await ensureMerchantLocation();
 
@@ -78,7 +95,7 @@ export async function POST(req: NextRequest) {
       await deleteInventoryItem(candidateSku);
     }
 
-    const itemResult = await upsertInventoryItem(sku, draft, categoryId);
+    const itemResult = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode);
     if (itemResult.status >= 400) {
       const errData = itemResult.data as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
       const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(itemResult.data);
@@ -92,7 +109,7 @@ export async function POST(req: NextRequest) {
     let missingRequiredAspects = itemResult.missingRequiredAspects ?? [];
 
     let offerId: string | undefined;
-    const offerResult = await createOffer(sku, draft.suggested_price, categoryId, heavy, shippingCost);
+    const offerResult = await createOffer(sku, draft.suggested_price, categoryId, shippingMode, shippingCost);
     offerId = (offerResult.data as { offerId?: string }).offerId;
 
     if (offerResult.status >= 400) {
@@ -123,7 +140,7 @@ export async function POST(req: NextRequest) {
         if (foundViaSku && foundViaSku !== sku) {
           // Old-SKU offer: delete it so we can create a fresh one linked to the current inventory item
           await deleteOffer(offerId);
-          const freshResult = await createOffer(sku, draft.suggested_price, categoryId, heavy, shippingCost);
+          const freshResult = await createOffer(sku, draft.suggested_price, categoryId, shippingMode, shippingCost);
           offerId = (freshResult.data as { offerId?: string }).offerId;
           if (freshResult.status >= 400 || !offerId) {
             const e = (freshResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
@@ -131,13 +148,13 @@ export async function POST(req: NextRequest) {
           }
         } else {
           // Same-SKU offer: update price, category, and merchant location
-          await updateOffer(offerId, draft.suggested_price, categoryId, heavy, shippingCost);
+          await updateOffer(offerId, draft.suggested_price, categoryId, shippingMode, shippingCost);
         }
 
       } else if (msg.includes("location")) {
         // Merchant location not found — recreate it and retry once
         await recreateMerchantLocation();
-        const retryResult = await createOffer(sku, draft.suggested_price, categoryId, heavy, shippingCost);
+        const retryResult = await createOffer(sku, draft.suggested_price, categoryId, shippingMode, shippingCost);
         offerId = (retryResult.data as { offerId?: string }).offerId;
         if (retryResult.status >= 400 || !offerId) {
           const retryErr = (retryResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
@@ -191,12 +208,12 @@ export async function POST(req: NextRequest) {
           : [originalCondition];
 
         for (const tryCondition of conditionsToTry) {
-          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition);
+          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode);
           if (upsertResult.status >= 400) continue;
           missingRequiredAspects = upsertResult.missingRequiredAspects ?? missingRequiredAspects;
           // Brief pause so eBay's inventory service indexes the item before we try to publish
           await new Promise((r) => setTimeout(r, 1500));
-          const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, heavy, shippingCost);
+          const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, shippingMode, shippingCost);
           const freshOfferId = (freshOffer.data as { offerId?: string }).offerId;
           if (freshOffer.status >= 400 || !freshOfferId) continue;
           publishResult = await publishOffer(freshOfferId);
@@ -220,11 +237,25 @@ export async function POST(req: NextRequest) {
       await supabase.from("drafts").update({ ebay_listing_id: listingId }).eq("id", draftId);
     }
 
+    // Store category isn't settable through the REST Inventory API's
+    // create/publish flow — it's applied as a separate Trading API call once
+    // there's a real ItemID to revise. Best-effort: a failure here doesn't
+    // undo an otherwise-successful listing, just surfaces as a warning.
+    let storeCategoryWarning: string | undefined;
+    const storeCategoryId = (draft as { store_category_id?: string | null }).store_category_id;
+    if (listingId && storeCategoryId) {
+      const catResult = await setListingStoreCategory(listingId, String(storeCategoryId));
+      if (!catResult.success) {
+        storeCategoryWarning = `Listed, but couldn't set the store category: ${catResult.error ?? "unknown error"}. You can set it manually on eBay.`;
+      }
+    }
+
     return NextResponse.json({
       success: true,
       listingId,
       url: listingId ? `https://www.ebay.com/itm/${listingId}` : null,
       missingRequiredAspects: missingRequiredAspects.length > 0 ? missingRequiredAspects : undefined,
+      storeCategoryWarning,
     });
   } catch (err) {
     const msg = (err as Error).message ?? "";
@@ -240,4 +271,5 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ error: msg }, { status: 500 });
   }
+  });
 }

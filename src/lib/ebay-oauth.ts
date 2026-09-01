@@ -1,5 +1,6 @@
 import https from "node:https";
 import crypto from "node:crypto";
+import { getEbayContext } from "./ebay-request-context";
 
 export const EBAY_OAUTH_STATE_COOKIE = "ebay_oauth_state";
 
@@ -7,10 +8,16 @@ export function generateOAuthState(): string {
   return crypto.randomBytes(24).toString("hex");
 }
 
+// sell.account.readonly was added in Phase 2 (per-user eBay connections) so
+// /api/ebay/policies can read each seller's own Business Policies. Anyone
+// who connected before this scope was added needs to reconnect once to
+// pick it up — expected, since Phase 2 already requires everyone to
+// reconnect (the old shared connection isn't migrated automatically).
 export const EBAY_SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
+  "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
 ].join(" ");
 
 function credentials() {
@@ -66,19 +73,27 @@ export async function exchangeCodeForTokens(code: string) {
 // stay fast and reliable. Cache the token for its actual lifetime (minus a
 // safety margin), same pattern already used for the Browse API app token in
 // pricing/suggest/route.ts.
-let userTokenCache: { token: string; expires: number } | null = null;
+//
+// Phase 2: this used to be one module-level slot shared by every request
+// (fine when there was only one shared eBay connection) — now keyed by
+// userId so two different users' requests landing on the same warm
+// serverless instance can never see each other's cached access token. The
+// refresh token itself comes from the current request's eBay context
+// (set up by requireEbayConnection() + ebayContext.run() in each route),
+// not a shared env var.
+const tokenCacheByUser = new Map<string, { token: string; expires: number }>();
 
 export async function getAccessToken(): Promise<string> {
-  if (userTokenCache && userTokenCache.expires > Date.now() + 60_000) {
-    return userTokenCache.token;
-  }
+  const ctx = getEbayContext();
 
-  const refreshToken = process.env.EBAY_OAUTH_REFRESH_TOKEN;
-  if (!refreshToken) throw new Error("eBay not connected — visit /api/ebay/connect first");
+  const cached = tokenCacheByUser.get(ctx.userId);
+  if (cached && cached.expires > Date.now() + 60_000) {
+    return cached.token;
+  }
 
   const body = new URLSearchParams({
     grant_type: "refresh_token",
-    refresh_token: refreshToken,
+    refresh_token: ctx.refreshToken,
     scope: EBAY_SCOPES,
   }).toString();
 
@@ -89,13 +104,15 @@ export async function getAccessToken(): Promise<string> {
   if (!data.access_token) throw new Error(data.error_description ?? "Token refresh failed");
 
   const ttlMs = (data.expires_in ?? 7200) * 1000;
-  userTokenCache = { token: data.access_token, expires: Date.now() + ttlMs };
+  tokenCacheByUser.set(ctx.userId, { token: data.access_token, expires: Date.now() + ttlMs });
   return data.access_token;
 }
 
 // Call after any request that gets a 401 with a valid-looking cached token,
 // so the very next call is forced to refresh instead of retrying with the
-// same (apparently revoked/expired) token.
+// same (apparently revoked/expired) token. Only clears the CURRENT user's
+// cache entry — must be called from inside the same ebayContext.run() the
+// failing request ran in.
 export function invalidateAccessTokenCache() {
-  userTokenCache = null;
+  tokenCacheByUser.delete(getEbayContext().userId);
 }

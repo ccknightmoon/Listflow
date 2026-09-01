@@ -1,5 +1,7 @@
 import https from "node:https";
 import { getAccessToken } from "./ebay-oauth";
+import { getEbayContext } from "./ebay-request-context";
+import { estimateShipping, type ShippingMode } from "./shipping";
 
 export const CONDITION_MAP: Record<string, string> = {
   "New with tags": "NEW",
@@ -323,7 +325,7 @@ export async function upsertInventoryItem(sku: string, draft: {
   character_family?: string | null;
   year_manufactured?: string | null;
   season?: string | null;
-}, categoryId = "1059", conditionOverride?: string) {
+}, categoryId = "1059", conditionOverride?: string, shippingMode: ShippingMode = "free") {
   const aspects: Record<string, string[]> = {};
   aspects["Department"] = [getDepartment(draft.title || "")];
   // Derived from the actual size tag/title (see detectSizeType) rather than
@@ -439,6 +441,25 @@ export async function upsertInventoryItem(sku: string, draft: {
     body.conditionDescription = draft.flaws.slice(0, 1000);
   }
 
+  // "Calculated" shipping needs the item's declared weight + package
+  // dimensions on the inventory item itself — that's what eBay uses to quote
+  // each buyer a real per-order rate. Free/buyer-pays listings don't need
+  // this (their cost is fixed by the policy or the per-offer override), so
+  // it's only attached when it actually matters.
+  if (shippingMode === "calculated") {
+    const est = estimateShipping(draft.item_type, draft.size, draft.material);
+    body.packageWeightAndSize = {
+      packageType: est.package.packageType,
+      weight: { value: est.weightLb, unit: "POUND" },
+      dimensions: {
+        length: est.package.lengthIn,
+        width: est.package.widthIn,
+        height: est.package.heightIn,
+        unit: "INCH",
+      },
+    };
+  }
+
   const result = await inventoryRequest("PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, body);
   return { ...result, missingRequiredAspects };
 }
@@ -470,12 +491,32 @@ export async function recreateMerchantLocation() {
   await ensureMerchantLocation();
 }
 
-function buildListingPolicies(isHeavy: boolean, shippingCost?: number) {
-  const fulfillmentPolicyId = isHeavy
-    ? process.env.EBAY_SHIPPING_HEAVY_ID
-    : process.env.EBAY_SHIPPING_FREE_ID;
-  const base: Record<string, unknown> = { fulfillmentPolicyId, returnPolicyId: process.env.EBAY_RETURN_POLICY_ID };
-  if (isHeavy && shippingCost && shippingCost > 0) {
+// Which pre-configured eBay business policy to attach, and — for buyer-pays
+// listings — the per-offer flat cost override. The "heavy" policy is a
+// flat-rate "buyer pays" policy (its cost is overridable per offer, which is
+// only possible on a real flat-rate service, not a Free Shipping one); the
+// "free" policy is the Free Shipping policy; the "calculated" policy is
+// configured on eBay's side with shipping type "Calculated" (cost varies by
+// buyer location) — eBay computes the actual buyer-facing rate itself from
+// the inventory item's declared weight/dimensions, so there's no per-offer
+// dollar override to send for it (shippingCostOverrides only applies to
+// flat-rate policies). Which policy gets used is an explicit seller choice
+// (`shippingMode`), not tied to item weight at all.
+//
+// Phase 2: these used to be one shared set of env vars (EBAY_SHIPPING_*_ID,
+// EBAY_RETURN_POLICY_ID) — every seller has their own real Business Policy
+// IDs from their own eBay Seller Hub, so these now come from the current
+// request's eBay connection context (set up by requireEbayConnection() +
+// ebayContext.run() in the calling route), populated via Settings' policy
+// pickers (/api/ebay/policies).
+function buildListingPolicies(shippingMode: ShippingMode, shippingCost?: number) {
+  const { policies } = getEbayContext();
+  const fulfillmentPolicyId =
+    shippingMode === "calculated" ? policies.shippingCalculatedId
+    : shippingMode === "buyer_pays" ? policies.shippingHeavyId
+    : policies.shippingFreeId;
+  const base: Record<string, unknown> = { fulfillmentPolicyId, returnPolicyId: policies.returnPolicyId };
+  if (shippingMode === "buyer_pays" && shippingCost && shippingCost > 0) {
     base.shippingCostOverrides = [
       { priority: 1, shippingServiceType: "DOMESTIC", shippingCost: { value: shippingCost.toFixed(2), currency: "USD" } },
     ];
@@ -483,12 +524,12 @@ function buildListingPolicies(isHeavy: boolean, shippingCost?: number) {
   return base;
 }
 
-export async function updateOffer(offerId: string, price: number, categoryId: string, isHeavy: boolean, shippingCost?: number) {
+export async function updateOffer(offerId: string, price: number, categoryId: string, shippingMode: ShippingMode, shippingCost?: number) {
   return inventoryRequest("PUT", `/sell/inventory/v1/offer/${offerId}`, {
     availableQuantity: 1,
     categoryId,
     merchantLocationKey: MERCHANT_LOCATION_KEY,
-    listingPolicies: buildListingPolicies(isHeavy, shippingCost),
+    listingPolicies: buildListingPolicies(shippingMode, shippingCost),
     pricingSummary: {
       price: { value: price.toFixed(2), currency: "USD" },
     },
@@ -496,7 +537,7 @@ export async function updateOffer(offerId: string, price: number, categoryId: st
   });
 }
 
-export async function createOffer(sku: string, price: number, categoryId: string, isHeavy = false, shippingCost?: number) {
+export async function createOffer(sku: string, price: number, categoryId: string, shippingMode: ShippingMode = "free", shippingCost?: number) {
   return inventoryRequest("POST", "/sell/inventory/v1/offer", {
     sku,
     marketplaceId: "EBAY_US",
@@ -504,7 +545,7 @@ export async function createOffer(sku: string, price: number, categoryId: string
     availableQuantity: 1,
     categoryId,
     merchantLocationKey: MERCHANT_LOCATION_KEY,
-    listingPolicies: buildListingPolicies(isHeavy, shippingCost),
+    listingPolicies: buildListingPolicies(shippingMode, shippingCost),
     pricingSummary: {
       price: { value: price.toFixed(2), currency: "USD" },
     },

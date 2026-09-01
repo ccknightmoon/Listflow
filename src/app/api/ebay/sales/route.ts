@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { tradingRequest } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
+import { requireEbayConnection } from "@/lib/ebay-connection";
+import { ebayContext } from "@/lib/ebay-request-context";
 
 export const runtime = "nodejs";
 
@@ -30,13 +32,58 @@ function makeSalesXml(from: string, to: string) {
   return `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailLevel>ReturnAll</DetailLevel><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetSellerTransactionsRequest>`;
 }
 
+// GetSellerTransactions' nested <Item> block never includes PictureDetails/
+// GalleryURL no matter the DetailLevel — confirmed against eBay's own docs,
+// which list GetSellerTransactions' Item fields explicitly and say to use
+// GetItem for anything beyond that limited set. So a gallery image for a
+// sold item can only come from two places: this app's own Supabase record
+// (if the item was listed through this app) or a follow-up GetItem call per
+// ItemID (for older/manually-listed items with no Supabase row). GetItem is
+// only attempted for whatever's left after the Supabase pass, since it's
+// one extra round trip per item. Note: eBay stops returning item details
+// (including pictures) for listings that ended more than ~90 days ago, so
+// very old sales may still fall back to the placeholder icon — that's a
+// real eBay limitation, not a bug here.
+function makeGetItemXml(itemId: string) {
+  return `<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>${itemId}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>`;
+}
+
+const EBAY_ITEM_ID_RE = /^\d{6,15}$/;
+const GALLERY_LOOKUP_CONCURRENCY = 5;
+// Upper bound on how many GetItem calls one sales-page load will make —
+// keeps a big 1-year window from turning into 100+ sequential eBay calls.
+const GALLERY_LOOKUP_MAX = 60;
+
+async function fetchGalleryUrl(itemId: string): Promise<string | null> {
+  if (!EBAY_ITEM_ID_RE.test(itemId)) return null;
+  try {
+    const { body } = await tradingRequest("GetItem", makeGetItemXml(itemId));
+    if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) return null;
+    const pictureDetails = xmlFind(body, "PictureDetails");
+    return xmlFind(pictureDetails, "GalleryURL") || xmlFind(body, "GalleryURL") || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: Request) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
   const { supabase } = auth;
 
+  const connection = await requireEbayConnection(auth);
+  if (!connection) {
+    return NextResponse.json({ error: "eBay not connected.", sales: [], connect: true, reconnect: false }, { status: 200 });
+  }
+
+  return ebayContext.run(connection, async () => {
+  try {
+
   const { searchParams } = new URL(req.url);
-  const days = Math.min(parseInt(searchParams.get("days") ?? "30", 10), 90);
+  // Capped at 365 days (1 year) rather than eBay's per-call 30-day ModTime
+  // limit — longer ranges are chunked into 30-day windows below and merged,
+  // so "up to date" sold history means up to a year back, not just 90 days.
+  const days = Math.min(parseInt(searchParams.get("days") ?? "30", 10), 365);
 
   // eBay caps ModTimeFrom/ModTimeTo at 30 days — split longer ranges into windows
   const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -64,9 +111,11 @@ export async function GET(req: Request) {
     if (!result.body.includes("<Ack>Success</Ack>")) {
       const raw = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
       const errMsg = decodeXml(decodeXml(raw));
-      const notConnected = !process.env.EBAY_OAUTH_REFRESH_TOKEN;
-      const isAuth = !notConnected && (errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission"));
-      return NextResponse.json({ error: errMsg, sales: [], connect: notConnected, reconnect: isAuth }, { status: 200 });
+      // "Not connected" is already checked up front via requireEbayConnection()
+      // before this ever runs — an auth failure reaching here means a
+      // revoked/expired token, not a never-connected account.
+      const isAuth = errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission");
+      return NextResponse.json({ error: errMsg, sales: [], connect: false, reconnect: isAuth }, { status: 200 });
     }
   }
 
@@ -92,12 +141,11 @@ export async function GET(req: Request) {
     const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
     const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
     const soldAt = xmlFind(tx, "CreatedDate");
-    const pictureDetails = xmlFind(itemBlock, "PictureDetails");
-    const galleryUrl = xmlFind(pictureDetails, "GalleryURL") || xmlFind(itemBlock, "GalleryURL") || null;
-    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null, galleryUrl };
+    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null };
   }).filter((s) => s.price > 0);
 
-  // Look up thumbnails from Supabase; fall back to eBay gallery image
+  // Look up thumbnails from Supabase first (instant, no extra eBay calls —
+  // covers every item that was actually listed through this app).
   if (sales.length > 0) {
     const listingIds = sales.map((s) => s.listingId).filter(Boolean);
     const { data: drafts } = await supabase
@@ -108,11 +156,31 @@ export async function GET(req: Request) {
     if (drafts && drafts.length > 0) {
       const thumbMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.thumbnail_url as string | null]));
       for (const sale of sales) {
-        sale.thumbnail = thumbMap.get(sale.listingId) ?? sale.galleryUrl;
+        sale.thumbnail = thumbMap.get(sale.listingId) ?? null;
       }
-    } else {
+    }
+
+    // Whatever's still missing a thumbnail (no Supabase record, and
+    // GalleryURL never comes back from GetSellerTransactions itself — see
+    // fetchGalleryUrl's comment) gets one GetItem call each, a few at a
+    // time, capped so a large date range can't turn into an unbounded
+    // number of eBay calls on one page load.
+    const needsLookup = sales.filter((s) => !s.thumbnail && s.listingId).slice(0, GALLERY_LOOKUP_MAX);
+    if (needsLookup.length > 0) {
+      const uniqueIds = [...new Set(needsLookup.map((s) => s.listingId))];
+      const galleryMap = new Map<string, string | null>();
+      let cursor = 0;
+      async function worker() {
+        while (cursor < uniqueIds.length) {
+          const id = uniqueIds[cursor++];
+          galleryMap.set(id, await fetchGalleryUrl(id));
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(GALLERY_LOOKUP_CONCURRENCY, uniqueIds.length) }, () => worker())
+      );
       for (const sale of sales) {
-        sale.thumbnail = sale.galleryUrl;
+        if (!sale.thumbnail) sale.thumbnail = galleryMap.get(sale.listingId) ?? null;
       }
     }
   }
@@ -120,4 +188,8 @@ export async function GET(req: Request) {
   const totalRevenue = sales.reduce((sum, s) => sum + s.total, 0);
 
   return NextResponse.json({ sales, totalRevenue, days });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message, sales: [] }, { status: 500 });
+  }
+  });
 }

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { tradingRequest } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
+import { requireEbayConnection } from "@/lib/ebay-connection";
+import { ebayContext } from "@/lib/ebay-request-context";
 
 export const runtime = "nodejs";
 
@@ -22,6 +24,14 @@ export async function GET() {
   if (!auth.user) return auth.unauthorized;
   const { supabase } = auth;
 
+  const connection = await requireEbayConnection(auth);
+  if (!connection) {
+    return NextResponse.json({ error: "eBay not connected.", items: [], count: 0, connect: true, reconnect: false }, { status: 200 });
+  }
+
+  return ebayContext.run(connection, async () => {
+  try {
+
   const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const to = new Date().toISOString();
 
@@ -32,10 +42,11 @@ export async function GET() {
 
   if (!result.body.includes("<Ack>Success</Ack>")) {
     const errMsg = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
-    const notConnected = !process.env.EBAY_OAUTH_REFRESH_TOKEN;
-    const isAuth = !notConnected && (errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission"));
+    // "Not connected" is already checked up front via requireEbayConnection()
+    // before this ever runs.
+    const isAuth = errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission");
     return NextResponse.json(
-      { error: errMsg, items: [], count: 0, connect: notConnected, reconnect: isAuth },
+      { error: errMsg, items: [], count: 0, connect: false, reconnect: isAuth },
       { status: 200 }
     );
   }
@@ -110,4 +121,8 @@ export async function GET() {
   }
 
   return NextResponse.json({ items, count: items.length });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message, items: [], count: 0 }, { status: 500 });
+  }
+  });
 }

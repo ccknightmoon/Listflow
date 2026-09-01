@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOfferBySku, deleteOffer, deleteInventoryItem, endItemByListingId, isValidEbayItemId } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
+import { requireEbayConnection } from "@/lib/ebay-connection";
+import { ebayContext } from "@/lib/ebay-request-context";
 
 export const runtime = "nodejs";
 
@@ -9,6 +11,12 @@ export async function POST(req: NextRequest) {
   if (!auth.user) return auth.unauthorized;
   const { supabase } = auth;
 
+  const connection = await requireEbayConnection(auth);
+  if (!connection) {
+    return NextResponse.json({ error: "eBay not connected. Authorize your account first.", connect: true }, { status: 400 });
+  }
+
+  return ebayContext.run(connection, async () => {
   try {
     const body = await req.json();
     const { draftId, listingId: directListingId } = body as { draftId?: string; listingId?: string };
@@ -91,4 +99,5 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
+  });
 }
