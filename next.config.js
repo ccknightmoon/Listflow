@@ -1,4 +1,59 @@
 /** @type {import('next').NextConfig} */
+
+// The Supabase project URL is a NEXT_PUBLIC_ var (already shipped in the
+// client bundle, not a secret) — read at build time so the CSP's connect-src
+// can allow it by name instead of falling back to a wildcard.
+const supabaseOrigin = (() => {
+  try {
+    return process.env.NEXT_PUBLIC_SUPABASE_URL ? new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).origin : "";
+  } catch {
+    return "";
+  }
+})();
+
+// Next.js App Router still streams RSC payloads and hydration data through
+// inline <script> tags (no nonce plumbing exists in this app), so script-src
+// needs 'unsafe-inline' to avoid breaking every page — this is a deliberate,
+// documented tradeoff, not an oversight. Everything else here is as tight as
+// the app's real behavior allows:
+// - img-src stays open to any https host + data: URIs because photo
+//   thumbnails come from eBay's GalleryURL (varies by listing) and Supabase
+//   Storage's public bucket URL, neither of which is a fixed, listable host.
+// - connect-src is 'self' (every app API call is same-origin, see
+//   CLAUDE.md's Notable Implementation Details) plus the Supabase origin
+//   itself, since the browser Supabase client (auth session, login RPCs)
+//   talks to Supabase directly, not through a Next.js API route.
+// - frame-ancestors 'none' + X-Frame-Options: DENY is the actual
+//   clickjacking defense; object-src/base-uri/form-action are locked to
+//   'none'/'self' since nothing in this app needs them looser.
+const csp = [
+  "default-src 'self'",
+  "script-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' https: data: blob:",
+  "font-src 'self' data:",
+  `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""}`,
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "object-src 'none'",
+].join("; ");
+
+const securityHeaders = [
+  { key: "Content-Security-Policy", value: csp },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  // Camera is used only via <input type="file" capture="environment">
+  // (new-listing photo capture) — no getUserMedia() anywhere in the app —
+  // but left self-permitted rather than blocked outright since it's the
+  // one real device capability the app touches.
+  { key: "Permissions-Policy", value: "camera=(self), microphone=(), geolocation=(), payment=()" },
+  // HSTS: Vercel serves this app over HTTPS only, so this just tells
+  // browsers to skip ever trying plain HTTP on repeat visits.
+  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+];
+
 const nextConfig = {
   images: {
     // The app never actually uses next/image's <Image> component anywhere —
@@ -13,6 +68,14 @@ const nextConfig = {
     // 16.1.5+ fix it. Since the feature was never used, the safer fix is to
     // turn it off outright rather than wait on a major-version upgrade.
     unoptimized: true,
+  },
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: securityHeaders,
+      },
+    ];
   },
 };
 

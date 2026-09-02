@@ -1,6 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 
+// eBay Store Category IDs are always numeric (see ebay-store-categories.ts,
+// which already guards its own XML-interpolation point the same way). This
+// app never lets a seller type a category ID by hand — it's always picked
+// from a live dropdown of the seller's real categories — so a non-numeric
+// value here means either a bug or a tampered request, not a legitimate
+// use case. Rejecting it at the API boundary (rather than trusting the
+// eBay-call-time guard alone) keeps bad data out of the database entirely.
+function isValidStoreCategoryId(value: unknown): value is string | null {
+  return value === null || value === undefined || (typeof value === "string" && /^\d+$/.test(value));
+}
+
 export async function GET() {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
@@ -35,7 +46,7 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "No ids provided." }, { status: 400 });
   }
 
-  const { error } = await auth.supabase.from("drafts").delete().in("id", ids);
+  const { error } = await auth.supabase.from("drafts").delete().in("id", ids).eq("user_id", auth.user.id);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
@@ -54,6 +65,10 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  if (!isValidStoreCategoryId(body.storeCategoryId)) {
+    return NextResponse.json({ error: "Invalid store category ID." }, { status: 400 });
   }
 
   const { data, error } = await auth.supabase

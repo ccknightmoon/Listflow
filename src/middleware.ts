@@ -11,57 +11,92 @@ import { Redis } from "@upstash/redis";
 //   cross-site top-level redirect from eBay rather than in-app navigation.
 //   "/api/ebay/connect" is NOT here on purpose — starting the OAuth flow
 //   requires being logged in, same as everything else.
+// - "/api/auth/lockout" is the login-lockout proxy (see
+//   src/app/api/auth/lockout/route.ts) — it has to be reachable BEFORE
+//   sign-in, since checking/recording a failed login attempt happens while
+//   the visitor is still anonymous. It's still subject to the rate-limit
+//   block below (that check runs before this public-path bypass, on
+//   purpose — see the comment there) and does its own email-shape
+//   validation and service-role-scoped RPC calls internally.
 //
 // IMPORTANT: /api routes are NEVER made public as a blanket rule here.
-// Every /api/* route other than the callback above must fall through to
-// the same "!user -> 401 JSON" check further down. A version of this file
+// Every /api/* route other than the two above must fall through to the
+// same "!user -> 401 JSON" check further down. A version of this file
 // briefly existed (as an unused, never-deployed duplicate at the project
 // root) that treated ALL "/api" paths as public — that would have made
 // every API route reachable with zero authentication, reopening exactly
 // the bypass this middleware was rewritten to close. Do not reintroduce
 // a blanket "/api" public rule.
 const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms"];
-const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback"];
+const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout"];
 
-// Rate limiting on the two AI vision endpoints — the actual cost driver,
-// since each call is a real paid OpenAI request. Built defensively: if the
-// two Upstash env vars aren't set, rate limiting is silently skipped
-// rather than throwing on every single request through this middleware.
-// A missing secondary/optional feature should never be able to take down
-// the whole app — the same principle behind every other "warn, don't
-// block" pattern in this codebase (see storeCategoryWarning in
-// api/ebay/list, for one).
-const RATE_LIMITED_PATHS = ["/api/analyze-item", "/api/analyze-batch"];
-const ratelimit =
-  process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN
-    ? new Ratelimit({
-        redis: Redis.fromEnv(),
-        limiter: Ratelimit.slidingWindow(15, "1 m"),
-        analytics: true,
-        prefix: "listflow:rl",
-      })
-    : null;
+// Rate limiting, two tiers. Built defensively either way: if the two
+// Upstash env vars aren't set, rate limiting is silently skipped rather
+// than throwing on every single request through this middleware. A missing
+// secondary/optional feature should never be able to take down the whole
+// app — the same principle behind every other "warn, don't block" pattern
+// in this codebase (see storeCategoryWarning in api/ebay/list, for one).
+//
+// Tier 1 — AI_RATE_LIMITED_PATHS: every endpoint that triggers a real paid
+// OpenAI call, or fans out multiple eBay calls per invocation (originally
+// just analyze-item/analyze-batch; group-photos and ai/suggest-specifics
+// are the same OpenAI cost shape and were simply missed when this was
+// first added; pricing/suggest fans out several eBay Browse API calls per
+// item, so it gets the tighter limit too). 15 requests/min/IP, matching
+// the original limit.
+//
+// Tier 2 — everything else under /api (except the eBay OAuth callback,
+// which isn't reached through normal in-app navigation and doesn't need
+// gating here). A much looser 60 requests/min/IP catch-all: cheap
+// Supabase-backed CRUD and read endpoints don't need the AI tier's limit,
+// but "no limit at all" left the entire rest of the API surface open to
+// unbounded scripted requests. 60/min comfortably covers real usage
+// (a page loading a couple of parallel fetches, or the store/sales pages
+// refetching on a filter change) while still capping abuse.
+const AI_RATE_LIMITED_PATHS = [
+  "/api/analyze-item",
+  "/api/analyze-batch",
+  "/api/group-photos",
+  "/api/ai/suggest-specifics",
+  "/api/pricing/suggest",
+];
+const hasUpstash = Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+const redis = hasUpstash ? Redis.fromEnv() : null;
+const aiRatelimit = redis
+  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(15, "1 m"), analytics: true, prefix: "listflow:rl:ai" })
+  : null;
+const generalRatelimit = redis
+  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(60, "1 m"), analytics: true, prefix: "listflow:rl:general" })
+  : null;
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  // Deliberately runs BEFORE the public-path bypass below: "/api/auth/lockout"
+  // is both public (reachable pre-sign-in) AND rate-limited, and the eBay
+  // callback is the only /api path that should skip this entirely (it's a
+  // one-time OAuth redirect, not a route a script would hammer).
+  if (redis && pathname.startsWith("/api") && !pathname.startsWith("/api/ebay/callback")) {
+    const isAiPath = AI_RATE_LIMITED_PATHS.some((p) => pathname.startsWith(p));
+    const limiter = isAiPath ? aiRatelimit : generalRatelimit;
+    if (limiter) {
+      const forwardedFor = request.headers.get("x-forwarded-for");
+      const ip = request.ip ?? forwardedFor?.split(",", 1)[0]?.trim() ?? "127.0.0.1";
+      const { success } = await limiter.limit(ip);
+      if (!success) {
+        return NextResponse.json(
+          { error: "Too many requests. Please wait a minute before trying again." },
+          { status: 429 }
+        );
+      }
+    }
+  }
 
   if (PUBLIC_PATHS.includes(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) {
     // Still resolve the user below for the "/login while already signed in" redirect;
     // everything else here just passes through.
     if (pathname !== "/login") {
       return NextResponse.next();
-    }
-  }
-
-  if (ratelimit && RATE_LIMITED_PATHS.some((p) => pathname.startsWith(p))) {
-    const forwardedFor = request.headers.get("x-forwarded-for");
-    const ip = request.ip ?? forwardedFor?.split(",", 1)[0]?.trim() ?? "127.0.0.1";
-    const { success } = await ratelimit.limit(ip);
-    if (!success) {
-      return NextResponse.json(
-        { error: "Too many requests. Please wait a minute before trying again." },
-        { status: 429 }
-      );
     }
   }
 

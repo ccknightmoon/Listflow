@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 
+// Same guard as POST /api/drafts — store category IDs are always numeric
+// and always picked from a live dropdown, never hand-typed.
+function isValidStoreCategoryId(value: unknown): value is string | null {
+  return value === null || value === undefined || (typeof value === "string" && /^\d+$/.test(value));
+}
+
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
@@ -9,6 +15,12 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     .from("drafts")
     .select("*")
     .eq("id", params.id)
+    // Belt-and-suspenders alongside RLS: RLS already scopes this table to
+    // auth.uid(), but an explicit ownership check here means a draft that
+    // isn't the caller's own returns the same "not found" response as one
+    // that doesn't exist at all, rather than depending solely on RLS to
+    // stop a cross-account ID guess.
+    .eq("user_id", auth.user.id)
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 404 });
@@ -24,6 +36,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
+  }
+
+  if (!isValidStoreCategoryId(body.storeCategoryId)) {
+    return NextResponse.json({ error: "Invalid store category ID." }, { status: 400 });
   }
 
   const { data, error } = await auth.supabase
@@ -58,8 +74,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       ...(body.activeRangeLow !== undefined && { active_range_low: body.activeRangeLow }),
       ...(body.activeRangeHigh !== undefined && { active_range_high: body.activeRangeHigh }),
       ...(body.sellOdds !== undefined && { sell_odds: body.sellOdds }),
+      ...(body.storeCategoryId !== undefined && { store_category_id: body.storeCategoryId }),
+      ...(body.storeCategoryName !== undefined && { store_category_name: body.storeCategoryName }),
     })
     .eq("id", params.id)
+    .eq("user_id", auth.user.id)
     .select()
     .single();
 
@@ -71,7 +90,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
 
-  const { error } = await auth.supabase.from("drafts").delete().eq("id", params.id);
+  const { error } = await auth.supabase.from("drafts").delete().eq("id", params.id).eq("user_id", auth.user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ deleted: true });
 }

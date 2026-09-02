@@ -32,6 +32,30 @@ export default function LoginPage() {
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
   );
 
+  // Proxies to /api/auth/lockout instead of calling the Postgres RPCs
+  // directly (the way this used to work) — those RPCs are no longer
+  // callable with the public anon key at all (see
+  // supabase-migrations/006_lock_down_login_rpcs.sql): calling them
+  // directly let anyone hit Supabase's public REST RPC endpoint with zero
+  // rate limiting, including to lock a real user out by spamming
+  // record_failed_login for their email. Routing through the app's own API
+  // instead means every call goes through src/middleware.ts's rate
+  // limiting like everything else. Fails open on a network/parse error,
+  // same as before: an infra hiccup here shouldn't lock a real user out of
+  // trying to sign in.
+  async function callLockout(action: "check" | "record" | "clear", emailValue: string) {
+    try {
+      const res = await fetch("/api/auth/lockout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, email: emailValue }),
+      });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
@@ -39,11 +63,9 @@ export default function LoginPage() {
 
     // Brute-force protection: check whether this email is currently
     // locked out (5+ failed attempts within the last 15 minutes) before
-    // even trying the password. Runs as a narrow Postgres RPC — see the
-    // add_login_lockout_protection migration. Fails open on error: an RPC
-    // hiccup shouldn't lock a real user out of trying to sign in.
-    const { data: lockoutData } = await supabase.rpc("check_login_lockout", { p_email: email });
-    const lockout = lockoutData?.[0] as { locked: boolean; seconds_remaining: number } | undefined;
+    // even trying the password.
+    const checkResult = await callLockout("check", email);
+    const lockout = checkResult?.result as { locked: boolean; seconds_remaining: number } | undefined;
     if (lockout?.locked) {
       const minutes = Math.ceil(lockout.seconds_remaining / 60);
       setError(`Too many failed attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`);
@@ -53,11 +75,11 @@ export default function LoginPage() {
 
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
-      await supabase.rpc("record_failed_login", { p_email: email });
+      await callLockout("record", email);
       setError(error.message);
       setLoading(false);
     } else {
-      await supabase.rpc("clear_login_attempts", { p_email: email });
+      await callLockout("clear", email);
       router.push("/dashboard");
       router.refresh();
     }
