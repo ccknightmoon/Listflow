@@ -81,10 +81,58 @@ export function shippingCostForWeight(weightLb: number): number {
   return band.cost;
 }
 
+// eBay's "Calculated" shipping needs a declared package type + box
+// dimensions (in addition to weight) so it can quote a real per-buyer rate —
+// see PackageWeightAndSize in the Inventory API. These are the same weight
+// brackets used for cost estimation above, mapped to eBay's PackageTypeEnum
+// and a reasonable box footprint for used clothing. Like the weight
+// estimate itself, this is a declared estimate, not a measurement — if it's
+// off, eBay quotes a slightly wrong calculated rate, the same tradeoff the
+// flat "buyer pays" cost estimate already carries.
+export interface PackageEstimate {
+  packageType: string;
+  lengthIn: number;
+  widthIn: number;
+  heightIn: number;
+}
+
+const PACKAGE_BANDS: Array<{ maxLb: number } & PackageEstimate> = [
+  { maxLb: 1, packageType: "PACKAGE_THICK_ENVELOPE", lengthIn: 12, widthIn: 9, heightIn: 1 },
+  { maxLb: 3, packageType: "PARCEL_OR_PADDED_ENVELOPE", lengthIn: 12, widthIn: 9, heightIn: 3 },
+  { maxLb: 5, packageType: "MAILING_BOX", lengthIn: 14, widthIn: 10, heightIn: 4 },
+  { maxLb: 10, packageType: "MAILING_BOX", lengthIn: 16, widthIn: 12, heightIn: 6 },
+  { maxLb: Infinity, packageType: "MAILING_BOX", lengthIn: 18, widthIn: 14, heightIn: 8 },
+];
+
+export function estimatePackage(weightLb: number): PackageEstimate {
+  const band = PACKAGE_BANDS.find((b) => weightLb <= b.maxLb) ?? PACKAGE_BANDS[PACKAGE_BANDS.length - 1];
+  const { packageType, lengthIn, widthIn, heightIn } = band;
+  return { packageType, lengthIn, widthIn, heightIn };
+}
+
 export interface ShippingEstimate {
   weightLb: number;
   cost: number;
   isHeavy: boolean;
+  package: PackageEstimate;
+}
+
+// Who pays for shipping on a given listing — a seller choice, not something
+// that should be silently decided by weight. "free" bakes the estimated
+// shipping cost into the item price (buyer sees "Free shipping"); "buyer_pays"
+// charges the buyer a flat dollar amount the seller sets; "calculated" lets
+// eBay quote each buyer their own real rate at checkout based on the
+// package's declared weight/dimensions and the buyer's own zip code (real
+// carrier rates, not a flat guess). `isHeavy` above still matters for the
+// cost *estimate* itself (a coat and a t-shirt should get different dollar
+// figures) — it just no longer decides which mode is used on its own.
+export type ShippingMode = "free" | "buyer_pays" | "calculated";
+
+// Narrows arbitrary request-body input to a real ShippingMode, defaulting to
+// "free" for anything unrecognized — the one place this parsing happens so
+// every API route treats an invalid/missing mode the same way.
+export function parseShippingMode(v: unknown): ShippingMode {
+  return v === "buyer_pays" || v === "calculated" ? v : "free";
 }
 
 // The one function that matters — everything else here supports it.
@@ -95,7 +143,7 @@ export interface ShippingEstimate {
 export function estimateShipping(itemType?: string | null, size?: string | null, material?: string | null): ShippingEstimate {
   const weightLb = estimateWeightLb(itemType, size, material);
   const cost = shippingCostForWeight(weightLb);
-  return { weightLb: Math.round(weightLb * 10) / 10, cost, isHeavy: cost > 8 };
+  return { weightLb: Math.round(weightLb * 10) / 10, cost, isHeavy: cost > 8, package: estimatePackage(weightLb) };
 }
 
 // --- Backward-compatible wrappers (existing call sites keep working) ---
