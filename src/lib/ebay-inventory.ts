@@ -573,10 +573,6 @@ export async function getAllOffers() {
   return inventoryRequest("GET", "/sell/inventory/v1/offer?limit=200&offset=0");
 }
 
-export async function getAllInventoryItems() {
-  return inventoryRequest("GET", "/sell/inventory/v1/inventory_item?limit=200&offset=0");
-}
-
 // Makes a Trading API XML call. Returns status code and raw XML response body.
 export async function tradingRequest(callName: string, xmlBody: string): Promise<{ status: number; body: string }> {
   const token = await getAccessToken();
