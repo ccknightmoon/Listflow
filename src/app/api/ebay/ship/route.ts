@@ -41,10 +41,24 @@ async function fetchGalleryUrl(itemId: string): Promise<string | null> {
   if (!EBAY_ITEM_ID_RE.test(itemId)) return null;
   try {
     const { body } = await tradingRequest("GetItem", makeGetItemXml(itemId));
-    if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) return null;
+    if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) {
+      // TEMP DIAGNOSTIC (remove once photo lookup is confirmed working):
+      console.error(`[ship/GetItem] non-success for ${itemId}:`, body.slice(0, 1000));
+      return null;
+    }
     const pictureDetails = xmlFind(body, "PictureDetails");
-    return xmlFind(pictureDetails, "GalleryURL") || xmlFind(body, "GalleryURL") || null;
-  } catch {
+    const gallery = xmlFind(pictureDetails, "GalleryURL") || xmlFind(body, "GalleryURL") || null;
+    if (!gallery) {
+      // TEMP DIAGNOSTIC (remove once photo lookup is confirmed working):
+      console.error(
+        `[ship/GetItem] no GalleryURL for ${itemId}. PictureDetails block:`,
+        pictureDetails ? pictureDetails.slice(0, 800) : "(none found)"
+      );
+    }
+    return gallery;
+  } catch (err) {
+    // TEMP DIAGNOSTIC (remove once photo lookup is confirmed working):
+    console.error(`[ship/GetItem] threw for ${itemId}:`, (err as Error).message);
     return null;
   }
 }
