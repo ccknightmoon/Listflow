@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight } from "lucide-react";
+import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight, Settings } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { createBrowserClient } from "@supabase/ssr";
 import { apiFetch } from "@/lib/api";
@@ -72,8 +72,17 @@ export default function DashboardPage() {
           <p className="text-sm text-[var(--text-secondary)]">Welcome back</p>
           <h1 className="text-xl font-medium">{displayName ?? "My store"}</h1>
         </div>
-        <div className="w-9 h-9 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 font-medium text-sm">
-          {displayName ? displayName[0].toUpperCase() : "S"}
+        <div className="flex items-center gap-2">
+          <Link
+            href="/settings"
+            className="w-9 h-9 rounded-full flex items-center justify-center text-[var(--text-secondary)] hover:bg-[var(--bg-page)]"
+            title="Settings"
+          >
+            <Settings className="w-4 h-4" />
+          </Link>
+          <div className="w-9 h-9 rounded-full bg-brand-50 flex items-center justify-center text-brand-600 font-medium text-sm">
+            {displayName ? displayName[0].toUpperCase() : "S"}
+          </div>
         </div>
       </div>
 
