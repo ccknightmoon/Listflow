@@ -17,6 +17,7 @@ import {
   Truck,
   Palette,
   UserCircle,
+  Trash2,
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
@@ -37,6 +38,8 @@ export default function SettingsPage() {
 
   const [theme, setTheme] = useState<Theme>("system");
   const [signingOut, setSigningOut] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // eBay Connection (Phase 2: per-user connections, replacing the old
   // shared env-var-based setup)
@@ -160,6 +163,34 @@ export default function SettingsPage() {
     );
     await supabase.auth.signOut();
     window.location.href = "/login";
+  }
+
+  // Soft delete: this only timestamps the request (see
+  // src/lib/account-deletion.ts) so a daily cron can purge it 30 days from
+  // now -- nothing is deleted on the spot. Logging back in any time before
+  // then shows /account/pending-deletion with a one-click "Reactivate."
+  async function handleDeleteAccount() {
+    if (deletingAccount) return;
+    const confirmed = window.confirm(
+      "Delete your account? Your drafts, photos, eBay connection, and settings will be permanently deleted in 30 days. You can undo this any time before then by logging back in and choosing \"Reactivate.\""
+    );
+    if (!confirmed) return;
+
+    setDeletingAccount(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch("/api/account/delete", { method: "POST" });
+      if (!res.ok) throw new Error();
+      const supabase = createBrowserClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
+      );
+      await supabase.auth.signOut();
+      window.location.href = "/login";
+    } catch {
+      setDeleteError("Couldn't start account deletion -- please try again.");
+      setDeletingAccount(false);
+    }
   }
 
   return (
@@ -350,11 +381,32 @@ export default function SettingsPage() {
           onClick={handleSignOut}
           disabled={signingOut}
           className="btn w-full flex items-center justify-center gap-2"
-          style={{ color: "var(--danger)" }}
         >
           {signingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : <LogOut className="w-4 h-4" />}
           Sign out
         </button>
+
+        <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
+          <p className="text-xs font-medium mb-1" style={{ color: "var(--danger)" }}>Danger zone</p>
+          <p className="text-xs text-[var(--text-tertiary)] mb-3 leading-relaxed">
+            Deleting your account starts a 30-day countdown, not an instant
+            wipe. Everything -- drafts, photos, your eBay connection, settings
+            -- is permanently deleted after that unless you log back in and
+            reactivate first.
+          </p>
+          {deleteError && (
+            <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>{deleteError}</p>
+          )}
+          <button
+            onClick={handleDeleteAccount}
+            disabled={deletingAccount}
+            className="btn w-full flex items-center justify-center gap-2"
+            style={{ color: "var(--danger)" }}
+          >
+            {deletingAccount ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+            Delete account
+          </button>
+        </div>
       </SettingsSection>
 
       <BottomNav />

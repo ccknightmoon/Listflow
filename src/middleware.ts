@@ -30,6 +30,17 @@ import { Redis } from "@upstash/redis";
 const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms"];
 const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout"];
 
+// Self-service account deletion (src/lib/account-deletion.ts): a signed-in
+// user with a pending deletion request is locked to /account/pending-deletion
+// and the couple of API routes that page itself calls, until they
+// reactivate there or the grace period lapses and the daily purge cron
+// (api/cron/purge-deleted-accounts) deletes the account for good.
+const PENDING_DELETION_ALLOWED_PATHS = [
+  "/account/pending-deletion",
+  "/api/account/status",
+  "/api/account/reactivate",
+];
+
 // Rate limiting, two tiers. Built defensively either way: if the two
 // Upstash env vars aren't set, rate limiting is silently skipped rather
 // than throwing on every single request through this middleware. A missing
@@ -144,6 +155,26 @@ export async function middleware(request: NextRequest) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     return NextResponse.redirect(loginUrl);
+  }
+
+  if (!PENDING_DELETION_ALLOWED_PATHS.includes(pathname)) {
+    const { data: settings } = await supabase
+      .from("app_settings")
+      .select("deletion_requested_at")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (settings?.deletion_requested_at) {
+      if (pathname.startsWith("/api")) {
+        return NextResponse.json(
+          { error: "Account pending deletion", pendingDeletion: true },
+          { status: 403 }
+        );
+      }
+      const pendingUrl = request.nextUrl.clone();
+      pendingUrl.pathname = "/account/pending-deletion";
+      return NextResponse.redirect(pendingUrl);
+    }
   }
 
   return response;

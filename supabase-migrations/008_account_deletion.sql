@@ -1,0 +1,21 @@
+-- Self-service account deletion with a 30-day grace/reactivation window.
+--
+-- Previously CLAUDE.md documented "no self-service account deletion" because
+-- drafts.user_id had no real ownership column. Phase 1 (multi_tenant_isolation,
+-- migration 003) fixed that -- every user-owned table is now a real uuid FK
+-- to auth.users(id) with `on delete cascade`. That means deleting the
+-- auth.users row itself now safely cascades to drafts, ebay_connections, and
+-- app_settings for that user alone, which is what makes this feature safe
+-- to ship now.
+--
+-- This migration just adds the one column needed to track a pending
+-- deletion request; the app_settings RLS policies from migration 003
+-- (select/insert/update scoped to auth.uid() = user_id) already cover it,
+-- no policy changes needed.
+--
+-- Applied directly against the live project via mcp__Supabase__apply_migration
+-- on 2026-09-02 (Supabase project ctmkjrzqdlggfcjyjxbo). Kept here for the
+-- repo's record -- re-running it is safe (add column if not exists) but
+-- unnecessary against the same database.
+alter table public.app_settings
+  add column if not exists deletion_requested_at timestamptz;
