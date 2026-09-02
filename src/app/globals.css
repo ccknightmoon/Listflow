@@ -2,17 +2,79 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
+/* Light theme — the default, on bare :root so it's always defined even
+   before any dark-mode rule below can apply. Every custom property any
+   component actually references (grep -roh "var(--[a-zA-Z0-9-]+" src/)
+   must have a real value here, not just in the dark blocks below — an
+   undefined custom property silently falls back to the browser's default
+   for that CSS property (e.g. transparent backgrounds, black text),
+   which is what made cards/buttons/inputs render unstyled everywhere. */
 :root {
-  --brand-500: #185fa5;
-  --brand-600: #0f4f8a;
+  --brand-600: #185fa5;
   --bg-page: #f5f7fb;
+  --bg-surface: #ffffff;
   --text-primary: #111827;
   --text-secondary: #4b5563;
   --text-tertiary: #6b7280;
   --border: #e5e7eb;
+  --danger: #b3261e;
+  --success: #1e7d1e;
+  --warning-bg: #fffbeb;
+  --warning-border: #f59e0b;
+  --shadow-card: 0 1px 2px rgba(17, 24, 39, 0.06), 0 1px 1px rgba(17, 24, 39, 0.04);
 }
 
 html {
+  color-scheme: light;
+}
+
+/* System preference (no explicit choice saved in Settings yet, or
+   "System" selected) — only applies when the page hasn't been forced to
+   light. See src/lib/theme.ts: "system" means the theme cookie is
+   deleted entirely rather than set to the literal string, so this media
+   query is what decides, and it keeps tracking the OS setting live
+   without needing a page reload. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --brand-600: #4a9bdb;
+    --bg-page: #12151a;
+    --bg-surface: #1b1f26;
+    --text-primary: #eef1f6;
+    --text-secondary: #a7b0bd;
+    --text-tertiary: #7c8797;
+    --border: #2a2f38;
+    --danger: #f87171;
+    --success: #6bcb9a;
+    --warning-bg: #332705;
+    --warning-border: #92661e;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.3);
+  }
+  html:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+
+/* Explicit "Dark" choice in Settings — wins over system preference
+   either direction (someone whose OS is light but picked Dark here
+   still gets it, and vice versa). */
+:root[data-theme="dark"] {
+  --brand-600: #4a9bdb;
+  --bg-page: #12151a;
+  --bg-surface: #1b1f26;
+  --text-primary: #eef1f6;
+  --text-secondary: #a7b0bd;
+  --text-tertiary: #7c8797;
+  --border: #2a2f38;
+  --danger: #f87171;
+  --success: #6bcb9a;
+  --warning-bg: #332705;
+  --warning-border: #92661e;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+html[data-theme="light"] {
   color-scheme: light;
 }
 
@@ -20,7 +82,7 @@ body {
   margin: 0;
   background: var(--bg-page);
   color: var(--text-primary);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -37,4 +99,72 @@ select {
 img {
   max-width: 100%;
   display: block;
+}
+
+/* ---------- Shared component classes ----------
+   Referenced as plain classNames ("card", "btn", "btn-primary", "input")
+   across ~20 files. These went missing when globals.css was rebuilt from
+   a build-verification stub (see git history) — every card/button/input
+   in the app was rendering with zero styling from these classes until
+   now, not just on the Settings page. */
+.card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-card);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--bg-page);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--brand-600);
+  color: #ffffff;
+  border-color: var(--brand-600);
+}
+
+.btn-primary:hover {
+  opacity: 0.9;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--brand-600);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-600) 25%, transparent);
 }

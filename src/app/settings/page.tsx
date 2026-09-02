@@ -14,6 +14,9 @@ import {
   MonitorSmartphone,
   LogOut,
   Store,
+  Truck,
+  Palette,
+  UserCircle,
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
@@ -171,6 +174,7 @@ export default function SettingsPage() {
       <SettingsSection
         title="Default shipping"
         description="Every new listing (New Listing, Batch Upload, Drafts) starts with this choice automatically, so you don&apos;t have to set it item by item. You can still switch an individual item on its own screen — this just sets what it starts as."
+        icon={Truck}
       >
         {loading ? (
           <div className="card p-8 text-center">
@@ -225,6 +229,7 @@ export default function SettingsPage() {
       <SettingsSection
         title="eBay Connection"
         description="Each account connects its own eBay seller account — your listings, categories, and shipping/return policies are yours alone, never shared with anyone else signed in."
+        icon={Store}
       >
         {ebayBanner && (
           <div
@@ -313,6 +318,7 @@ export default function SettingsPage() {
       <SettingsSection
         title="Appearance"
         description="Choose how Listflow looks on this device. &quot;System&quot; follows your phone or computer's own light/dark setting automatically."
+        icon={Palette}
       >
         <div className="flex flex-col gap-3">
           <OptionCard
@@ -339,7 +345,7 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Account">
+      <SettingsSection title="Account" icon={UserCircle}>
         <button
           onClick={handleSignOut}
           disabled={signingOut}
@@ -359,18 +365,30 @@ export default function SettingsPage() {
 function SettingsSection({
   title,
   description,
+  icon: Icon,
   children,
 }: {
   title: string;
   description?: string;
+  icon: React.ElementType;
   children: React.ReactNode;
 }) {
   return (
-    <section className="mb-6">
-      <p className="text-sm font-medium text-[var(--text-primary)] mb-1">{title}</p>
-      {description && (
-        <p className="text-xs text-[var(--text-tertiary)] mb-3">{description}</p>
-      )}
+    <section className="card p-4 mb-4">
+      <div className="flex items-start gap-3 mb-3">
+        <div
+          className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+          style={{ background: "color-mix(in srgb, var(--brand-600) 14%, var(--bg-surface))" }}
+        >
+          <Icon className="w-[18px] h-[18px]" style={{ color: "var(--brand-600)" }} />
+        </div>
+        <div className="flex-1 pt-1">
+          <p className="text-sm font-semibold text-[var(--text-primary)]">{title}</p>
+          {description && (
+            <p className="text-xs text-[var(--text-tertiary)] mt-1 leading-relaxed">{description}</p>
+          )}
+        </div>
+      </div>
       {children}
     </section>
   );
