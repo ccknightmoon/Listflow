@@ -42,23 +42,24 @@ async function fetchGalleryUrl(itemId: string): Promise<string | null> {
   try {
     const { body } = await tradingRequest("GetItem", makeGetItemXml(itemId));
     if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) {
-      // TEMP DIAGNOSTIC (remove once photo lookup is confirmed working):
-      console.error(`[ship/GetItem] non-success for ${itemId}:`, body.slice(0, 1000));
       return null;
     }
     const pictureDetails = xmlFind(body, "PictureDetails");
-    const gallery = xmlFind(pictureDetails, "GalleryURL") || xmlFind(body, "GalleryURL") || null;
-    if (!gallery) {
-      // TEMP DIAGNOSTIC (remove once photo lookup is confirmed working):
-      console.error(
-        `[ship/GetItem] no GalleryURL for ${itemId}. PictureDetails block:`,
-        pictureDetails ? pictureDetails.slice(0, 800) : "(none found)"
-      );
-    }
+    // Listings created through eBay's REST Inventory API (how this app
+    // lists items) don't populate the classic single GalleryURL field on
+    // GetItem's response — instead PictureDetails carries a list of
+    // <PictureURL> entries. Confirmed against real production data: every
+    // lookup that came up empty had a populated PictureURL list right next
+    // to the missing GalleryURL. Try GalleryURL first (still correct for
+    // older/manually-listed items that do use it), then fall back to the
+    // first PictureURL.
+    const gallery =
+      xmlFind(pictureDetails, "GalleryURL") ||
+      xmlFind(pictureDetails, "PictureURL") ||
+      xmlFind(body, "GalleryURL") ||
+      null;
     return gallery;
-  } catch (err) {
-    // TEMP DIAGNOSTIC (remove once photo lookup is confirmed working):
-    console.error(`[ship/GetItem] threw for ${itemId}:`, (err as Error).message);
+  } catch {
     return null;
   }
 }
