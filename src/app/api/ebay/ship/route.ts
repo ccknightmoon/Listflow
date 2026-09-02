@@ -19,6 +19,36 @@ function xmlFindAll(xml: string, tag: string): string[] {
   return results;
 }
 
+// Same limitation documented in /api/ebay/sales/route.ts: GetSellerTransactions'
+// nested <Item> block never includes PictureDetails/GalleryURL no matter the
+// DetailLevel, so a thumbnail for a paid-but-unshipped item can only come from
+// this app's own Supabase record (if it was listed through this app) or a
+// follow-up GetItem call per ItemID (for items listed manually on eBay, or
+// listed before this app tracked photos). GetItem is only attempted for
+// whatever's left after the Supabase pass.
+function makeGetItemXml(itemId: string) {
+  return `<?xml version="1.0" encoding="utf-8"?><GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ItemID>${itemId}</ItemID><DetailLevel>ReturnAll</DetailLevel></GetItemRequest>`;
+}
+
+const EBAY_ITEM_ID_RE = /^\d{6,15}$/;
+const GALLERY_LOOKUP_CONCURRENCY = 5;
+// This page only ever shows paid-but-unshipped items (a small, naturally
+// bounded list), but cap it anyway for the same reason sales/route.ts does -
+// no unbounded number of eBay calls on one page load.
+const GALLERY_LOOKUP_MAX = 60;
+
+async function fetchGalleryUrl(itemId: string): Promise<string | null> {
+  if (!EBAY_ITEM_ID_RE.test(itemId)) return null;
+  try {
+    const { body } = await tradingRequest("GetItem", makeGetItemXml(itemId));
+    if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) return null;
+    const pictureDetails = xmlFind(body, "PictureDetails");
+    return xmlFind(pictureDetails, "GalleryURL") || xmlFind(body, "GalleryURL") || null;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET() {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
@@ -100,7 +130,8 @@ export async function GET() {
     })
     .filter((item): item is NonNullable<typeof item> => item !== null);
 
-  // Look up thumbnails from Supabase
+  // Look up thumbnails from Supabase first (instant, no extra eBay calls -
+  // covers every item that was actually listed through this app).
   if (items.length > 0) {
     const listingIds = items.map((i) => i.listingId).filter(Boolean);
     const { data: drafts } = await supabase
@@ -116,6 +147,31 @@ export async function GET() {
     } else {
       for (const item of items) {
         item.thumbnail = item.galleryUrl;
+      }
+    }
+
+    // Whatever's still missing a thumbnail (no Supabase record, and
+    // GalleryURL essentially never comes back from GetSellerTransactions
+    // itself - see fetchGalleryUrl's comment above) gets one GetItem call
+    // each, a few at a time, so items listed manually on eBay (or listed
+    // before this app tracked photos) still show a real photo instead of
+    // the generic placeholder icon.
+    const needsLookup = items.filter((i) => !i.thumbnail && i.listingId).slice(0, GALLERY_LOOKUP_MAX);
+    if (needsLookup.length > 0) {
+      const uniqueIds = [...new Set(needsLookup.map((i) => i.listingId))];
+      const galleryMap = new Map<string, string | null>();
+      let cursor = 0;
+      async function worker() {
+        while (cursor < uniqueIds.length) {
+          const id = uniqueIds[cursor++];
+          galleryMap.set(id, await fetchGalleryUrl(id));
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(GALLERY_LOOKUP_CONCURRENCY, uniqueIds.length) }, () => worker())
+      );
+      for (const item of items) {
+        if (!item.thumbnail) item.thumbnail = galleryMap.get(item.listingId) ?? null;
       }
     }
   }
