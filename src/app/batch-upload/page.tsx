@@ -139,6 +139,7 @@ export default function BatchUploadPage() {
   const [shippingCosts, setShippingCosts] = useState<Record<number, string>>({});
   const [listingAll, setListingAll] = useState(false);
   const [listingAllProgress, setListingAllProgress] = useState<{ done: number; total: number } | null>(null);
+  const [analyzingProgress, setAnalyzingProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [groupingProgress, setGroupingProgress] = useState<string>("");
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -300,34 +301,56 @@ export default function BatchUploadPage() {
   async function handleAnalyzeBatch() {
     setError(null);
     setStep("analyzing");
+    setAnalyzingProgress({ done: 0, total: groups.length });
 
-    const allResults: AiResult[] = [];
+    const allResults: AiResult[] = new Array(groups.length);
+
+    // A few items analyzed at once instead of strictly one at a time — the
+    // same bounded worker-pool pattern already used for pricing lookups
+    // below (see PRICING_CONCURRENCY) and for bulk eBay listing. Kept
+    // conservative rather than "as many as possible": the real ceiling here
+    // is OpenAI's per-minute token budget on the account, not network
+    // throughput, and analyze-batch's own retry/backoff
+    // (src/app/api/analyze-batch/route.ts) still catches anything that
+    // slips past this. Side benefit over the old sequential loop: one
+    // item's network hiccup no longer aborts the whole batch — each item
+    // now fails on its own instead of taking every other item down with it.
+    const ANALYSIS_CONCURRENCY = 3;
+    let doneCount = 0;
+
+    async function analyzeOne(i: number) {
+      let data: { results?: AiResult[]; error?: string };
+      try {
+        data = await apiFetch<{ results?: AiResult[]; error?: string }>("/api/analyze-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            groups: [{ images: groupImagesForRequest(groups[i]) }],
+          }),
+        });
+      } catch (error) {
+        data = { error: error instanceof Error ? error.message : "Analysis failed" };
+      }
+
+      allResults[i] = !data.results
+        ? { itemType: "", brand: "", color: "", size: "", condition: "Good - minor flaws", flaws: "", suggestedTitle: "", error: data.error || "Analysis failed" }
+        : data.results[0];
+
+      doneCount++;
+      setAnalyzingProgress({ done: doneCount, total: groups.length });
+    }
 
     try {
-      for (let i = 0; i < groups.length; i++) {
-        let data: { results?: AiResult[]; error?: string };
-        try {
-          data = await apiFetch<{ results?: AiResult[]; error?: string }>("/api/analyze-batch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              groups: [{ images: groupImagesForRequest(groups[i]) }],
-            }),
-          });
-        } catch (error) {
-          data = { error: error instanceof Error ? error.message : "Analysis failed" };
-        }
-
-        if (!data.results) {
-          allResults.push({ itemType: "", brand: "", color: "", size: "", condition: "Good - minor flaws", flaws: "", suggestedTitle: "", error: data.error || "Analysis failed" });
-        } else {
-          allResults.push(data.results[0]);
-        }
-
-        if (i < groups.length - 1) {
-          await delay(1000);
+      let cursor = 0;
+      async function worker() {
+        while (cursor < groups.length) {
+          const i = cursor++;
+          await analyzeOne(i);
         }
       }
+      await Promise.all(
+        Array.from({ length: Math.min(ANALYSIS_CONCURRENCY, groups.length) }, () => worker())
+      );
 
       setResults(allResults);
       setStep("results");
@@ -355,6 +378,8 @@ export default function BatchUploadPage() {
     } catch (err) {
       setError((err as Error).message);
       setStep("review");
+    } finally {
+      setAnalyzingProgress(null);
     }
   }
 
@@ -641,13 +666,30 @@ export default function BatchUploadPage() {
     setListingAll(true);
     setListingAllProgress({ done: 0, total: indices.length });
 
+    // A couple of listings at a time instead of strictly one at a time.
+    // Kept lower than ANALYSIS_CONCURRENCY above: a single listing is
+    // already several sequential eBay calls internally (SKU cleanup,
+    // upsert, offer create/update, publish, best-effort category revise),
+    // so 2 concurrent listings roughly doubles real throughput without
+    // stacking too much simultaneous load on eBay's Trading/Inventory APIs.
+    const LISTING_CONCURRENCY = 2;
     let successCount = 0;
-    for (let n = 0; n < indices.length; n++) {
-      const ok = await handleListOnEbay(indices[n]);
-      if (ok) successCount++;
-      setListingAllProgress({ done: n + 1, total: indices.length });
-      if (n < indices.length - 1) await delay(1000);
+    let doneCount = 0;
+    let cursor = 0;
+
+    async function worker() {
+      while (cursor < indices.length) {
+        const n = cursor++;
+        const ok = await handleListOnEbay(indices[n]);
+        if (ok) successCount++;
+        doneCount++;
+        setListingAllProgress({ done: doneCount, total: indices.length });
+      }
     }
+
+    await Promise.all(
+      Array.from({ length: Math.min(LISTING_CONCURRENCY, indices.length) }, () => worker())
+    );
 
     setListingAll(false);
     setListingAllProgress(null);
@@ -827,7 +869,9 @@ export default function BatchUploadPage() {
         <div className="card p-8 text-center">
           <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
           <p className="text-sm text-[var(--text-secondary)]">
-            Analyzing {groups.length} item{groups.length !== 1 ? "s" : ""}...
+            {analyzingProgress
+              ? `Analyzing ${analyzingProgress.done}/${analyzingProgress.total} items...`
+              : `Analyzing ${groups.length} item${groups.length !== 1 ? "s" : ""}...`}
           </p>
         </div>
       )}
