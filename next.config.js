@@ -30,9 +30,18 @@ const supabaseOrigin = (() => {
 // - frame-ancestors 'none' + X-Frame-Options: DENY is the actual
 //   clickjacking defense; object-src/base-uri/form-action are locked to
 //   'none'/'self' since nothing in this app needs them looser.
+// next dev's webpack bundler wraps modules in eval() for fast incremental
+// rebuilds -- a strict script-src with no 'unsafe-eval' blocks that outright,
+// which is why "next dev" under this CSP looks like a totally dead app in
+// the browser (no click handler ever attaches, forms fall back to a plain
+// HTML submit that just reloads the page). Production builds (`next build`)
+// never emit eval()'d code, so this only loosens the policy in dev -- the
+// deployed CSP is exactly as strict as before.
+const isDev = process.env.NODE_ENV !== "production";
+
 const csp = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline'",
+  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' https: data: blob:",
   "font-src 'self' data:",
