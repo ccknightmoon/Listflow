@@ -83,6 +83,16 @@ export async function exchangeCodeForTokens(code: string) {
 // not a shared env var.
 const tokenCacheByUser = new Map<string, { token: string; expires: number }>();
 
+// The SKU-cleanup loop in list/route.ts and delist/route.ts now fires its
+// per-SKU deletes with Promise.all instead of one at a time (see those
+// files), so several getAccessToken() calls for the same user can now land
+// on a cold cache at the same instant — without this, each one would fire
+// its own redundant refresh POST to eBay ("thundering herd"). Not a
+// correctness bug (eBay refresh tokens are reusable), just wasted requests
+// and slightly higher throttling risk. Dedupe by keeping the in-flight
+// refresh promise keyed by userId so concurrent callers share one refresh.
+const inFlightRefresh = new Map<string, Promise<string>>();
+
 export async function getAccessToken(): Promise<string> {
   const ctx = getEbayContext();
 
@@ -91,21 +101,33 @@ export async function getAccessToken(): Promise<string> {
     return cached.token;
   }
 
-  const body = new URLSearchParams({
-    grant_type: "refresh_token",
-    refresh_token: ctx.refreshToken,
-    scope: EBAY_SCOPES,
-  }).toString();
+  const existing = inFlightRefresh.get(ctx.userId);
+  if (existing) return existing;
 
-  const raw = await httpsPost("/identity/v1/oauth2/token", body, {
-    Authorization: `Basic ${credentials()}`,
-  });
-  const data = JSON.parse(raw) as { access_token?: string; expires_in?: number; error_description?: string };
-  if (!data.access_token) throw new Error(data.error_description ?? "Token refresh failed");
+  const refreshPromise = (async () => {
+    try {
+      const body = new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: ctx.refreshToken,
+        scope: EBAY_SCOPES,
+      }).toString();
 
-  const ttlMs = (data.expires_in ?? 7200) * 1000;
-  tokenCacheByUser.set(ctx.userId, { token: data.access_token, expires: Date.now() + ttlMs });
-  return data.access_token;
+      const raw = await httpsPost("/identity/v1/oauth2/token", body, {
+        Authorization: `Basic ${credentials()}`,
+      });
+      const data = JSON.parse(raw) as { access_token?: string; expires_in?: number; error_description?: string };
+      if (!data.access_token) throw new Error(data.error_description ?? "Token refresh failed");
+
+      const ttlMs = (data.expires_in ?? 7200) * 1000;
+      tokenCacheByUser.set(ctx.userId, { token: data.access_token, expires: Date.now() + ttlMs });
+      return data.access_token;
+    } finally {
+      inFlightRefresh.delete(ctx.userId);
+    }
+  })();
+
+  inFlightRefresh.set(ctx.userId, refreshPromise);
+  return refreshPromise;
 }
 
 // Call after any request that gets a 401 with a valid-looking cached token,

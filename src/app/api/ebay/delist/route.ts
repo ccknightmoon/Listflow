@@ -83,14 +83,15 @@ export async function POST(req: NextRequest) {
       `listflow-${draftId}`,
     ].filter((s): s is string => Boolean(s));
 
-    for (const sku of candidateSkus) {
+    // Same independence as the equivalent cleanup in list/route.ts — each
+    // candidate SKU's offers/inventory item are untouched by what happens to
+    // the others, so there's no reason to clean them up one at a time.
+    await Promise.all(candidateSkus.map(async (sku) => {
       const offerRes = await getOfferBySku(sku);
       const offers = (offerRes.data as { offers?: Array<{ offerId: string }> }).offers ?? [];
-      for (const offer of offers) {
-        await deleteOffer(offer.offerId);
-      }
+      await Promise.all(offers.map((offer) => deleteOffer(offer.offerId)));
       await deleteInventoryItem(sku);
-    }
+    }));
 
     // Clear the listing ID so the draft moves back to Drafts
     await supabase.from("drafts").update({ ebay_listing_id: null }).eq("id", draftId);

@@ -474,7 +474,20 @@ export async function upsertInventoryItem(sku: string, draft: {
 
 const MERCHANT_LOCATION_KEY = "listflow_us";
 
+// Setting up the merchant location is a one-time, idempotent operation —
+// once it exists on eBay, every later call just gets a 409 "already exists"
+// back (handled below as success). But this was called unconditionally on
+// EVERY "List on eBay" request, meaning every listing paid for a real
+// network round trip that could never do anything after the very first one
+// for a given user. Cache the "already ensured" state per user so repeat
+// listings skip the call entirely; cleared when recreateMerchantLocation()
+// tears the location down so the next ensure call re-verifies it.
+const merchantLocationEnsured = new Set<string>();
+
 export async function ensureMerchantLocation() {
+  const ctx = getEbayContext();
+  if (merchantLocationEnsured.has(ctx.userId)) return;
+
   const result = await inventoryRequest("POST", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}`, {
     location: { address: { country: "US", postalCode: "10001" } },
     locationTypes: ["WAREHOUSE"],
@@ -489,9 +502,12 @@ export async function ensureMerchantLocation() {
       throw new Error(`Merchant location setup failed (${result.status}): ${errData.errors?.[0]?.message ?? JSON.stringify(result.data)}`);
     }
   }
+  merchantLocationEnsured.add(ctx.userId);
 }
 
 export async function recreateMerchantLocation() {
+  const ctx = getEbayContext();
+  merchantLocationEnsured.delete(ctx.userId);
   // Disable then delete (both may fail if location doesn't exist — ignore)
   await inventoryRequest("POST", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}/disable`, undefined);
   await inventoryRequest("DELETE", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}`, undefined);

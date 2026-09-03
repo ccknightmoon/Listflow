@@ -121,15 +121,20 @@ export async function POST(req: NextRequest) {
     // eBay blocks condition changes on inventory items with prior offers — deleting everything
     // gives us a guaranteed clean slate with the correct condition and category.
     // Always include autoSku so that switching from auto→custom SKU cleans up the old auto entry
+    // Each candidate SKU's cleanup (find its offers, delete them, delete the
+    // inventory item) is completely independent of every other candidate's —
+    // this used to run one full SKU at a time, serializing up to 5 rounds of
+    // network calls back-to-back on the app's most-used action. Running them
+    // concurrently doesn't change the result (each SKU's own offers/inventory
+    // item are untouched by what happens to the others), just how long it
+    // takes to get there.
     const skusToClean = [...new Set([sku, autoSku, legacyFullSku, legacyShortSku, legacyHyphenSku])];
-    for (const candidateSku of skusToClean) {
+    await Promise.all(skusToClean.map(async (candidateSku) => {
       const existingRes = await getOfferBySku(candidateSku);
       const existingOffers = (existingRes.data as { offers?: Array<{ offerId: string }> }).offers ?? [];
-      for (const existing of existingOffers) {
-        await deleteOffer(existing.offerId);
-      }
+      await Promise.all(existingOffers.map((existing) => deleteOffer(existing.offerId)));
       await deleteInventoryItem(candidateSku);
-    }
+    }));
 
     const itemResult = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter);
     if (itemResult.status >= 400) {
