@@ -219,21 +219,35 @@ export default function NewListingPage() {
     setSaveStatus("saving");
     setPhotoUploadWarning(null);
     try {
+      // The three photo slots upload independently of each other, so they
+      // run concurrently instead of one at a time. Promise.all keeps
+      // results in the same ["front", "measure", "flaw"] order regardless
+      // of which upload actually finishes first, so "front" is still
+      // reliably preferred as the thumbnail below.
+      const uploadKeys: Array<"front" | "measure" | "flaw"> = ["front", "measure", "flaw"];
+      const uploadOutcomes = await Promise.all(
+        uploadKeys.map(async (key) => {
+          const preview = photos[key]?.previewUrl;
+          if (!preview) return null;
+          try {
+            return await uploadThumbnail(preview);
+          } catch (err) {
+            console.error(`Photo upload failed (${key}):`, (err as Error).message);
+            return { failedKey: key };
+          }
+        })
+      );
       const allPhotoUrls: string[] = [];
       const failedKeys: string[] = [];
       let thumbnailUrl: string | null = null;
-      for (const key of ["front", "measure", "flaw"]) {
-        const preview = photos[key]?.previewUrl;
-        if (!preview) continue;
-        try {
-          const url = await uploadThumbnail(preview);
-          allPhotoUrls.push(url);
-          if (key === "front" || !thumbnailUrl) thumbnailUrl = url;
-        } catch (err) {
-          console.error(`Photo upload failed (${key}):`, (err as Error).message);
-          failedKeys.push(key);
+      uploadOutcomes.forEach((outcome, i) => {
+        if (typeof outcome === "string") {
+          allPhotoUrls.push(outcome);
+          if (uploadKeys[i] === "front" || !thumbnailUrl) thumbnailUrl = outcome;
+        } else if (outcome) {
+          failedKeys.push(outcome.failedKey);
         }
-      }
+      });
       if (failedKeys.length > 0) {
         setPhotoUploadWarning(
           `Saved, but ${failedKeys.length} photo${failedKeys.length > 1 ? "s" : ""} (${failedKeys.join(", ")}) failed to upload. Re-add ${failedKeys.length > 1 ? "them" : "it"} before listing.`

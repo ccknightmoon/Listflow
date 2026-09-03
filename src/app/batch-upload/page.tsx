@@ -180,11 +180,26 @@ export default function BatchUploadPage() {
       .map((_, i) => i)
       .filter((i) => !results[i].error && (saveStatus[i] ?? "idle") === "idle");
 
+    // Each item's save is just Supabase writes (a few photo uploads + one
+    // drafts insert/update) — no eBay calls, so this can run at a higher
+    // concurrency than the eBay-touching bulk actions below without
+    // stressing anything but Supabase, which handles far more parallel
+    // load than that. Used to save one item at a time; for a 40-item
+    // batch that was 40 full round trips back-to-back before "Save all
+    // drafts" ever finished.
+    const SAVE_CONCURRENCY = 5;
     let successCount = 0;
-    for (const i of indices) {
-      const id = await handleSaveDraft(i);
-      if (id) successCount++;
+    let cursor = 0;
+    async function worker() {
+      while (cursor < indices.length) {
+        const i = indices[cursor++];
+        const id = await handleSaveDraft(i);
+        if (id) successCount++;
+      }
     }
+    await Promise.all(
+      Array.from({ length: Math.min(SAVE_CONCURRENCY, indices.length) }, () => worker())
+    );
     setSavingAll(false);
     if (successCount > 0) setTimeout(() => router.push("/drafts"), 1200);
   }
@@ -558,21 +573,27 @@ export default function BatchUploadPage() {
       // Upload all photos in the group; first becomes the thumbnail. Only
       // overwrite photoUrls/thumbnailUrl on a re-save if something actually
       // uploaded this time — an empty result shouldn't wipe out photos a
-      // previous save already stored.
-      const photoUrls: string[] = [];
-      let failedCount = 0;
-      for (const photoIdx of group) {
-        const dataUrl = photos[photoIdx]?.previewUrl;
-        if (dataUrl) {
+      // previous save already stored. Each photo's upload is independent of
+      // the others, so they run concurrently instead of one at a time —
+      // with up to MAX_PHOTOS_PER_ITEM (6) photos per item across a
+      // 40-item batch, this used to mean hundreds of sequential Supabase
+      // Storage round trips. Promise.all preserves the group's original
+      // order in its results regardless of which upload finishes first, so
+      // photoUrls[0] is still reliably the group's first/front photo.
+      const uploadOutcomes = await Promise.all(
+        group.map(async (photoIdx) => {
+          const dataUrl = photos[photoIdx]?.previewUrl;
+          if (!dataUrl) return null;
           try {
-            const url = await uploadThumbnail(dataUrl);
-            photoUrls.push(url);
+            return await uploadThumbnail(dataUrl);
           } catch (err) {
             console.error("Photo upload failed:", (err as Error).message);
-            failedCount++;
+            return undefined; // distinguish "no photo at this slot" from "upload failed"
           }
-        }
-      }
+        })
+      );
+      const photoUrls = uploadOutcomes.filter((u): u is string => typeof u === "string");
+      const failedCount = uploadOutcomes.filter((u) => u === undefined).length;
       if (failedCount > 0) {
         setPhotoUploadWarnings((prev) => ({
           ...prev,
