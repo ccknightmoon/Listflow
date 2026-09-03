@@ -22,7 +22,11 @@ const supabaseOrigin = (() => {
 // - connect-src is 'self' (every app API call is same-origin, see
 //   CLAUDE.md's Notable Implementation Details) plus the Supabase origin
 //   itself, since the browser Supabase client (auth session, login RPCs)
-//   talks to Supabase directly, not through a Next.js API route.
+//   talks to Supabase directly, not through a Next.js API route, plus
+//   Sentry's ingest host so browser-side error reports (sentry.client.
+//   config.ts) aren't silently blocked by this same CSP -- a locked-down
+//   connect-src blocks Sentry's own requests just as effectively as an
+//   attacker's.
 // - frame-ancestors 'none' + X-Frame-Options: DENY is the actual
 //   clickjacking defense; object-src/base-uri/form-action are locked to
 //   'none'/'self' since nothing in this app needs them looser.
@@ -32,7 +36,7 @@ const csp = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' https: data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""}`,
+  `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""} https://*.ingest.us.sentry.io https://*.ingest.sentry.io`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -79,4 +83,14 @@ const nextConfig = {
   },
 };
 
-module.exports = nextConfig;
+// eslint-disable-next-line @typescript-eslint/no-require-imports -- next.config.js is CommonJS, not a module Next.js transpiles
+const { withSentryConfig } = require("@sentry/nextjs/config");
+
+// No org/project/authToken here on purpose -- those are only needed to
+// upload source maps to Sentry (so stack traces show real code instead of
+// minified bundles). Without them this still fully works for "an error
+// happened, here's the message and where" -- source-map upload is a later,
+// optional upgrade, not something this app's error monitoring depends on.
+module.exports = withSentryConfig(nextConfig, {
+  silent: true,
+});
