@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
+import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
 import { ITEM_VISION_PROMPT as PROMPT } from "@/lib/vision-prompt";
 
 export const runtime = "nodejs";
@@ -88,9 +89,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Each group here is one real OpenAI call, so the usage cap is consumed
+  // per-group, not per-request -- a 20-item batch should count as 20, not 1.
+  // If the whole batch doesn't fit this month's remaining budget, process as
+  // many groups as still fit (consuming exactly that many) and mark the rest
+  // capped, rather than failing the entire batch over a partial shortfall.
+  const requested = groups.length;
+  const usage = await checkAndConsumeAiUsage(auth.user.id, requested);
+  let processLimit = requested;
+  if (!usage.allowed) {
+    processLimit = usage.remaining;
+    if (processLimit > 0) {
+      await checkAndConsumeAiUsage(auth.user.id, processLimit);
+    }
+  }
+
   const results = [];
 
   for (let i = 0; i < groups.length; i++) {
+    if (i >= processLimit) {
+      results.push({ error: AI_USAGE_LIMIT_MESSAGE });
+      continue;
+    }
     try {
       const result = await analyzeGroup(apiKey, groups[i].images);
       results.push(result);

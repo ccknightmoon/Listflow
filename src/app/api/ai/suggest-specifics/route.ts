@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
+import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,11 @@ export async function POST(req: NextRequest) {
       { error: "OPENAI_API_KEY is not configured on the server." },
       { status: 500 }
     );
+  }
+
+  const usage = await checkAndConsumeAiUsage(auth.user.id, 1);
+  if (!usage.allowed) {
+    return NextResponse.json({ error: AI_USAGE_LIMIT_MESSAGE }, { status: 429 });
   }
 
   try {

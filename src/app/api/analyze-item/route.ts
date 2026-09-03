@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
 import { ITEM_VISION_PROMPT } from "@/lib/vision-prompt";
+import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
 
 export const runtime = "nodejs";
 
@@ -33,6 +34,11 @@ export async function POST(req: NextRequest) {
       { error: "At least one image is required." },
       { status: 400 }
     );
+  }
+
+  const usage = await checkAndConsumeAiUsage(auth.user.id, 1);
+  if (!usage.allowed) {
+    return NextResponse.json({ error: AI_USAGE_LIMIT_MESSAGE }, { status: 429 });
   }
 
   const imageContent = images.map((img) => ({
