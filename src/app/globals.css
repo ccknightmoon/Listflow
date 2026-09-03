@@ -2,27 +2,68 @@
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
 
-/* Light theme — the default, on bare :root so it's always defined even
-   before any dark-mode rule below can apply. Every custom property any
-   component actually references (grep -roh "var(--[a-zA-Z0-9-]+" src/)
-   must have a real value here, not just in the dark blocks below — an
-   undefined custom property silently falls back to the browser's default
-   for that CSS property (e.g. transparent backgrounds, black text),
-   which is what made cards/buttons/inputs render unstyled everywhere. */
+/* ==========================================================================
+   Listflow "Indigo" design tokens
+   ==========================================================================
+   Mechanism unchanged from before: [data-theme] on <html>, set server-side
+   in layout.tsx from a plain `theme` cookie (src/lib/theme.ts) so the very
+   first byte of HTML already carries the right theme — no flash. "system"
+   (no cookie) falls through to the prefers-color-scheme block below.
+
+   New in this pass: [data-accent] on <html> (src/lib/accent.ts, same
+   cookie-mirror pattern, source of truth is app_settings.accent_color)
+   picks one of six named accent presets. --accent itself doesn't change
+   between light/dark — only how it's *used* (tint/soft/deep) does, via
+   color-mix() against each theme's own tokens, computed once per theme
+   below rather than duplicated per preset.
+
+   Every custom property any component references (grep -roh
+   "var(--[a-zA-Z0-9-]+" src/) must have a real value in the bare :root
+   block below, not only inside a dark/media block — an undefined custom
+   property silently falls back to the browser default for that property
+   (transparent backgrounds, black text), which is the exact bug that once
+   left every card/button/input on the site unstyled. */
+
 :root {
-  --brand-600: #185fa5;
-  --bg-page: #f5f7fb;
+  /* accent presets — same hex in both themes, deliberately not tied to
+     light/dark so a user's chosen color reads consistently everywhere */
+  --accent: #5645ff; /* indigo — default */
+
+  /* light theme — "ivory glass" */
+  --bg-page: #f3f1fa;
   --bg-surface: #ffffff;
-  --text-primary: #111827;
-  --text-secondary: #4b5563;
-  --text-tertiary: #6b7280;
-  --border: #e5e7eb;
-  --danger: #b3261e;
-  --success: #1e7d1e;
-  --warning-bg: #fffbeb;
-  --warning-border: #f59e0b;
-  --shadow-card: 0 1px 2px rgba(17, 24, 39, 0.06), 0 1px 1px rgba(17, 24, 39, 0.04);
+  --text-primary: #1b1a24;
+  --text-secondary: #5b5872;
+  --text-tertiary: #8a87a0;
+  --border: #e4e1f0;
+  --danger: #c23b52;
+  --success: #1e9e74;
+  --warning-bg: #fff6e5;
+  --warning-border: #d98b1e;
+  --shadow-card: 0 1px 2px rgba(27, 26, 36, 0.05), 0 10px 28px rgba(60, 50, 120, 0.07);
+
+  /* glass surfaces — translucent card/button/input backgrounds, blur is
+     applied per-component via backdrop-filter so it only costs paint
+     where it's actually used */
+  --glass: rgba(255, 255, 255, 0.6);
+  --glass-line: rgba(27, 26, 36, 0.08);
+  --glass-strong: rgba(255, 255, 255, 0.78);
+
+  /* accent-derived, computed from whatever --accent currently is —
+     recalculates automatically when a preset or theme changes, no lookup
+     table to keep in sync */
+  --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 72%, black);
+  --accent-deep: color-mix(in srgb, var(--accent) 88%, black);
+
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+
+[data-accent="sapphire"] { --accent: #2f80ed; }
+[data-accent="emerald"] { --accent: #1e9e74; }
+[data-accent="amber"] { --accent: #d98b1e; }
+[data-accent="rose"] { --accent: #e5487b; }
+[data-accent="teal"] { --accent: #16b8c4; }
 
 html {
   color-scheme: light;
@@ -36,40 +77,55 @@ html {
    without needing a page reload. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --brand-600: #4a9bdb;
-    --bg-page: #12151a;
-    --bg-surface: #1b1f26;
-    --text-primary: #eef1f6;
-    --text-secondary: #a7b0bd;
-    --text-tertiary: #7c8797;
-    --border: #2a2f38;
-    --danger: #f87171;
-    --success: #6bcb9a;
-    --warning-bg: #332705;
-    --warning-border: #92661e;
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.3);
+    /* dark theme — "charcoal glass", the rich indigo look */
+    --bg-page: #101017;
+    --bg-surface: #17161f;
+    --text-primary: #f3f2fa;
+    --text-secondary: #9693aa;
+    --text-tertiary: #726f87;
+    --border: rgba(255, 255, 255, 0.11);
+    --danger: #ff5c72;
+    --success: #33d17a;
+    --warning-bg: rgba(245, 185, 66, 0.12);
+    --warning-border: #f5b942;
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 36px rgba(0, 0, 0, 0.35);
+
+    --glass: rgba(255, 255, 255, 0.055);
+    --glass-line: rgba(255, 255, 255, 0.11);
+    --glass-strong: rgba(255, 255, 255, 0.09);
+
+    --accent-tint: color-mix(in srgb, var(--accent) 18%, transparent);
+    --accent-soft: color-mix(in srgb, var(--accent) 55%, white);
+    --accent-deep: color-mix(in srgb, var(--accent) 80%, black);
   }
   html:not([data-theme="light"]) {
     color-scheme: dark;
   }
 }
 
-/* Explicit "Dark" choice in Settings — wins over system preference
-   either direction (someone whose OS is light but picked Dark here
-   still gets it, and vice versa). */
+/* Explicit "Dark" choice in Settings — wins over system preference either
+   direction (someone whose OS is light but picked Dark here still gets
+   it, and vice versa). Same values as the media query above. */
 :root[data-theme="dark"] {
-  --brand-600: #4a9bdb;
-  --bg-page: #12151a;
-  --bg-surface: #1b1f26;
-  --text-primary: #eef1f6;
-  --text-secondary: #a7b0bd;
-  --text-tertiary: #7c8797;
-  --border: #2a2f38;
-  --danger: #f87171;
-  --success: #6bcb9a;
-  --warning-bg: #332705;
-  --warning-border: #92661e;
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(0, 0, 0, 0.3);
+  --bg-page: #101017;
+  --bg-surface: #17161f;
+  --text-primary: #f3f2fa;
+  --text-secondary: #9693aa;
+  --text-tertiary: #726f87;
+  --border: rgba(255, 255, 255, 0.11);
+  --danger: #ff5c72;
+  --success: #33d17a;
+  --warning-bg: rgba(245, 185, 66, 0.12);
+  --warning-border: #f5b942;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 16px 36px rgba(0, 0, 0, 0.35);
+
+  --glass: rgba(255, 255, 255, 0.055);
+  --glass-line: rgba(255, 255, 255, 0.11);
+  --glass-strong: rgba(255, 255, 255, 0.09);
+
+  --accent-tint: color-mix(in srgb, var(--accent) 18%, transparent);
+  --accent-soft: color-mix(in srgb, var(--accent) 55%, white);
+  --accent-deep: color-mix(in srgb, var(--accent) 80%, black);
 }
 html[data-theme="dark"] {
   color-scheme: dark;
@@ -82,7 +138,12 @@ body {
   margin: 0;
   background: var(--bg-page);
   color: var(--text-primary);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-body), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
 * {
@@ -101,17 +162,79 @@ img {
   display: block;
 }
 
+/* ---------- Motion ---------- */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.stagger {
+  animation: rise 0.45s var(--spring) both;
+}
+/* Explicit delay steps rather than :nth-child — an :nth-child rule
+   counts siblings under its immediate parent regardless of class, which
+   once leaked a grid-column rule into an unrelated nested grid sharing
+   the same class name one level down. Apply one of these alongside
+   .stagger on each item instead. */
+.d1 { animation-delay: 0.03s; }
+.d2 { animation-delay: 0.06s; }
+.d3 { animation-delay: 0.09s; }
+.d4 { animation-delay: 0.12s; }
+.d5 { animation-delay: 0.15s; }
+.d6 { animation-delay: 0.18s; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---------- Utilities ---------- */
+
+.glass {
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+/* Modern CSS-only accordion (grid-template-rows 0fr -> 1fr) — no JS height
+   measurement needed, and no :nth-child structural selectors (see the
+   .stagger delay classes above for why those are avoided here). Wrap the
+   collapsible content in one child div with overflow:hidden; toggle the
+   inline gridTemplateRows between "0fr" and "1fr" from React state. */
+.accordion {
+  display: grid;
+  transition: grid-template-rows 0.3s var(--spring);
+}
+
+
+.text-accent { color: var(--accent); }
+.bg-accent-tint { background: var(--accent-tint); }
+
+.bloom {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(46px);
+  pointer-events: none;
+}
+
 /* ---------- Shared component classes ----------
    Referenced as plain classNames ("card", "btn", "btn-primary", "input")
-   across ~20 files. These went missing when globals.css was rebuilt from
-   a build-verification stub (see git history) — every card/button/input
-   in the app was rendering with zero styling from these classes until
-   now, not just on the Settings page. */
+   across every screen — redefining what they render as is what re-skins
+   most of the app from this one file, without touching page JSX. */
 .card {
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  background: var(--glass);
+  border: 1px solid var(--glass-line);
+  border-radius: 18px;
   box-shadow: var(--shadow-card);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+  transition: transform 0.2s var(--spring);
 }
 
 .btn {
@@ -119,52 +242,59 @@ img {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 10px 16px;
   font-size: 14px;
   font-weight: 500;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
+  border: 1px solid var(--glass-line);
+  background: var(--glass);
   color: var(--text-primary);
-  transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transition: transform 0.2s var(--spring), background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
   cursor: pointer;
 }
 
 .btn:hover {
-  background: var(--bg-page);
+  background: var(--glass-strong);
 }
 
 .btn:active {
-  transform: scale(0.98);
+  transform: scale(0.94);
 }
 
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  transform: none;
 }
 
 .btn-primary {
-  background: var(--brand-600);
+  background: var(--accent);
   color: #ffffff;
-  border-color: var(--brand-600);
+  border-color: var(--accent);
 }
 
 .btn-primary:hover {
-  opacity: 0.9;
+  opacity: 0.92;
+  background: var(--accent);
 }
 
 .input {
   width: 100%;
   padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-surface);
+  border-radius: 10px;
+  border: 1px solid var(--glass-line);
+  background: var(--glass);
   color: var(--text-primary);
   font-size: 14px;
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .input:focus {
   outline: none;
-  border-color: var(--brand-600);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--brand-600) 25%, transparent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
 }

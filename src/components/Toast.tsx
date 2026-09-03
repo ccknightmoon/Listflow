@@ -5,21 +5,32 @@ type ToastProps = {
 };
 
 export default function Toast({ message, type = "info", onClose }: ToastProps) {
-  const tone = {
-    info: "border-blue-200 bg-blue-50 text-blue-900",
-    success: "border-emerald-200 bg-emerald-50 text-emerald-900",
-    error: "border-red-200 bg-red-50 text-red-900",
+  const color = {
+    info: "var(--accent)",
+    success: "var(--success)",
+    error: "var(--danger)",
   }[type];
 
   return (
-    <div className={`flex w-full items-start justify-between gap-3 rounded-xl border px-3 py-2 text-sm shadow-sm ${tone}`}>
+    <div
+      className="flex w-full items-start justify-between gap-3 rounded-xl px-3 py-2 text-sm animate-[rise_.3s_var(--spring)_both]"
+      style={{
+        background: "var(--glass-strong)",
+        border: `1px solid ${color}`,
+        color: "var(--text-primary)",
+        boxShadow: "var(--shadow-card)",
+        backdropFilter: "blur(16px)",
+        WebkitBackdropFilter: "blur(16px)",
+      }}
+    >
       <span className="block leading-5">{message}</span>
       {onClose && (
         <button
           type="button"
           aria-label="Dismiss notification"
           onClick={onClose}
-          className="shrink-0 text-current/80 hover:text-current"
+          className="shrink-0 opacity-70 hover:opacity-100 transition-opacity"
+          style={{ color: "var(--text-primary)" }}
         >
           ×
         </button>

@@ -222,7 +222,7 @@ export default function StorePage() {
   });
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
+    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24" style={{ viewTransitionName: "store-panel" }}>
       <div className="flex items-center gap-3 mb-4">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
@@ -242,7 +242,7 @@ export default function StorePage() {
           selectMode ? (
             <button onClick={() => { setSelectMode(false); setSelected(new Set()); setBulkPrice(""); }} className="text-sm text-[var(--text-secondary)]">Cancel</button>
           ) : (
-            <button onClick={() => setSelectMode(true)} className="text-sm" style={{ color: "var(--brand-600)" }}>Select</button>
+            <button onClick={() => setSelectMode(true)} className="text-sm" style={{ color: "var(--accent)" }}>Select</button>
           )
         )}
       </div>
@@ -256,7 +256,7 @@ export default function StorePage() {
               placeholder="Search by title..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+              className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
             {search && (
               <button
@@ -270,7 +270,7 @@ export default function StorePage() {
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -351,7 +351,7 @@ export default function StorePage() {
           {sorted.map((l) => (
             <div
               key={l.listingId}
-              className={`card p-3 ${selectMode && selected.has(l.listingId) ? "ring-2 ring-[var(--brand-600)]" : ""}`}
+              className={`card p-3 ${selectMode && selected.has(l.listingId) ? "ring-2 ring-[var(--accent)]" : ""}`}
               onClick={
                 selectMode
                   ? () =>
@@ -393,7 +393,7 @@ export default function StorePage() {
                         min="0.99"
                         value={editingPrice.get(l.listingId)}
                         onChange={(e) => setEditingPrice((prev) => new Map(prev).set(l.listingId, e.target.value))}
-                        className="w-20 text-xs border border-[var(--border)] rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[var(--brand-600)]"
+                        className="w-20 text-xs border border-[var(--border)] rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
                         autoFocus
                         onKeyDown={(e) => {
                           if (e.key === "Enter") handleUpdatePrice(l);
@@ -409,7 +409,7 @@ export default function StorePage() {
                     </div>
                   ) : (
                     <p
-                      className="text-xs text-[var(--text-secondary)] mt-0.5 cursor-pointer hover:text-[var(--brand-600)]"
+                      className="text-xs text-[var(--text-secondary)] mt-0.5 cursor-pointer hover:text-[var(--accent)]"
                       onClick={() => setEditingPrice((prev) => new Map(prev).set(l.listingId, l.price != null ? l.price.toFixed(2) : ""))}
                     >
                       {l.price != null ? `$${l.price.toFixed(2)}` : "Tap to set price"}

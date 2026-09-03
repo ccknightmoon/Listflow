@@ -18,6 +18,7 @@ import {
   Trash2,
   CheckSquare,
   Square,
+  ChevronDown,
 } from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
@@ -155,6 +156,7 @@ export default function BatchUploadPage() {
   const [bulkCondition, setBulkCondition] = useState<Condition>(CONDITIONS[2]);
   const [bulkHeavy, setBulkHeavy] = useState(false);
   const [bulkShippingCost, setBulkShippingCost] = useState("");
+  const [bulkOpen, setBulkOpen] = useState(true); // bulk-edit panel accordion — collapsed manually, not on selection change
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   async function handleFilesSelected(files: FileList | null) {
@@ -803,7 +805,7 @@ export default function BatchUploadPage() {
   }
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
+    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24" style={{ viewTransitionName: "batch-panel" }}>
       <div className="flex items-center gap-3 mb-6">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
@@ -979,6 +981,45 @@ export default function BatchUploadPage() {
       {step === "results" && (
         <div className="flex flex-col gap-4">
           <AIDisclaimer />
+          {results.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 stagger d1">
+              {results.map((r, i) => {
+                const group = groups[i] ?? [];
+                const thumb = group.map((idx) => photos[idx]?.previewUrl).find(Boolean);
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() =>
+                      document.getElementById(`result-item-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                    }
+                    className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden active:scale-90"
+                    style={{ border: "1px solid var(--glass-line)", transition: "transform .2s var(--spring)" }}
+                  >
+                    {thumb ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={thumb} alt={`Item ${i + 1}`} className="w-full h-full object-cover" />
+                    ) : (
+                      <div
+                        className="w-full h-full flex items-center justify-center text-[10px] font-medium"
+                        style={{ background: "var(--glass)", color: "var(--text-tertiary)" }}
+                      >
+                        #{i + 1}
+                      </div>
+                    )}
+                    {r.error && (
+                      <span
+                        className="absolute inset-x-0 bottom-0 text-[8px] font-bold text-center text-white py-0.5"
+                        style={{ background: "var(--danger)" }}
+                      >
+                        !
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           {(() => {
             const unsaved = results.filter((r, i) => !r.error && (saveStatus[i] ?? "idle") === "idle").length;
             const allSaved = results.every((r, i) => r.error || saveStatus[i] === "saved");
@@ -1042,64 +1083,84 @@ export default function BatchUploadPage() {
             if (selectable.length === 0) return null;
             const selectedCount = selectable.filter((i) => selected[i]).length;
             const allSelected = selectedCount > 0 && selectedCount === selectable.length;
+            const panelOpen = selectedCount > 0 && bulkOpen;
             return (
-              <div className="card p-3 flex flex-col gap-3">
-                <button
-                  onClick={toggleSelectAll}
-                  className="flex items-center gap-2 text-sm font-medium self-start"
-                >
-                  {allSelected ? (
-                    <CheckSquare className="w-4 h-4 text-[var(--brand-600)]" />
-                  ) : (
-                    <Square className="w-4 h-4 text-[var(--text-tertiary)]" />
-                  )}
-                  {selectedCount > 0 ? `${selectedCount} selected` : `Select items to bulk-edit (${selectable.length})`}
-                </button>
-                {selectedCount > 0 && (
-                  <div className="flex flex-col gap-2 pt-1 border-t border-[var(--border)]">
-                    <div className="flex items-center gap-2">
-                      <select
-                        className="input flex-1 text-xs"
-                        value={bulkCondition}
-                        onChange={(e) => setBulkCondition(e.target.value as Condition)}
-                      >
-                        {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <button onClick={applyBulkCondition} className="btn text-xs px-3 py-1.5 whitespace-nowrap">
-                        Set condition
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <input
-                        type="checkbox"
-                        id="bulk-heavy"
-                        checked={bulkHeavy}
-                        onChange={(e) => setBulkHeavy(e.target.checked)}
-                        className="w-4 h-4 rounded accent-[var(--brand-600)]"
+              <div className="card p-3 flex flex-col gap-1">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={toggleSelectAll}
+                    className="flex items-center gap-2 text-sm font-medium flex-1 min-w-0"
+                  >
+                    {allSelected ? (
+                      <CheckSquare className="w-4 h-4 text-[var(--accent)] flex-shrink-0" />
+                    ) : (
+                      <Square className="w-4 h-4 text-[var(--text-tertiary)] flex-shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {selectedCount > 0 ? `${selectedCount} selected` : `Select items to bulk-edit (${selectable.length})`}
+                    </span>
+                  </button>
+                  {selectedCount > 0 && (
+                    <button
+                      onClick={() => setBulkOpen((v) => !v)}
+                      aria-label={panelOpen ? "Collapse bulk edit" : "Expand bulk edit"}
+                      className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{ color: "var(--text-tertiary)" }}
+                    >
+                      <ChevronDown
+                        className="w-4 h-4"
+                        style={{ transition: "transform .25s var(--spring)", transform: panelOpen ? "rotate(180deg)" : "none" }}
                       />
-                      <label htmlFor="bulk-heavy" className="text-xs text-[var(--text-secondary)] cursor-pointer">
-                        Heavy item
-                      </label>
-                      {bulkHeavy && (
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-[var(--text-secondary)]">— shipping $</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            placeholder="0.00"
-                            value={bulkShippingCost}
-                            onChange={(e) => setBulkShippingCost(e.target.value)}
-                            className="input w-16 text-xs py-0.5 px-1.5"
-                          />
-                        </div>
-                      )}
-                      <button onClick={applyBulkShipping} className="btn text-xs px-3 py-1.5 whitespace-nowrap ml-auto">
-                        Set shipping
-                      </button>
+                    </button>
+                  )}
+                </div>
+                <div className="accordion" style={{ gridTemplateRows: panelOpen ? "1fr" : "0fr" }}>
+                  <div className="min-h-0 overflow-hidden">
+                    <div className="flex flex-col gap-2 pt-2 mt-1 border-t border-[var(--border)]">
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="input flex-1 text-xs"
+                          value={bulkCondition}
+                          onChange={(e) => setBulkCondition(e.target.value as Condition)}
+                        >
+                          {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                        <button onClick={applyBulkCondition} className="btn text-xs px-3 py-1.5 whitespace-nowrap">
+                          Set condition
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <input
+                          type="checkbox"
+                          id="bulk-heavy"
+                          checked={bulkHeavy}
+                          onChange={(e) => setBulkHeavy(e.target.checked)}
+                          className="w-4 h-4 rounded accent-[var(--accent)]"
+                        />
+                        <label htmlFor="bulk-heavy" className="text-xs text-[var(--text-secondary)] cursor-pointer">
+                          Heavy item
+                        </label>
+                        {bulkHeavy && (
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-[var(--text-secondary)]">— shipping $</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="0.00"
+                              value={bulkShippingCost}
+                              onChange={(e) => setBulkShippingCost(e.target.value)}
+                              className="input w-16 text-xs py-0.5 px-1.5"
+                            />
+                          </div>
+                        )}
+                        <button onClick={applyBulkShipping} className="btn text-xs px-3 py-1.5 whitespace-nowrap ml-auto">
+                          Set shipping
+                        </button>
+                      </div>
                     </div>
                   </div>
-                )}
+                </div>
               </div>
             );
           })()}
@@ -1110,7 +1171,7 @@ export default function BatchUploadPage() {
 
             if (result.error) {
               return (
-                <div key={i} className="card p-4">
+                <div key={i} id={`result-item-${i}`} className="card p-4">
                   <p className="text-sm font-medium mb-1">Item {i + 1}</p>
                   <p className="text-sm mb-3" style={{ color: "#B3261E" }}>
                     {result.error}
@@ -1146,14 +1207,14 @@ export default function BatchUploadPage() {
             const pricingNoData = pricingAttempted && !livePricing;
 
             return (
-              <div key={i} className="card overflow-hidden">
+              <div key={i} id={`result-item-${i}`} className="card overflow-hidden">
                 {!draftIds[i] && (
                   <button
                     onClick={() => toggleSelected(i)}
                     className="flex items-center gap-2 px-4 pt-3 text-xs text-[var(--text-tertiary)] w-full"
                   >
                     {selected[i] ? (
-                      <CheckSquare className="w-4 h-4 text-[var(--brand-600)]" />
+                      <CheckSquare className="w-4 h-4 text-[var(--accent)]" />
                     ) : (
                       <Square className="w-4 h-4" />
                     )}
@@ -1258,7 +1319,7 @@ export default function BatchUploadPage() {
                           setHeavyItems((prev) => ({ ...prev, [i]: e.target.checked }));
                           if (!e.target.checked) setShippingCosts((prev) => { const n = { ...prev }; delete n[i]; return n; });
                         }}
-                        className="w-4 h-4 rounded accent-[var(--brand-600)]"
+                        className="w-4 h-4 rounded accent-[var(--accent)]"
                       />
                       <label htmlFor={`heavy-${i}`} className="text-xs text-[var(--text-secondary)] cursor-pointer">
                         Heavy item
@@ -1300,7 +1361,7 @@ export default function BatchUploadPage() {
                         <button
                           onClick={() => handleRetryPricing(i)}
                           disabled={retryingPricing[i]}
-                          className="flex items-center gap-1 text-xs text-brand-600 ml-1"
+                          className="flex items-center gap-1 text-xs text-accent ml-1"
                         >
                           {retryingPricing[i] ? (
                             <Loader2 className="w-3 h-3 animate-spin" />

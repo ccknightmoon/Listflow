@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
+import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
 
 type DefaultShippingMode = "free" | "calculated";
 
@@ -47,6 +48,8 @@ export default function SettingsPage() {
   const [footerError, setFooterError] = useState<string | null>(null);
 
   const [theme, setTheme] = useState<Theme>("system");
+  const [accent, setAccent] = useState<AccentColor>("indigo");
+  const [accentSaving, setAccentSaving] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -67,6 +70,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     setTheme(getStoredTheme());
+    setAccent(getStoredAccent());
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data) => {
@@ -74,6 +78,14 @@ export default function SettingsPage() {
         const f = data.storeDescriptionFooter ?? "";
         setFooter(f);
         setSavedFooter(f);
+        // app_settings.accent_color is the source of truth (synced across
+        // devices) — reconcile this device's cookie/attribute with it in
+        // case another device changed it since our last visit here.
+        const serverAccent = ACCENT_PRESETS.some((p) => p.value === data.accentColor)
+          ? (data.accentColor as AccentColor)
+          : "indigo";
+        setAccent(serverAccent);
+        setStoredAccent(serverAccent);
       })
       .catch(() => setError("Could not load settings"))
       .finally(() => setLoading(false));
@@ -189,6 +201,28 @@ export default function SettingsPage() {
     if (next === theme) return;
     setTheme(next);
     setStoredTheme(next);
+  }
+
+  async function handleAccentSelect(next: AccentColor) {
+    if (next === accent || accentSaving) return;
+    const prev = accent;
+    setAccent(next);
+    setStoredAccent(next); // instant feedback — updates --accent on <html> right away
+    setAccentSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accentColor: next }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+    } catch {
+      setAccent(prev);
+      setStoredAccent(prev);
+      setError("Could not save accent color — try again.");
+    } finally {
+      setAccentSaving(false);
+    }
   }
 
   async function handleSignOut() {
@@ -416,9 +450,48 @@ export default function SettingsPage() {
 
       <SettingsSection
         title="Appearance"
-        description="Choose how Listflow looks on this device. &quot;System&quot; follows your phone or computer's own light/dark setting automatically."
+        description="Pick an accent color for the whole app — buttons, tiles, and highlights update everywhere, on every device you're signed into. Theme is per-device; &quot;System&quot; follows your phone or computer's own light/dark setting automatically."
         icon={Palette}
       >
+        <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2.5">Accent color</p>
+        <div className="flex items-center gap-2.5 mb-2">
+          {ACCENT_PRESETS.map((preset) => (
+            <button
+              key={preset.value}
+              type="button"
+              onClick={() => handleAccentSelect(preset.value)}
+              aria-label={preset.label}
+              aria-pressed={accent === preset.value}
+              title={preset.label}
+              className="w-9 h-9 rounded-full flex-shrink-0 active:scale-90"
+              style={{
+                background: preset.hex,
+                border: accent === preset.value ? "2px solid var(--text-primary)" : "2px solid transparent",
+                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.15)",
+                transition: "transform 0.2s var(--spring), border-color 0.15s ease",
+              }}
+            />
+          ))}
+          {accentSaving && <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--text-tertiary)] ml-1" />}
+        </div>
+
+        <div
+          className="rounded-2xl p-3 mb-5 flex items-center gap-3"
+          style={{ background: "var(--glass-strong)", border: "1px solid var(--glass-line)" }}
+        >
+          <div className="flex-1 rounded-xl px-3 py-2" style={{ background: "var(--accent-tint)" }}>
+            <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: "var(--accent-soft)" }}>This week</p>
+            <p className="font-display font-extrabold text-base mt-0.5" style={{ color: "var(--text-primary)" }}>$284</p>
+          </div>
+          <div
+            className="text-xs font-bold rounded-xl px-3.5 py-2.5 whitespace-nowrap"
+            style={{ background: "var(--accent)", color: "#fff" }}
+          >
+            + New listing
+          </div>
+        </div>
+
+        <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2.5">Theme</p>
         <div className="flex flex-col gap-3">
           <OptionCard
             icon={Sun}
@@ -504,9 +577,9 @@ function SettingsSection({
       <div className="flex items-start gap-3 mb-3">
         <div
           className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ background: "color-mix(in srgb, var(--brand-600) 14%, var(--bg-surface))" }}
+          style={{ background: "color-mix(in srgb, var(--accent) 14%, var(--bg-surface))" }}
         >
-          <Icon className="w-[18px] h-[18px]" style={{ color: "var(--brand-600)" }} />
+          <Icon className="w-[18px] h-[18px]" style={{ color: "var(--accent)" }} />
         </div>
         <div className="flex-1 pt-1">
           <p className="text-sm font-semibold text-[var(--text-primary)]">{title}</p>
@@ -565,13 +638,13 @@ function OptionCard({
     <button
       onClick={onClick}
       className="card p-4 text-left flex gap-3 items-start"
-      style={selected ? { border: "2px solid var(--brand-600)" } : undefined}
+      style={selected ? { border: "2px solid var(--accent)" } : undefined}
     >
-      <Icon className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: selected ? "var(--brand-600)" : "var(--text-secondary)" }} />
+      <Icon className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: selected ? "var(--accent)" : "var(--text-secondary)" }} />
       <div className="flex-1">
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium">{title}</p>
-          {selected && <Check className="w-3.5 h-3.5" style={{ color: "var(--brand-600)" }} />}
+          {selected && <Check className="w-3.5 h-3.5" style={{ color: "var(--accent)" }} />}
         </div>
         <p className="text-xs text-[var(--text-secondary)] mt-0.5">{description}</p>
       </div>

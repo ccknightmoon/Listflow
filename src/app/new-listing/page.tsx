@@ -397,7 +397,7 @@ export default function NewListingPage() {
             id="heavy"
             checked={isHeavy}
             onChange={(e) => { setIsHeavy(e.target.checked); if (!e.target.checked) setShippingCost(""); }}
-            className="w-4 h-4 rounded accent-[var(--brand-600)]"
+            className="w-4 h-4 rounded accent-[var(--accent)]"
           />
           <label htmlFor="heavy" className="text-sm text-[var(--text-primary)] cursor-pointer">
             Heavy item
@@ -449,7 +449,7 @@ export default function NewListingPage() {
       {aiResult && (
         <div className="card p-4 mb-4">
           <p className="text-xs text-[var(--text-secondary)] mb-2 flex items-center gap-1">
-            <Sparkles className="w-3.5 h-3.5 text-brand-600" />
+            <Sparkles className="w-3.5 h-3.5 text-accent" />
             AI detected
           </p>
           <div className="grid grid-cols-2 gap-2 text-sm">

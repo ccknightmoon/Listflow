@@ -48,7 +48,16 @@ export default function BottomNav() {
   }
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-[var(--border)] flex justify-around py-2 max-w-md mx-auto">
+    <nav
+      className="fixed bottom-3 left-3 right-3 max-w-md mx-auto flex justify-around py-2 px-1 rounded-2xl"
+      style={{
+        background: "var(--glass-strong)",
+        border: "1px solid var(--glass-line)",
+        backdropFilter: "blur(20px)",
+        WebkitBackdropFilter: "blur(20px)",
+        boxShadow: "var(--shadow-card)",
+      }}
+    >
       {navItems.map(({ href, icon: Icon, label }) => {
         const active = pathname === href;
         const badge = href === "/drafts" ? counts?.drafts : href === "/store" ? counts?.store : 0;
@@ -56,25 +65,30 @@ export default function BottomNav() {
           <Link
             key={href}
             href={href}
-            className="flex flex-col items-center gap-1 px-3 py-1"
+            className="relative flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl transition-transform"
+            style={{
+              background: active ? "var(--accent-tint)" : "transparent",
+              transform: active ? "translateY(-1px)" : "none",
+              transition: "background-color .2s ease, transform .2s var(--spring)",
+            }}
           >
             <div className="relative">
               <Icon
                 className="w-5 h-5"
-                style={{ color: active ? "var(--brand-600, #185FA5)" : "var(--text-tertiary)" }}
+                style={{ color: active ? "var(--accent)" : "var(--text-tertiary)" }}
               />
               {badge != null && badge > 0 && (
                 <span
                   className="absolute -top-1 -right-2 min-w-[14px] h-[14px] rounded-full text-white text-[9px] font-medium flex items-center justify-center px-0.5"
-                  style={{ background: "var(--brand-600, #185FA5)" }}
+                  style={{ background: "var(--accent)" }}
                 >
                   {badge > 99 ? "99+" : badge}
                 </span>
               )}
             </div>
             <span
-              className="text-[10px]"
-              style={{ color: active ? "var(--brand-600, #185FA5)" : "var(--text-tertiary)" }}
+              className="text-[10px] font-medium"
+              style={{ color: active ? "var(--accent)" : "var(--text-tertiary)" }}
             >
               {label}
             </span>
@@ -84,10 +98,11 @@ export default function BottomNav() {
 
       <button
         onClick={handleSignOut}
-        className="flex flex-col items-center gap-1 px-3 py-1"
+        className="flex flex-col items-center gap-1 px-3 py-1.5 active:scale-95 transition-transform"
+        style={{ transitionTimingFunction: "var(--spring)" }}
       >
         <LogOut className="w-5 h-5" style={{ color: "var(--text-tertiary)" }} />
-        <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>Sign out</span>
+        <span className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>Sign out</span>
       </button>
     </nav>
   );

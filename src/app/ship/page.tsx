@@ -68,7 +68,7 @@ export default function ShipPage() {
   }
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
+    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24" style={{ viewTransitionName: "ship-panel" }}>
       <div className="flex items-center gap-3 mb-6">
         <Link href="/dashboard"><ArrowLeft className="w-5 h-5" /></Link>
         <div className="flex-1">
@@ -179,7 +179,7 @@ export default function ShipPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1 text-xs font-medium text-[var(--brand-600)] hover:underline flex-shrink-0 mt-0.5"
+                  className="flex items-center gap-1 text-xs font-medium text-[var(--accent)] hover:underline flex-shrink-0 mt-0.5"
                 >
                   Ship
                   <ExternalLink className="w-3 h-3" />

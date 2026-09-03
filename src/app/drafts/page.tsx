@@ -202,7 +202,7 @@ export default function DraftsPage() {
 
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
+    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24" style={{ viewTransitionName: "drafts-panel" }}>
       <div className="flex items-center gap-3 mb-4">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
@@ -219,7 +219,7 @@ export default function DraftsPage() {
               placeholder="Search drafts..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+              className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             />
             {search && (
               <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -230,7 +230,7 @@ export default function DraftsPage() {
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--brand-600)]"
+            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>

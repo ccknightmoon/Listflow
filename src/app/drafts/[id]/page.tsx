@@ -501,7 +501,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             <div
               key={i}
               ref={(el) => { photoRefs.current[i] = el; }}
-              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none transition-all${dragIdx === i ? " opacity-40 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--brand-600)]" : ""}`}
+              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none transition-all${dragIdx === i ? " opacity-40 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
               style={{ width: 208, height: 208, touchAction: "none" }}
               onPointerDown={(e) => onPhotoPDown(e, i)}
               onPointerMove={onPhotoPMove}
@@ -557,7 +557,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             </div>
           ))}
           {reanalyzePhotos.length < 3 && (
-            <label className="w-16 h-16 rounded-lg border-2 border-dashed border-[var(--border)] flex flex-col items-center justify-center cursor-pointer hover:border-[var(--brand-600)] transition-colors">
+            <label className="w-16 h-16 rounded-lg border-2 border-dashed border-[var(--border)] flex flex-col items-center justify-center cursor-pointer hover:border-[var(--accent)] transition-colors">
               <Camera className="w-5 h-5 text-[var(--text-tertiary)]" />
               <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleAddReanalyzePhoto(e.target.files[0])} />
             </label>
@@ -682,7 +682,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
               localStorage.setItem(`heavy-${params.id}`, JSON.stringify(e.target.checked));
               if (!e.target.checked) { setShippingCost(""); localStorage.removeItem(`shippingCost-${params.id}`); }
             }}
-            className="w-4 h-4 rounded accent-[var(--brand-600)]"
+            className="w-4 h-4 rounded accent-[var(--accent)]"
           />
           <label htmlFor="heavy" className="text-sm text-[var(--text-primary)] cursor-pointer">
             Heavy item
