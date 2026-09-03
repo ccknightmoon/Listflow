@@ -193,6 +193,7 @@ export async function GET() {
 
   return NextResponse.json({ items, count: items.length });
   } catch (err) {
+    console.error("[api/ebay/ship] failed:", err);
     return NextResponse.json({ error: (err as Error).message, items: [], count: 0 }, { status: 500 });
   }
   });
