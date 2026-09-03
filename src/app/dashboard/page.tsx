@@ -87,9 +87,10 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid grid-cols-3 gap-2 mb-6">
-        <Stat label="drafts" value={drafts !== null ? String(drafts) : "—"} />
-        <Stat label="active" value={active !== null ? String(active) : "—"} />
+        <Stat href="/drafts" label="drafts" value={drafts !== null ? String(drafts) : "—"} />
+        <Stat href="/store" label="active" value={active !== null ? String(active) : "—"} />
         <Stat
+          href="/sales"
           label="this week"
           value={revenue !== null ? (revenue === 0 ? "$0" : `$${revenue.toFixed(0)}`) : "—"}
           sub={weeklySales !== null && weeklySales > 0 ? `${weeklySales} sold` : undefined}
@@ -147,13 +148,16 @@ export default function DashboardPage() {
   );
 }
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Stat({ href, label, value, sub }: { href: string; label: string; value: string; sub?: string }) {
   return (
-    <div className="card p-3 text-center">
+    <Link
+      href={href}
+      className="card p-3 text-center transition-colors hover:bg-[var(--bg-page)] active:bg-[var(--bg-page)]"
+    >
       <p className="text-xl font-medium">{value}</p>
       <p className="text-[11px] text-[var(--text-secondary)]">{label}</p>
       {sub && <p className="text-[10px] text-green-600 mt-0.5">{sub}</p>}
-    </div>
+    </Link>
   );
 }
 

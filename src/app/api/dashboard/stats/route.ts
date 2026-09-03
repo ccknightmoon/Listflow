@@ -77,13 +77,26 @@ export async function GET() {
     if (salesResult.status === "fulfilled" && salesResult.value.body.includes("<Ack>Success</Ack>")) {
       weeklyRevenue = 0;
       weeklySales = 0;
+      const sevenDaysAgoMs = Date.parse(sevenDaysAgo);
       const txBlocks = xmlFindAll(salesResult.value.body, "Transaction");
       for (const tx of txBlocks) {
         const priceStr = xmlFind(tx, "TransactionPrice");
         const qtyStr = xmlFind(tx, "QuantityPurchased");
         const price = parseFloat(priceStr || "0");
         const qty = parseInt(qtyStr || "1", 10);
-        if (price > 0) { weeklyRevenue += price * qty; weeklySales += qty; }
+        // The ModTimeFrom/ModTimeTo query above filters by eBay's ModTime,
+        // which bumps on ANY change to a transaction -- a buyer leaving
+        // feedback, marking it shipped, a return being opened -- not just
+        // the original sale. A sale from weeks ago that merely got touched
+        // this week would otherwise get counted as "sold this week" and
+        // inflate both numbers. CreatedDate is the actual sale timestamp,
+        // so re-check against it here rather than trusting the ModTime
+        // window alone (ModTime is always >= CreatedDate, so this can only
+        // narrow the set, never miss a real this-week sale).
+        const createdDateStr = xmlFind(tx, "CreatedDate");
+        const createdMs = createdDateStr ? Date.parse(createdDateStr) : NaN;
+        const isActuallyThisWeek = !isNaN(createdMs) && createdMs >= sevenDaysAgoMs;
+        if (price > 0 && isActuallyThisWeek) { weeklyRevenue += price * qty; weeklySales += qty; }
       }
     }
 
