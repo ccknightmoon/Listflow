@@ -207,7 +207,15 @@ export default function NewListingPage() {
   }
 
   async function handleSaveDraft(): Promise<string | null> {
-    if (savedDraftId) return savedDraftId;
+    // NOTE: this used to short-circuit with `if (savedDraftId) return
+    // savedDraftId;` — meaning a second save (or the re-save that
+    // handleListOnEbay does before listing) was a silent no-op that threw
+    // away any edits made since the first save: re-running Analyze, adding
+    // a photo, or fixing a typo after an initial save all got dropped, and
+    // /api/ebay/list reads the draft straight from the database, so a
+    // stale draft meant a stale live eBay listing. Now every call does a
+    // real, full sync — POST once to create, PATCH every time after to
+    // keep the stored draft caught up with the current on-screen state.
     setSaveStatus("saving");
     setPhotoUploadWarning(null);
     try {
@@ -235,41 +243,55 @@ export default function NewListingPage() {
       const { suggestedPrice, avgSold, activeRangeLow, activeRangeHigh, sellOdds } = result ?? {};
       const finalPrice = suggestedPrice ?? (customPrice ? Number(customPrice) : null);
 
-      const data = await apiFetch<{ draft?: { id?: string | null } }>("/api/drafts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          brand: brand || aiResult?.brand || null,
-          color: color || aiResult?.color || null,
-          size: size || aiResult?.size || null,
-          condition,
-          flaws,
-          suggestedPrice: finalPrice,
-          avgSold: avgSold ?? null,
-          activeRangeLow: activeRangeLow ?? null,
-          activeRangeHigh: activeRangeHigh ?? null,
-          sellOdds: sellOdds ?? null,
-          thumbnailUrl,
-          photoUrls: allPhotoUrls.length > 0 ? allPhotoUrls : null,
-          itemType: aiResult?.itemType ?? null,
-          style: aiResult?.style ?? null,
-          material: aiResult?.material ?? null,
-          sleeveLength: aiResult?.sleeveLength ?? null,
-          neckline: aiResult?.neckline ?? null,
-          fit: aiResult?.fit ?? null,
-          pattern: aiResult?.pattern ?? null,
-          description: aiResult?.description ?? null,
-          vintage: aiResult?.vintage ?? null,
-          theme: aiResult?.theme ?? null,
-          character: aiResult?.character ?? null,
-          characterFamily: aiResult?.characterFamily ?? null,
-          yearManufactured: aiResult?.yearManufactured ?? null,
-          season: aiResult?.season ?? null,
-        }),
-      });
+      const payload = {
+        title,
+        brand: brand || aiResult?.brand || null,
+        color: color || aiResult?.color || null,
+        size: size || aiResult?.size || null,
+        condition,
+        flaws,
+        suggestedPrice: finalPrice,
+        avgSold: avgSold ?? null,
+        activeRangeLow: activeRangeLow ?? null,
+        activeRangeHigh: activeRangeHigh ?? null,
+        sellOdds: sellOdds ?? null,
+        // Photos: only overwrite what we actually re-uploaded this call —
+        // an empty result here (e.g. every slot already had a URL and
+        // nothing new was picked) shouldn't wipe out photos saved earlier.
+        ...(thumbnailUrl ? { thumbnailUrl } : {}),
+        ...(allPhotoUrls.length > 0 ? { photoUrls: allPhotoUrls } : {}),
+        itemType: aiResult?.itemType ?? null,
+        style: aiResult?.style ?? null,
+        material: aiResult?.material ?? null,
+        sleeveLength: aiResult?.sleeveLength ?? null,
+        neckline: aiResult?.neckline ?? null,
+        fit: aiResult?.fit ?? null,
+        pattern: aiResult?.pattern ?? null,
+        description: aiResult?.description ?? null,
+        vintage: aiResult?.vintage ?? null,
+        theme: aiResult?.theme ?? null,
+        character: aiResult?.character ?? null,
+        characterFamily: aiResult?.characterFamily ?? null,
+        yearManufactured: aiResult?.yearManufactured ?? null,
+        season: aiResult?.season ?? null,
+      };
 
-      const id = data.draft?.id ?? null;
+      let id = savedDraftId;
+      if (id) {
+        await apiFetch(`/api/drafts/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        const data = await apiFetch<{ draft?: { id?: string | null } }>("/api/drafts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        id = data.draft?.id ?? null;
+      }
+
       setSavedDraftId(id);
       setSaveStatus("saved");
       return id;
@@ -285,18 +307,8 @@ export default function NewListingPage() {
     setNeedsConnect(false);
     setNeedsReconnect(false);
     try {
-      const existingId = savedDraftId;
       const draftId = await handleSaveDraft();
       if (!draftId) throw new Error("Could not save draft before listing");
-      if (existingId) {
-        const { suggestedPrice } = result ?? {};
-        const finalPrice = suggestedPrice ?? (customPrice ? Number(customPrice) : null);
-        await apiFetch(`/api/drafts/${draftId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ title, brand: brand || aiResult?.brand || null, size: size || aiResult?.size || null, color: color || aiResult?.color || null, condition, flaws, suggestedPrice: finalPrice }),
-        });
-      }
       const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[] }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

@@ -531,12 +531,21 @@ export default function BatchUploadPage() {
   }
 
   async function handleSaveDraft(index: number): Promise<string | null> {
-    if (draftIds[index]) return draftIds[index];
+    // NOTE: this used to short-circuit with `if (draftIds[index]) return
+    // draftIds[index];`, and handleListOnEbay only ever called this when
+    // no draft existed yet — so editing a row in the results table (title,
+    // condition, brand, color, size, flaws are all editable above) after
+    // "Save all drafts" had already run meant the edit never reached the
+    // database at all, and /api/ebay/list reads the draft straight from
+    // there. Now every call does a real, full sync — POST once to create,
+    // PATCH every time after — and handleListOnEbay always calls this
+    // first so a listing attempt is always built from what's on screen.
     setSaveStatus((prev) => ({ ...prev, [index]: "saving" }));
 
     try {
       const result = results[index];
       const group = groups[index] ?? [];
+      const existingId = draftIds[index];
 
       const hasRealPricing = result.pricing && !result.pricing.noData;
       const suggestion: PriceSuggestion =
@@ -546,7 +555,10 @@ export default function BatchUploadPage() {
         ? suggestion.suggestedPrice
         : customPrices[index] ? Number(customPrices[index]) : suggestion.suggestedPrice;
 
-      // Upload all photos in the group; first becomes the thumbnail
+      // Upload all photos in the group; first becomes the thumbnail. Only
+      // overwrite photoUrls/thumbnailUrl on a re-save if something actually
+      // uploaded this time — an empty result shouldn't wipe out photos a
+      // previous save already stored.
       const photoUrls: string[] = [];
       let failedCount = 0;
       for (const photoIdx of group) {
@@ -569,46 +581,56 @@ export default function BatchUploadPage() {
       }
       const thumbnailUrl = photoUrls[0] ?? null;
 
-      const data = await apiFetch<{ draft?: { id?: string } }>("/api/drafts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: result.suggestedTitle,
-          brand: result.brand,
-          color: result.color,
-          size: result.size,
-          condition: result.condition,
-          flaws: result.flaws,
-          suggestedPrice: finalPrice,
-          avgSold: hasRealPricing ? suggestion.avgSold : null,
-          activeRangeLow: hasRealPricing ? suggestion.activeRangeLow : null,
-          activeRangeHigh: hasRealPricing ? suggestion.activeRangeHigh : null,
-          sellOdds: hasRealPricing ? suggestion.sellOdds : null,
-          thumbnailUrl,
-          photoUrls: photoUrls.length > 0 ? photoUrls : null,
-          itemType: result.itemType ?? null,
-          style: result.style ?? null,
-          material: result.material ?? null,
-          sleeveLength: result.sleeveLength ?? null,
-          neckline: result.neckline ?? null,
-          fit: result.fit ?? null,
-          pattern: result.pattern ?? null,
-          description: (() => {
-            const measLine = formatMeasurements(result);
-            if (measLine && result.description) return `${measLine}\n\n${result.description}`;
-            if (measLine) return measLine;
-            return result.description ?? null;
-          })(),
-          vintage: result.vintage ?? null,
-          theme: result.theme ?? null,
-          character: result.character ?? null,
-          characterFamily: result.characterFamily ?? null,
-          yearManufactured: result.yearManufactured ?? null,
-          season: result.season ?? null,
-        }),
-      });
+      const payload = {
+        title: result.suggestedTitle,
+        brand: result.brand,
+        color: result.color,
+        size: result.size,
+        condition: result.condition,
+        flaws: result.flaws,
+        suggestedPrice: finalPrice,
+        avgSold: hasRealPricing ? suggestion.avgSold : null,
+        activeRangeLow: hasRealPricing ? suggestion.activeRangeLow : null,
+        activeRangeHigh: hasRealPricing ? suggestion.activeRangeHigh : null,
+        sellOdds: hasRealPricing ? suggestion.sellOdds : null,
+        ...(photoUrls.length > 0 ? { thumbnailUrl, photoUrls } : {}),
+        itemType: result.itemType ?? null,
+        style: result.style ?? null,
+        material: result.material ?? null,
+        sleeveLength: result.sleeveLength ?? null,
+        neckline: result.neckline ?? null,
+        fit: result.fit ?? null,
+        pattern: result.pattern ?? null,
+        description: (() => {
+          const measLine = formatMeasurements(result);
+          if (measLine && result.description) return `${measLine}\n\n${result.description}`;
+          if (measLine) return measLine;
+          return result.description ?? null;
+        })(),
+        vintage: result.vintage ?? null,
+        theme: result.theme ?? null,
+        character: result.character ?? null,
+        characterFamily: result.characterFamily ?? null,
+        yearManufactured: result.yearManufactured ?? null,
+        season: result.season ?? null,
+      };
 
-      const id: string = data.draft?.id ?? "";
+      let id: string = existingId ?? "";
+      if (id) {
+        await apiFetch(`/api/drafts/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        const data = await apiFetch<{ draft?: { id?: string } }>("/api/drafts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        id = data.draft?.id ?? "";
+      }
+
       if (!id) throw new Error("Failed to save draft");
       setDraftIds((prev) => ({ ...prev, [index]: id }));
       setSaveStatus((prev) => ({ ...prev, [index]: "saved" }));
@@ -620,16 +642,12 @@ export default function BatchUploadPage() {
   }
 
   async function handleListOnEbay(index: number): Promise<boolean> {
-    let id = draftIds[index];
+    setListStatus((prev) => ({ ...prev, [index]: "saving" }));
+    const id = await handleSaveDraft(index);
     if (!id) {
-      setListStatus((prev) => ({ ...prev, [index]: "saving" }));
-      const saved = await handleSaveDraft(index);
-      if (!saved) {
-        setListStatus((prev) => ({ ...prev, [index]: "error" }));
-        setListErrors((prev) => ({ ...prev, [index]: "Failed to save draft" }));
-        return false;
-      }
-      id = saved;
+      setListStatus((prev) => ({ ...prev, [index]: "error" }));
+      setListErrors((prev) => ({ ...prev, [index]: "Failed to save draft" }));
+      return false;
     }
 
     setListStatus((prev) => ({ ...prev, [index]: "listing" }));

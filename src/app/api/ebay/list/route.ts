@@ -18,16 +18,41 @@ export async function POST(req: NextRequest) {
   if (!auth.user) return auth.unauthorized;
   const { supabase } = auth;
 
-  let body: { draftId?: string; shippingMode?: unknown; shippingCost?: unknown; customSku?: string };
+  let body: { draftId?: string; shippingMode?: unknown; shippingCost?: unknown; customSku?: string; isHeavy?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
-  const { draftId, shippingMode: rawShippingMode, shippingCost: rawShippingCost, customSku: requestCustomSku } = body;
+  const { draftId, shippingMode: rawShippingMode, shippingCost: rawShippingCost, customSku: requestCustomSku, isHeavy: rawIsHeavy } = body;
   const shippingCost = typeof rawShippingCost === "number" && rawShippingCost > 0 ? rawShippingCost : undefined;
-  const shippingMode = parseShippingMode(rawShippingMode);
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
+
+  // Neither listing screen (new-listing, batch-upload) has ever sent an
+  // explicit shippingMode — they only send the "Heavy item" checkbox as
+  // `isHeavy` plus its dollar amount as `shippingCost`. That meant every
+  // listing silently used the default "free" shipping policy no matter
+  // what the seller picked as their Default Shipping Mode in Settings
+  // (app_settings.default_shipping_mode), and the "Heavy item" checkbox
+  // never actually applied the flat-rate "buyer pays" policy or shipping
+  // cost override on the real eBay listing — it only nudged the suggested
+  // price. Fixed by deriving the real mode server-side when the caller
+  // doesn't pass one explicitly: a checked "Heavy item" always means
+  // "buyer_pays" (the flat-rate policy this checkbox has always been
+  // paired with), otherwise fall back to the seller's own saved default.
+  let shippingMode = parseShippingMode(rawShippingMode);
+  if (rawShippingMode === undefined) {
+    if (rawIsHeavy === true) {
+      shippingMode = "buyer_pays";
+    } else {
+      const { data: settingsRow } = await supabase
+        .from("app_settings")
+        .select("default_shipping_mode")
+        .eq("user_id", auth.user.id)
+        .maybeSingle();
+      shippingMode = settingsRow?.default_shipping_mode === "calculated" ? "calculated" : "free";
+    }
+  }
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {
@@ -36,6 +61,11 @@ export async function POST(req: NextRequest) {
   if (shippingMode === "calculated" && !connection.policies.shippingCalculatedId) {
     return NextResponse.json({
       error: "Calculated shipping isn't set up yet — pick your Calculated shipping policy in Settings → eBay Connection (create a \"Calculated: cost varies by buyer location\" shipping policy in eBay Seller Hub first if you haven't).",
+    }, { status: 400 });
+  }
+  if (shippingMode === "buyer_pays" && !connection.policies.shippingHeavyId) {
+    return NextResponse.json({
+      error: "Heavy-item shipping isn't set up yet — pick your flat-rate (heavy item) shipping policy in Settings → eBay Connection (create a flat-rate shipping policy in eBay Seller Hub first if you haven't).",
     }, { status: 400 });
   }
 
