@@ -40,16 +40,22 @@ export async function POST(req: NextRequest) {
   // doesn't pass one explicitly: a checked "Heavy item" always means
   // "buyer_pays" (the flat-rate policy this checkbox has always been
   // paired with), otherwise fall back to the seller's own saved default.
+  // One settings lookup covers both the shipping-mode fallback (only
+  // needed when the caller didn't say and the item isn't flagged heavy)
+  // and the store description footer (always needed — see
+  // upsertInventoryItem in ebay-inventory.ts, the one place it's applied).
+  const { data: settingsRow } = await supabase
+    .from("app_settings")
+    .select("default_shipping_mode, store_description_footer")
+    .eq("user_id", auth.user.id)
+    .maybeSingle();
+  const storeFooter = settingsRow?.store_description_footer || null;
+
   let shippingMode = parseShippingMode(rawShippingMode);
   if (rawShippingMode === undefined) {
     if (rawIsHeavy === true) {
       shippingMode = "buyer_pays";
     } else {
-      const { data: settingsRow } = await supabase
-        .from("app_settings")
-        .select("default_shipping_mode")
-        .eq("user_id", auth.user.id)
-        .maybeSingle();
       shippingMode = settingsRow?.default_shipping_mode === "calculated" ? "calculated" : "free";
     }
   }
@@ -125,7 +131,7 @@ export async function POST(req: NextRequest) {
       await deleteInventoryItem(candidateSku);
     }
 
-    const itemResult = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode);
+    const itemResult = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter);
     if (itemResult.status >= 400) {
       const errData = itemResult.data as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
       const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(itemResult.data);
@@ -238,7 +244,7 @@ export async function POST(req: NextRequest) {
           : [originalCondition];
 
         for (const tryCondition of conditionsToTry) {
-          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode);
+          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter);
           if (upsertResult.status >= 400) continue;
           missingRequiredAspects = upsertResult.missingRequiredAspects ?? missingRequiredAspects;
           // Brief pause so eBay's inventory service indexes the item before we try to publish

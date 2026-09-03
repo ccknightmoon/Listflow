@@ -18,6 +18,7 @@ import {
   Palette,
   UserCircle,
   Trash2,
+  FileText,
 } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
@@ -35,6 +36,15 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Store description footer — appended automatically to every listing's
+  // description at publish time (never shown/stored on the item's own
+  // description field, see upsertInventoryItem in src/lib/ebay-inventory.ts).
+  const [footer, setFooter] = useState("");
+  const [savedFooter, setSavedFooter] = useState(""); // last value confirmed saved, to know if there are unsaved edits
+  const [footerSaving, setFooterSaving] = useState(false);
+  const [footerSaved, setFooterSaved] = useState(false);
+  const [footerError, setFooterError] = useState<string | null>(null);
 
   const [theme, setTheme] = useState<Theme>("system");
   const [signingOut, setSigningOut] = useState(false);
@@ -59,10 +69,37 @@ export default function SettingsPage() {
     setTheme(getStoredTheme());
     fetch("/api/settings")
       .then((r) => r.json())
-      .then((data) => setMode(data.defaultShippingMode === "calculated" ? "calculated" : "free"))
+      .then((data) => {
+        setMode(data.defaultShippingMode === "calculated" ? "calculated" : "free");
+        const f = data.storeDescriptionFooter ?? "";
+        setFooter(f);
+        setSavedFooter(f);
+      })
       .catch(() => setError("Could not load settings"))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleSaveFooter() {
+    if (footerSaving) return;
+    setFooterSaving(true);
+    setFooterSaved(false);
+    setFooterError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storeDescriptionFooter: footer }),
+      });
+      if (!res.ok) throw new Error();
+      setSavedFooter(footer);
+      setFooterSaved(true);
+      setTimeout(() => setFooterSaved(false), 2000);
+    } catch {
+      setFooterError("Could not save — try again.");
+    } finally {
+      setFooterSaving(false);
+    }
+  }
 
   useEffect(() => {
     // The eBay OAuth callback redirects back here with ?ebay=connected or
@@ -255,6 +292,37 @@ export default function SettingsPage() {
             <Check className="w-3 h-3" /> Saved
           </p>
         )}
+      </SettingsSection>
+
+      <SettingsSection
+        title="Store description"
+        description="Write your shop's boilerplate once — welcome message, policies, a sign-off, whatever you'd normally paste into every listing. It gets added to the end of every item's description automatically when you list it. Each item's own description above this only ever has that item's own details; you never see or edit this text on the listing screens."
+        icon={FileText}
+      >
+        <textarea
+          className="input"
+          rows={8}
+          placeholder={'Welcome to our store :)!\nExplore unique second-hand treasures with detailed photos!\n...'}
+          value={footer}
+          onChange={(e) => { setFooter(e.target.value); setFooterSaved(false); }}
+        />
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            onClick={handleSaveFooter}
+            disabled={footerSaving || footer === savedFooter}
+            className="btn btn-primary text-xs px-3 py-1.5"
+          >
+            {footerSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save"}
+          </button>
+          {footerError && (
+            <p className="text-xs" style={{ color: "var(--danger)" }}>{footerError}</p>
+          )}
+          {footerSaved && (
+            <p className="text-xs flex items-center gap-1" style={{ color: "var(--success)" }}>
+              <Check className="w-3 h-3" /> Saved
+            </p>
+          )}
+        </div>
       </SettingsSection>
 
       <SettingsSection

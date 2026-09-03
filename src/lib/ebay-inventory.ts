@@ -325,7 +325,7 @@ export async function upsertInventoryItem(sku: string, draft: {
   character_family?: string | null;
   year_manufactured?: string | null;
   season?: string | null;
-}, categoryId = "1059", conditionOverride?: string, shippingMode: ShippingMode = "free") {
+}, categoryId = "1059", conditionOverride?: string, shippingMode: ShippingMode = "free", storeFooter?: string | null) {
   const aspects: Record<string, string[]> = {};
   aspects["Department"] = [getDepartment(draft.title || "")];
   // Derived from the actual size tag/title (see detectSizeType) rather than
@@ -427,7 +427,15 @@ export async function upsertInventoryItem(sku: string, draft: {
     condition,
     product: {
       title: (draft.title || "Item").slice(0, 80),
-      description: draft.description || descParts.join("\n") || "No description.",
+      // The seller's own store-wide message (Settings → Store Description)
+      // is appended here, at actual eBay-listing-build time, never written
+      // into drafts.description itself — the item's own description stays
+      // clean/reusable, and every listing always picks up whatever the
+      // seller has saved as their footer right now, not a snapshot frozen
+      // in at draft-save time.
+      description: [draft.description || descParts.join("\n") || "No description.", storeFooter?.trim() || null]
+        .filter(Boolean)
+        .join("\n\n"),
       aspects,
       ...(() => {
         const urls = (draft.photo_urls ?? []).filter((u) => u?.startsWith("http"));
