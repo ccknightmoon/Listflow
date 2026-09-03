@@ -16,6 +16,8 @@ import {
   Check,
   X,
   Trash2,
+  CheckSquare,
+  Square,
 } from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
@@ -142,6 +144,17 @@ export default function BatchUploadPage() {
   const [analyzingProgress, setAnalyzingProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [groupingProgress, setGroupingProgress] = useState<string>("");
+  // Bulk-edit selection on the results screen — lets a seller set condition
+  // or heavy-item shipping across many items at once instead of one row at
+  // a time, the single most-requested gap found in the "list 40 a day"
+  // workflow audit. Only items that haven't been saved/listed yet are
+  // selectable, matching every per-item control's own disabled={!!draftIds[i]}
+  // rule below — editing a value that's already locked in on eBay would be
+  // silently meaningless.
+  const [selected, setSelected] = useState<Record<number, boolean>>({});
+  const [bulkCondition, setBulkCondition] = useState<Condition>(CONDITIONS[2]);
+  const [bulkHeavy, setBulkHeavy] = useState(false);
+  const [bulkShippingCost, setBulkShippingCost] = useState("");
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   async function handleFilesSelected(files: FileList | null) {
@@ -735,6 +748,60 @@ export default function BatchUploadPage() {
     if (successCount > 0) setTimeout(() => router.push("/store"), 1500);
   }
 
+  // Items still open for bulk editing -- once a draft is saved (draftIds[i]
+  // set), every per-item field below locks with disabled={!!draftIds[i]},
+  // so bulk-applying a new value to an already-saved item would silently
+  // do nothing. Errored items are excluded too; they have no editable
+  // fields to apply to until retried.
+  function getSelectableIndices(): number[] {
+    return results
+      .map((_, i) => i)
+      .filter((i) => !results[i].error && !draftIds[i]);
+  }
+
+  function toggleSelected(i: number) {
+    setSelected((prev) => ({ ...prev, [i]: !prev[i] }));
+  }
+
+  function toggleSelectAll() {
+    const selectable = getSelectableIndices();
+    const allSelected = selectable.length > 0 && selectable.every((i) => selected[i]);
+    setSelected((prev) => {
+      const next = { ...prev };
+      selectable.forEach((i) => {
+        next[i] = !allSelected;
+      });
+      return next;
+    });
+  }
+
+  function applyBulkCondition() {
+    const targets = getSelectableIndices().filter((i) => selected[i]);
+    if (targets.length === 0) return;
+    const targetSet = new Set(targets);
+    setResults((prev) => prev.map((r, i) => (targetSet.has(i) ? { ...r, condition: bulkCondition } : r)));
+  }
+
+  function applyBulkShipping() {
+    const targets = getSelectableIndices().filter((i) => selected[i]);
+    if (targets.length === 0) return;
+    setHeavyItems((prev) => {
+      const next = { ...prev };
+      targets.forEach((i) => {
+        next[i] = bulkHeavy;
+      });
+      return next;
+    });
+    setShippingCosts((prev) => {
+      const next = { ...prev };
+      targets.forEach((i) => {
+        if (bulkHeavy && bulkShippingCost) next[i] = bulkShippingCost;
+        else delete next[i];
+      });
+      return next;
+    });
+  }
+
   return (
     <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
       <div className="flex items-center gap-3 mb-6">
@@ -970,6 +1037,72 @@ export default function BatchUploadPage() {
               </div>
             );
           })()}
+          {(() => {
+            const selectable = getSelectableIndices();
+            if (selectable.length === 0) return null;
+            const selectedCount = selectable.filter((i) => selected[i]).length;
+            const allSelected = selectedCount > 0 && selectedCount === selectable.length;
+            return (
+              <div className="card p-3 flex flex-col gap-3">
+                <button
+                  onClick={toggleSelectAll}
+                  className="flex items-center gap-2 text-sm font-medium self-start"
+                >
+                  {allSelected ? (
+                    <CheckSquare className="w-4 h-4 text-[var(--brand-600)]" />
+                  ) : (
+                    <Square className="w-4 h-4 text-[var(--text-tertiary)]" />
+                  )}
+                  {selectedCount > 0 ? `${selectedCount} selected` : `Select items to bulk-edit (${selectable.length})`}
+                </button>
+                {selectedCount > 0 && (
+                  <div className="flex flex-col gap-2 pt-1 border-t border-[var(--border)]">
+                    <div className="flex items-center gap-2">
+                      <select
+                        className="input flex-1 text-xs"
+                        value={bulkCondition}
+                        onChange={(e) => setBulkCondition(e.target.value as Condition)}
+                      >
+                        {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <button onClick={applyBulkCondition} className="btn text-xs px-3 py-1.5 whitespace-nowrap">
+                        Set condition
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <input
+                        type="checkbox"
+                        id="bulk-heavy"
+                        checked={bulkHeavy}
+                        onChange={(e) => setBulkHeavy(e.target.checked)}
+                        className="w-4 h-4 rounded accent-[var(--brand-600)]"
+                      />
+                      <label htmlFor="bulk-heavy" className="text-xs text-[var(--text-secondary)] cursor-pointer">
+                        Heavy item
+                      </label>
+                      {bulkHeavy && (
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-[var(--text-secondary)]">— shipping $</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="0.00"
+                            value={bulkShippingCost}
+                            onChange={(e) => setBulkShippingCost(e.target.value)}
+                            className="input w-16 text-xs py-0.5 px-1.5"
+                          />
+                        </div>
+                      )}
+                      <button onClick={applyBulkShipping} className="btn text-xs px-3 py-1.5 whitespace-nowrap ml-auto">
+                        Set shipping
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
           {results.map((result, i) => {
             const group = groups[i] ?? [];
             const groupPhotos = group.map((idx) => photos[idx]?.previewUrl).filter(Boolean) as string[];
@@ -1014,6 +1147,19 @@ export default function BatchUploadPage() {
 
             return (
               <div key={i} className="card overflow-hidden">
+                {!draftIds[i] && (
+                  <button
+                    onClick={() => toggleSelected(i)}
+                    className="flex items-center gap-2 px-4 pt-3 text-xs text-[var(--text-tertiary)] w-full"
+                  >
+                    {selected[i] ? (
+                      <CheckSquare className="w-4 h-4 text-[var(--brand-600)]" />
+                    ) : (
+                      <Square className="w-4 h-4" />
+                    )}
+                    Item {i + 1}
+                  </button>
+                )}
                 {/* Scrollable photo strip — swipe to see all photos in this group */}
                 {groupPhotos.length > 0 && (
                   <div className="flex gap-2 overflow-x-auto px-4 pt-4 pb-2 snap-x snap-mandatory">
