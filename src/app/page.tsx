@@ -71,6 +71,12 @@ export default function SplashPage() {
           Sign in
         </Link>
       </div>
+
+      <footer className="mt-10 flex items-center justify-center gap-3 text-xs text-[var(--text-tertiary)]">
+        <Link href="/terms" className="underline">Terms</Link>
+        <span>&middot;</span>
+        <Link href="/privacy" className="underline">Privacy</Link>
+      </footer>
     </main>
   );
 }

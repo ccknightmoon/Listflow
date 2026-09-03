@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 import { Loader2 } from "lucide-react";
+import Link from "next/link";
 
 // Sign-up is intentionally NOT offered from this page. Drafts, settings,
 // and photos are now genuinely private per account (see the multi-tenant
@@ -118,6 +119,12 @@ export default function LoginPage() {
             {loading ? "Signing in..." : "Sign in"}
           </button>
         </form>
+
+        <p className="text-xs text-center text-[var(--text-tertiary)]">
+          By signing in, you agree to our{" "}
+          <Link href="/terms" className="underline">Terms</Link> and{" "}
+          <Link href="/privacy" className="underline">Privacy Policy</Link>.
+        </p>
       </div>
     </main>
   );

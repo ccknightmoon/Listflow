@@ -460,12 +460,6 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       </div>
 
       {error && (
-        <div className="mb-4">
-          <AIDisclaimer className="mb-3" />
-        </div>
-      )}
-
-      {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
           {error}
           {needsConnect && (
@@ -628,6 +622,8 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           </button>
         </div>
       )}
+
+      <AIDisclaimer className="mb-3" />
 
       <div className="flex flex-col gap-3 mb-4">
         <div>

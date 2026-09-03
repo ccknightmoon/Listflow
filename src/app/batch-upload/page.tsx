@@ -706,12 +706,6 @@ export default function BatchUploadPage() {
       </div>
 
       {error && (
-        <div className="mb-4">
-          <AIDisclaimer className="mb-3" />
-        </div>
-      )}
-
-      {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
           {error}
         </div>
@@ -878,6 +872,7 @@ export default function BatchUploadPage() {
 
       {step === "results" && (
         <div className="flex flex-col gap-4">
+          <AIDisclaimer />
           {(() => {
             const unsaved = results.filter((r, i) => !r.error && (saveStatus[i] ?? "idle") === "idle").length;
             const allSaved = results.every((r, i) => r.error || saveStatus[i] === "saved");

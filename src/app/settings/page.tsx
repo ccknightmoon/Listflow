@@ -409,6 +409,12 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
+      <footer className="flex items-center justify-center gap-3 text-xs text-[var(--text-tertiary)] mt-2 mb-4">
+        <Link href="/terms" className="underline">Terms</Link>
+        <span>&middot;</span>
+        <Link href="/privacy" className="underline">Privacy</Link>
+      </footer>
+
       <BottomNav />
     </main>
   );
