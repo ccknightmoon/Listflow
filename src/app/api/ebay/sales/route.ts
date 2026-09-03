@@ -159,6 +159,21 @@ export async function GET(req: Request) {
     return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null };
   }).filter((s) => s.price > 0);
 
+  // Most-recently-sold first. Transactions arrive merged from several
+  // parallel 30-day-window calls (see the chunking above) in whatever
+  // order Promise.all's results happen to land in, not chronological
+  // order — without an explicit sort here the list on /sales came out
+  // effectively shuffled relative to sale date. An unparseable/missing
+  // soldAt sorts to the bottom rather than throwing the whole list off.
+  sales.sort((a, b) => {
+    const ta = Date.parse(a.soldAt);
+    const tb = Date.parse(b.soldAt);
+    if (isNaN(ta) && isNaN(tb)) return 0;
+    if (isNaN(ta)) return 1;
+    if (isNaN(tb)) return -1;
+    return tb - ta;
+  });
+
   // Look up thumbnails from Supabase first (instant, no extra eBay calls —
   // covers every item that was actually listed through this app).
   if (sales.length > 0) {
