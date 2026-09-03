@@ -136,7 +136,7 @@ export default function ShipPage() {
             const isUrgent = days >= 3;
 
             return (
-              <div key={i} className="card p-3 flex items-start gap-3">
+              <div key={i} className={`card stagger p-3 flex items-start gap-3 ${i < 6 ? `d${i + 1}` : ""}`}>
                 {item.thumbnail ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -164,8 +164,10 @@ export default function ShipPage() {
                     <span
                       className="text-[11px] font-medium px-1.5 py-0.5 rounded-full"
                       style={{
-                        background: isUrgent ? "#FEF2F2" : "#F0FDF4",
-                        color: isUrgent ? "#B91C1C" : "#15803D",
+                        background: isUrgent
+                          ? "color-mix(in srgb, var(--danger) 16%, var(--bg-surface))"
+                          : "color-mix(in srgb, var(--success) 16%, var(--bg-surface))",
+                        color: isUrgent ? "var(--danger)" : "var(--success)",
                       }}
                     >
                       {days === 0 ? "Paid today" : days === 1 ? "Paid yesterday" : `Paid ${days}d ago`}

@@ -256,7 +256,8 @@ export default function StorePage() {
               placeholder="Search by title..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              className="w-full text-sm rounded-xl border pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
             />
             {search && (
               <button
@@ -270,7 +271,8 @@ export default function StorePage() {
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className="w-full text-sm rounded-xl border px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -348,10 +350,10 @@ export default function StorePage() {
 
       {!loading && sorted.length > 0 && (
         <div className="flex flex-col gap-2">
-          {sorted.map((l) => (
+          {sorted.map((l, rowIndex) => (
             <div
               key={l.listingId}
-              className={`card p-3 ${selectMode && selected.has(l.listingId) ? "ring-2 ring-[var(--accent)]" : ""}`}
+              className={`card stagger p-3 ${rowIndex < 6 ? `d${rowIndex + 1}` : ""} ${selectMode && selected.has(l.listingId) ? "ring-2 ring-[var(--accent)]" : ""}`}
               onClick={
                 selectMode
                   ? () =>
@@ -400,7 +402,7 @@ export default function StorePage() {
                           if (e.key === "Escape") setEditingPrice((prev) => { const next = new Map(prev); next.delete(l.listingId); return next; });
                         }}
                       />
-                      <button onClick={() => handleUpdatePrice(l)} disabled={savingPrice.has(l.listingId)} className="text-green-600">
+                      <button onClick={() => handleUpdatePrice(l)} disabled={savingPrice.has(l.listingId)} style={{ color: "var(--success)" }}>
                         {savingPrice.has(l.listingId) ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                       </button>
                       <button onClick={() => setEditingPrice((prev) => { const next = new Map(prev); next.delete(l.listingId); return next; })} className="text-[var(--text-tertiary)]">
@@ -475,7 +477,7 @@ export default function StorePage() {
 
       {selectMode && selected.size > 0 && (
         <div className="fixed bottom-20 left-0 right-0 max-w-md mx-auto px-5">
-          <div className="card p-3 shadow-lg flex flex-col gap-2">
+          <div className="card p-3 flex flex-col gap-2">
             <p className="text-xs text-[var(--text-secondary)]">{selected.size} item{selected.size !== 1 ? "s" : ""} selected</p>
             <div className="flex gap-2">
               <div className="relative flex-1">

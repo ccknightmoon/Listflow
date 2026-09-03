@@ -90,16 +90,58 @@ export default function SalesPage() {
       </div>
 
       {!loading && !error && sales.length > 0 && (
-        <div className="card p-4 mb-4 flex items-center gap-3">
-          <TrendingUp className="w-5 h-5 text-green-600 flex-shrink-0" />
+        <div className="card p-4 mb-3 flex items-center gap-3">
+          <div
+            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "color-mix(in srgb, var(--success) 16%, var(--bg-surface))", color: "var(--success)" }}
+          >
+            <TrendingUp className="w-5 h-5" />
+          </div>
           <div>
-            <p className="text-xs text-[var(--text-secondary)]">
+            <p className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
               {sales.length} item{sales.length !== 1 ? "s" : ""} sold
             </p>
-            <p className="text-xl font-medium">${totalRevenue.toFixed(2)}</p>
+            <p className="font-display font-extrabold text-xl">${totalRevenue.toFixed(2)}</p>
           </div>
         </div>
       )}
+
+      {!loading && !error && sales.length > 0 && (() => {
+        // Bucket sold-at timestamps into ~weekly windows ending today, most
+        // recent week last — purely client-side from the sales already on
+        // hand, no separate API call.
+        const bucketCount = Math.max(1, Math.min(6, Math.ceil(days / 7)));
+        const weekMs = 7 * 86400000;
+        const now = Date.now();
+        const totals = new Array(bucketCount).fill(0);
+        for (const s of sales) {
+          const t = new Date(s.soldAt).getTime();
+          const idx = Math.floor((now - t) / weekMs);
+          if (idx >= 0 && idx < bucketCount) totals[bucketCount - 1 - idx] += s.total;
+        }
+        const max = Math.max(1, ...totals);
+        return (
+          <div className="card p-4 mb-4">
+            <p className="text-[11.5px] font-bold mb-2.5" style={{ color: "var(--text-secondary)" }}>Revenue by week</p>
+            <div className="flex items-end gap-1.5" style={{ height: 64 }}>
+              {totals.map((t, idx) => (
+                <div
+                  key={idx}
+                  className="flex-1 rounded-t"
+                  style={{
+                    height: `${Math.max(6, (t / max) * 100)}%`,
+                    background: "var(--accent)",
+                    opacity: idx === totals.length - 1 ? 1 : 0.6,
+                    borderRadius: "5px 5px 2px 2px",
+                    transition: "height .4s var(--spring)",
+                  }}
+                  title={`$${t.toFixed(2)}`}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {error && (
         <div className="mb-4">
@@ -133,7 +175,7 @@ export default function SalesPage() {
       {!loading && sales.length > 0 && (
         <div className="flex flex-col gap-2">
           {sales.map((s, i) => (
-            <div key={i} className="card p-3 flex items-center gap-3">
+            <div key={i} className={`card stagger p-3 flex items-center gap-3 ${i < 6 ? `d${i + 1}` : ""}`}>
               {s.thumbnail ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={s.thumbnail} alt={s.title} className="w-12 h-12 rounded-md object-cover flex-shrink-0" />
@@ -150,7 +192,7 @@ export default function SalesPage() {
                 </p>
               </div>
               <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                <p className="text-sm font-medium text-green-600">${s.total.toFixed(2)}</p>
+                <p className="text-sm font-medium" style={{ color: "var(--success)" }}>${s.total.toFixed(2)}</p>
                 <a
                   href={`https://www.ebay.com/itm/${s.listingId}`}
                   target="_blank"

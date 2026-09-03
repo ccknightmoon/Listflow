@@ -274,6 +274,7 @@ export default function SettingsPage() {
       </div>
 
       <SettingsSection
+        delay="d1"
         title="Default shipping"
         description="Every new listing (New Listing, Batch Upload, Drafts) starts with this choice automatically, so you don&apos;t have to set it item by item. You can still switch an individual item on its own screen — this just sets what it starts as."
         icon={Truck}
@@ -329,6 +330,7 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
+        delay="d2"
         title="Store description"
         description="Write your shop's boilerplate once — welcome message, policies, a sign-off, whatever you'd normally paste into every listing. It gets added to the end of every item's description automatically when you list it. Each item's own description above this only ever has that item's own details; you never see or edit this text on the listing screens."
         icon={FileText}
@@ -360,6 +362,7 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
+        delay="d3"
         title="eBay Connection"
         description="Each account connects its own eBay seller account — your listings, categories, and shipping/return policies are yours alone, never shared with anyone else signed in."
         icon={Store}
@@ -449,6 +452,7 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
+        delay="d4"
         title="Appearance"
         description="Pick an accent color for the whole app — buttons, tiles, and highlights update everywhere, on every device you're signed into. Theme is per-device; &quot;System&quot; follows your phone or computer's own light/dark setting automatically."
         icon={Palette}
@@ -517,7 +521,7 @@ export default function SettingsPage() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title="Account" icon={UserCircle}>
+      <SettingsSection delay="d5" title="Account" icon={UserCircle}>
         <button
           onClick={handleSignOut}
           disabled={signingOut}
@@ -566,14 +570,16 @@ function SettingsSection({
   description,
   icon: Icon,
   children,
+  delay,
 }: {
   title: string;
   description?: string;
   icon: React.ElementType;
   children: React.ReactNode;
+  delay?: string;
 }) {
   return (
-    <section className="card p-4 mb-4">
+    <section className={`card stagger p-4 mb-4 ${delay ?? ""}`}>
       <div className="flex items-start gap-3 mb-3">
         <div
           className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -637,8 +643,8 @@ function OptionCard({
   return (
     <button
       onClick={onClick}
-      className="card p-4 text-left flex gap-3 items-start"
-      style={selected ? { border: "2px solid var(--accent)" } : undefined}
+      className="card p-4 text-left flex gap-3 items-start active:scale-[.98]"
+      style={{ border: selected ? "2px solid var(--accent)" : undefined, transitionTimingFunction: "var(--spring)" }}
     >
       <Icon className="w-5 h-5 mt-0.5 flex-shrink-0" style={{ color: selected ? "var(--accent)" : "var(--text-secondary)" }} />
       <div className="flex-1">

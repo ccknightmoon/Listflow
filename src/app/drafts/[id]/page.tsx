@@ -415,7 +415,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
 
   if (loading) {
     return (
-      <main className="min-h-screen max-w-md mx-auto px-5 pt-6">
+      <main className="min-h-screen max-w-md mx-auto px-5 pt-6" style={{ viewTransitionName: "draft-detail" }}>
         <Link href="/drafts" className="inline-flex mb-4">
           <ArrowLeft className="w-5 h-5" />
         </Link>
@@ -428,7 +428,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
 
   if (error && !draft) {
     return (
-      <main className="min-h-screen max-w-md mx-auto px-5 pt-6">
+      <main className="min-h-screen max-w-md mx-auto px-5 pt-6" style={{ viewTransitionName: "draft-detail" }}>
         <Link href="/drafts" className="inline-flex mb-4">
           <ArrowLeft className="w-5 h-5" />
         </Link>
@@ -438,7 +438,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
   }
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-32">
+    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-32" style={{ viewTransitionName: "draft-detail" }}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Link href={draft?.ebay_listing_id ? "/store" : "/drafts"}>

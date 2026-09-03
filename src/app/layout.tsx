@@ -59,7 +59,8 @@ export default function RootLayout({
     <html lang="en" data-theme={theme} data-accent={accent} className={`${bricolage.variable} ${jakarta.variable}`}>
       <head>
         <meta name="mobile-web-app-capable" content="yes" />
-        <meta name="theme-color" content="#185FA5" />
+        <meta name="theme-color" content="#F3F1FA" media="(prefers-color-scheme: light)" />
+        <meta name="theme-color" content="#101017" media="(prefers-color-scheme: dark)" />
       </head>
       <body>{children}</body>
     </html>

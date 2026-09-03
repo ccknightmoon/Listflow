@@ -7,6 +7,7 @@ import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X } from "lucide-rea
 import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
+import { morphNavigate } from "@/lib/view-transition";
 
 interface Draft {
   id: string;
@@ -219,7 +220,8 @@ export default function DraftsPage() {
               placeholder="Search drafts..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-sm rounded-lg border border-[var(--border)] bg-white pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              className="w-full text-sm rounded-xl border pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
             />
             {search && (
               <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -230,7 +232,8 @@ export default function DraftsPage() {
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            className="w-full text-sm rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className="w-full text-sm rounded-xl border px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
           >
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -264,9 +267,9 @@ export default function DraftsPage() {
       )}
 
       {!loading && drafts.filter((d) => !d.suggested_price).length > 0 && (
-        <div className="card p-3 mb-4 flex items-center gap-2 text-sm" style={{ borderColor: "#F59E0B", background: "#FFFBEB" }}>
+        <div className="card p-3 mb-4 flex items-center gap-2 text-sm" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
           <span className="text-base">⚠️</span>
-          <p style={{ color: "#92400E" }}>
+          <p style={{ color: "var(--text-primary)" }}>
             {drafts.filter((d) => !d.suggested_price).length} draft{drafts.filter((d) => !d.suggested_price).length !== 1 ? "s" : ""} have no price — set one before listing.
           </p>
         </div>
@@ -301,22 +304,31 @@ export default function DraftsPage() {
           )}
 
           <div className="flex flex-col gap-2 mb-6">
-            {filtered.map((d) => {
+            {filtered.map((d, rowIndex) => {
               const isSelected = selected.has(d.id);
               const isHeavy = heavyIds.has(d.id);
               return (
                 <div
                   key={d.id}
-                  onClick={() => router.push(`/drafts/${d.id}`)}
-                  className="card flex items-center gap-3 p-3 cursor-pointer active:opacity-80"
-                  style={isSelected ? { borderColor: "#3B6D11" } : undefined}
+                  onClick={(e) => {
+                    // Only the clicked row carries the shared transition
+                    // name — every row can't hold it statically, since a
+                    // view-transition-name must be unique on screen at once.
+                    (e.currentTarget as HTMLElement).style.viewTransitionName = "draft-detail";
+                    morphNavigate(router, `/drafts/${d.id}`);
+                  }}
+                  className={`card stagger p-3 flex items-center gap-3 cursor-pointer active:scale-[.98] ${rowIndex < 6 ? `d${rowIndex + 1}` : ""}`}
+                  style={{
+                    borderColor: isSelected ? "var(--accent)" : undefined,
+                    transitionTimingFunction: "var(--spring)",
+                  }}
                 >
                   <div
                     onClick={(e) => toggleSelect(e, d.id)}
                     className="w-5 h-5 rounded border-2 flex-shrink-0 flex items-center justify-center"
                     style={{
-                      borderColor: isSelected ? "#3B6D11" : "var(--text-tertiary)",
-                      background: isSelected ? "#3B6D11" : "transparent",
+                      borderColor: isSelected ? "var(--accent)" : "var(--text-tertiary)",
+                      background: isSelected ? "var(--accent)" : "transparent",
                     }}
                   >
                     {isSelected && (
@@ -343,10 +355,10 @@ export default function DraftsPage() {
                     <div className="flex items-center gap-2">
                       <p className="text-sm font-medium truncate">{d.title ?? "Untitled item"}</p>
                       {isHeavy && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-medium" style={{ background: "#F3F4F6", color: "var(--text-secondary)" }}>Heavy</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full flex-shrink-0 font-medium" style={{ background: "var(--glass-strong)", color: "var(--text-secondary)" }}>Heavy</span>
                       )}
                     </div>
-                    <p className="text-xs mt-0.5" style={{ color: d.suggested_price == null ? "#D97706" : "var(--text-secondary)" }}>
+                    <p className="text-xs mt-0.5" style={{ color: d.suggested_price == null ? "var(--warning-border)" : "var(--text-secondary)" }}>
                       {d.suggested_price != null ? `$${d.suggested_price}` : "No price set"}
                       {d.condition ? ` · ${d.condition}` : ""}
                       {d.created_at ? ` · ${timeAgo(d.created_at)}` : ""}
@@ -367,12 +379,12 @@ export default function DraftsPage() {
         <div
           className="fixed bottom-20 left-0 right-0 px-5 max-w-md mx-auto"
         >
-          <div className="card p-3 flex gap-2 shadow-lg">
+          <div className="card p-3 flex gap-2">
             <button
               onClick={handleDeleteSelected}
               disabled={deleting}
               className="btn flex-1"
-              style={{ color: "#B3261E" }}
+              style={{ color: "var(--danger)" }}
             >
               {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
               {deleting ? "Deleting..." : `Delete (${selected.size})`}
