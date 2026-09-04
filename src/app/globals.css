@@ -201,12 +201,46 @@ img {
 .d5 { animation-delay: 0.15s; }
 .d6 { animation-delay: 0.18s; }
 
+/* View Transitions: the "container transform" a tapped Dashboard tile
+   (MorphLink, e.g. the To-ship card) grows into the destination screen's
+   root content block, sharing a viewTransitionName between the two (see
+   src/lib/view-transition.ts). The browser interpolates position, size
+   and opacity between them on its own — this just swaps the default
+   linear crossfade for the app's own spring easing and a touch of lift,
+   so it reads as "rising into place" rather than a flat dissolve. */
+::view-transition-group(*) {
+  animation-duration: 0.5s;
+  animation-timing-function: var(--spring);
+}
+
+::view-transition-old(root) {
+  animation: vt-fade-out 0.18s ease-out both;
+}
+
+::view-transition-new(root) {
+  animation: vt-rise-in 0.5s var(--spring) both;
+}
+
+@keyframes vt-fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes vt-rise-in {
+  from { opacity: 0; transform: translateY(18px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation-duration: 0.01ms !important;
   }
 }
 

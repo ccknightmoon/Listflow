@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight, Settings } from "lucide-react";
+import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
@@ -77,7 +77,7 @@ export default function DashboardPage() {
   const weeklySales = stats?.weeklySales ?? null;
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-4 pt-5 pb-28 overflow-hidden">
+    <main className="relative min-h-screen flex flex-col max-w-md mx-auto px-4 pt-5 pb-28 overflow-hidden">
       <div
         className="bloom d1 stagger"
         style={{ width: 260, height: 260, top: -80, left: -60, background: "var(--glow-primary)" }}
@@ -95,25 +95,15 @@ export default function DashboardPage() {
           <p className="text-[11px] font-semibold" style={{ color: "var(--text-tertiary)" }}>{eyebrow}</p>
           <h1 className="font-display font-bold text-lg mt-0.5">{displayName ?? "My store"}</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/settings"
-            className="w-9 h-9 rounded-xl flex items-center justify-center active:scale-90"
-            style={{ background: "var(--glass-strong)", border: "1px solid var(--glass-line)", color: "var(--text-secondary)", transition: "transform .25s var(--spring)" }}
-            title="Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </Link>
-          <div
-            className="w-9 h-9 rounded-xl flex items-center justify-center font-display font-bold text-sm text-white"
-            style={{ background: "var(--accent)" }}
-          >
-            {displayName ? displayName[0].toUpperCase() : "S"}
-          </div>
+        <div
+          className="w-9 h-9 rounded-xl flex items-center justify-center font-display font-bold text-sm text-white"
+          style={{ background: "var(--accent)" }}
+        >
+          {displayName ? displayName[0].toUpperCase() : "S"}
         </div>
       </div>
 
-      <div className="relative grid grid-cols-[1.3fr_1fr] gap-2.5 mb-2.5">
+      <div className="relative grid flex-1 grid-cols-[1.3fr_1fr] gap-2.5 mb-2.5">
         <Link
           href="/sales"
           className="card d1 stagger row-span-2 p-4 flex flex-col justify-between active:scale-[.97]"
