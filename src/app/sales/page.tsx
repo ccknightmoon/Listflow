@@ -88,21 +88,43 @@ export default function SalesPage() {
         </button>
       </div>
 
-      <div className="flex gap-2 mb-4">
-        {([7, 30, 90] as DayRange[]).map((d) => (
-          <button
-            key={d}
-            onClick={() => setDays(d)}
-            className={`flex-1 text-sm py-1.5 rounded-lg border transition-colors ${
-              days === d
-                ? "border-[var(--accent)] text-[var(--accent)] font-medium"
-                : "border-[var(--border)] text-[var(--text-secondary)]"
-            }`}
+      {(() => {
+        const dayOptions: DayRange[] = [7, 30, 90];
+        const activeIndex = dayOptions.indexOf(days);
+        return (
+          <div
+            className="relative flex mb-4 rounded-xl overflow-hidden"
+            style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
           >
-            {d}d
-          </button>
-        ))}
-      </div>
+            {/* Sliding accent pill behind the active tab — position/width
+                computed from activeIndex so it glides to the new tab
+                instead of the flat border/color swap this used to be. */}
+            <div
+              className="absolute rounded-lg pointer-events-none"
+              style={{
+                top: 3,
+                bottom: 3,
+                left: `calc(${activeIndex} * 100% / 3 + 3px)`,
+                width: `calc(100% / 3 - 6px)`,
+                background: "var(--accent-tint)",
+                border: "1px solid var(--accent)",
+                transition: "left .35s var(--spring)",
+              }}
+            />
+            {dayOptions.map((d) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => setDays(d)}
+                className="tap relative z-10 flex-1 text-sm py-2 font-medium"
+                style={{ color: days === d ? "var(--accent)" : "var(--text-secondary)" }}
+              >
+                {d}d
+              </button>
+            ))}
+          </div>
+        );
+      })()}
 
       {!loading && !error && sales.length > 0 && (
         <div className="card p-4 mb-3 flex items-center gap-3">
