@@ -21,6 +21,17 @@ import Link from "next/link";
 // since that's enforced by Supabase itself and can't be bypassed by
 // calling its API directly with the public anon key the way an app-level
 // check here could be.
+//
+// TODO when reopening self-serve signup: the "By signing in, you agree to
+// our Terms and Privacy Policy" text below is fine for sign-IN (existing
+// users already agreed once, when their account was created) — but a
+// sign-UP form needs actual affirmative consent, not a passive link. Add a
+// required checkbox on the sign-up form specifically — unchecked by
+// default, e.g. "I agree to the Terms of Service and Privacy Policy" —
+// and keep the submit/create-account button disabled until it's checked,
+// so there's a real record that each new account owner agreed before the
+// account was created. Do not just reuse the sign-in form's footer text
+// for sign-up and call it done.
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
