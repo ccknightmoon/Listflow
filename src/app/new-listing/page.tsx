@@ -403,7 +403,7 @@ export default function NewListingPage() {
               setIsHeavy(next);
               if (!next) setShippingCost("");
             }}
-            className="text-xs font-semibold rounded-full px-3 py-1.5 border"
+            className="tap text-xs font-semibold rounded-full px-3 py-1.5 border"
             style={
               isHeavy
                 ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }

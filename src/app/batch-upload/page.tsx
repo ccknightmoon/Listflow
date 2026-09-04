@@ -1058,7 +1058,7 @@ export default function BatchUploadPage() {
                     {gIdx > 0 && (
                       <button
                         onClick={() => mergeGroupUp(gIdx)}
-                        className="p-1 rounded hover:bg-[var(--bg-page)]"
+                        className="tap p-1 rounded hover:bg-[var(--bg-page)]"
                         title={`Merge into Item ${gIdx} — use if the AI split one item into two groups`}
                       >
                         <ArrowUpToLine className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
@@ -1066,7 +1066,7 @@ export default function BatchUploadPage() {
                     )}
                     <button
                       onClick={() => removeGroup(gIdx)}
-                      className="p-1 rounded hover:bg-[var(--bg-page)]"
+                      className="tap p-1 rounded hover:bg-[var(--bg-page)]"
                       title="Delete group"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
@@ -1102,7 +1102,7 @@ export default function BatchUploadPage() {
                               e.stopPropagation();
                               removePhoto(photoIdx, gIdx);
                             }}
-                            className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full flex items-center justify-center"
+                            className="tap absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full flex items-center justify-center"
                             style={{ background: "var(--bg-surface)", border: "1px solid var(--glass-line)" }}
                           >
                             <X className="w-2.5 h-2.5" style={{ color: "var(--text-secondary)" }} />
@@ -1122,7 +1122,7 @@ export default function BatchUploadPage() {
                             onClick={() => movePhotoEarlier(photoIdx, gIdx)}
                             disabled={isFirstOverall}
                             title={posInGroup === 0 ? "Move to previous item" : "Move earlier"}
-                            className="w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
+                            className="tap w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
                             style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
                           >
                             <ChevronLeft className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
@@ -1132,7 +1132,7 @@ export default function BatchUploadPage() {
                             onClick={() => splitGroupAt(gIdx, photoIdx)}
                             disabled={posInGroup === 0}
                             title={posInGroup === 0 ? "Already the start of this item" : "Split into a new item starting here"}
-                            className="w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
+                            className="tap w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
                             style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
                           >
                             <Scissors className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
@@ -1142,7 +1142,7 @@ export default function BatchUploadPage() {
                             onClick={() => movePhotoLater(photoIdx, gIdx)}
                             disabled={isLastOverall}
                             title={posInGroup === group.length - 1 ? "Move to next item" : "Move later"}
-                            className="w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
+                            className="tap w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
                             style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
                           >
                             <ChevronRight className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
@@ -1477,7 +1477,7 @@ export default function BatchUploadPage() {
                     />
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
                       <select
-                        className="text-xs font-semibold rounded-full px-3 py-1.5 border appearance-none"
+                        className="tap text-xs font-semibold rounded-full px-3 py-1.5 border appearance-none"
                         style={{ background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-primary)" }}
                         value={result.condition}
                         disabled={!!draftIds[i]}
@@ -1496,7 +1496,7 @@ export default function BatchUploadPage() {
                           if (!next) setShippingCosts((prev) => { const n = { ...prev }; delete n[i]; return n; });
                         }}
                         disabled={!!draftIds[i]}
-                        className="text-xs font-semibold rounded-full px-3 py-1.5 border"
+                        className="tap text-xs font-semibold rounded-full px-3 py-1.5 border"
                         style={
                           heavyItems[i]
                             ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }

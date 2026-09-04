@@ -243,7 +243,7 @@ export default function DraftsPage() {
               style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
+              <button onClick={() => setSearch("")} className="tap absolute right-3 top-1/2 -translate-y-1/2">
                 <X className="w-4 h-4 text-[var(--text-tertiary)]" />
               </button>
             )}

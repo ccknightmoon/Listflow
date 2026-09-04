@@ -267,6 +267,18 @@ img {
 .text-accent { color: var(--accent); }
 .bg-accent-tint { background: var(--accent-tint); }
 
+/* Shared press-feedback utility for clickable elements that don't already
+   get it from .card/.btn (icon buttons, text-link rows, custom toggle
+   pills) — a quick spring squish plus a smooth color/border transition so
+   nothing on the page just snaps between states. */
+.tap {
+  transition: transform 0.15s var(--spring), background-color 0.15s ease,
+    border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+.tap:active {
+  transform: scale(0.94);
+}
+
 .bloom {
   position: absolute;
   border-radius: 50%;

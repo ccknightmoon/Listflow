@@ -294,7 +294,7 @@ export default function StorePage() {
               {search && (
                 <button
                   onClick={() => setSearch("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                  className="tap absolute right-3 top-1/2 -translate-y-1/2"
                 >
                   <X className="w-4 h-4 text-[var(--text-tertiary)]" />
                 </button>
@@ -463,7 +463,7 @@ export default function StorePage() {
                   href={`https://www.ebay.com/sh/edit-item/${l.listingId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
+                  className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
                 >
                   <Pencil className="w-3.5 h-3.5" />
                   Edit on eBay
@@ -473,7 +473,7 @@ export default function StorePage() {
                   href={`https://www.ebay.com/itm/${l.listingId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
+                  className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                   View
@@ -483,7 +483,7 @@ export default function StorePage() {
                     <div className="w-px h-4 bg-[var(--border)]" />
                     <Link
                       href={`/drafts/${l.draftId}`}
-                      className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
+                      className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
                     >
                       <ChevronRight className="w-3.5 h-3.5" />
                       Edit
@@ -494,7 +494,7 @@ export default function StorePage() {
                 <button
                   onClick={() => handleDelist(l)}
                   disabled={deleting.has(l.listingId)}
-                  className="flex items-center gap-1 text-xs flex-1 justify-center py-1 disabled:opacity-50"
+                  className="tap flex items-center gap-1 text-xs flex-1 justify-center py-1 disabled:opacity-50"
                   style={{ color: "var(--danger)" }}
                 >
                   {deleting.has(l.listingId) ? (
