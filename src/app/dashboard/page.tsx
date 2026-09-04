@@ -7,7 +7,7 @@ import BottomNav from "@/components/BottomNav";
 import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
 import { apiFetch } from "@/lib/api";
-import { bucketRevenueByWeek, type BucketableSale } from "@/lib/sales-buckets";
+import { bucketRevenue, formatCompactCurrency, type BucketableSale } from "@/lib/sales-buckets";
 
 interface Stats {
   drafts: number;
@@ -98,7 +98,7 @@ export default function DashboardPage() {
     })();
   }, [supabase]);
 
-  const trend = trendSales ? bucketRevenueByWeek(trendSales, TREND_DAYS) : null;
+  const trend = trendSales ? bucketRevenue(trendSales, TREND_DAYS) : null;
   const trendMax = trend ? Math.max(1, ...trend.totals) : 1;
 
   const drafts = stats?.drafts ?? null;
@@ -159,20 +159,30 @@ export default function DashboardPage() {
                 <p className="text-[9px] font-bold mb-1.5" style={{ color: "var(--text-tertiary)" }}>
                   Last {trend.totals.length} weeks
                 </p>
-                <div className="flex items-end gap-1" style={{ height: 30 }}>
-                  {trend.totals.map((t, i) => (
-                    <div
-                      key={i}
-                      className="flex-1 rounded-t"
-                      style={{
-                        height: `${Math.max(3, (t / trendMax) * 30)}px`,
-                        background: "var(--accent)",
-                        opacity: i === trend.totals.length - 1 ? 1 : 0.45,
-                        borderRadius: "3px 3px 1px 1px",
-                      }}
-                      title={`$${t.toFixed(2)}`}
-                    />
-                  ))}
+                <div className="flex items-end gap-1.5" style={{ height: 38 }}>
+                  {trend.totals.map((t, i) => {
+                    const isCurrent = i === trend.totals.length - 1;
+                    return (
+                      <div key={i} className="flex-1 flex flex-col items-center justify-end gap-0.5 h-full min-w-0">
+                        <span
+                          className="text-[7px] font-semibold tabular-nums leading-none"
+                          style={{ color: isCurrent ? "var(--accent)" : "var(--text-tertiary)" }}
+                        >
+                          {formatCompactCurrency(t)}
+                        </span>
+                        <div
+                          className="w-full rounded-t"
+                          style={{
+                            height: `${Math.max(3, (t / trendMax) * 24)}px`,
+                            background: "var(--accent)",
+                            opacity: isCurrent ? 1 : 0.45,
+                            borderRadius: "3px 3px 1px 1px",
+                          }}
+                          title={`$${t.toFixed(2)}`}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}

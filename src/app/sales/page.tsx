@@ -5,18 +5,9 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, Loader2, RefreshCw, Shirt, TrendingUp } from "lucide-react";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
-import { bucketRevenueByWeek } from "@/lib/sales-buckets";
+import { bucketRevenue, formatCompactCurrency } from "@/lib/sales-buckets";
 
 type DayRange = 7 | 30 | 90;
-
-// Compact currency for tight chart labels: $342, $1.2k, $12k — never cents,
-// since the point is a quick relative read, not a precise figure (the exact
-// total is one tap away in the stat card above and the list below).
-function formatCompactCurrency(n: number): string {
-  if (n >= 10000) return `$${Math.round(n / 1000)}k`;
-  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
-  return `$${Math.round(n)}`;
-}
 
 interface Sale {
   listingId: string;
@@ -134,19 +125,29 @@ export default function SalesPage() {
         // Purely client-side from the sales already on hand, no separate API
         // call — and computed by the same shared bucketing function the
         // Dashboard's trend sparkline uses, so the two screens can never
-        // disagree about what "this week" means. Recomputed on every
-        // render, so as real time passes and `sales` is refreshed, the
-        // buckets and their date labels shift forward automatically.
-        const { totals, weekStarts } = bucketRevenueByWeek(sales, days);
+        // disagree about what a given period's revenue is. Recomputed on
+        // every render, so as real time passes and `sales` is refreshed,
+        // the buckets and their date labels shift forward automatically.
+        // The 7-day tab buckets by day (a real day-by-day trend instead of
+        // one giant bar); 30/90-day tabs bucket by week and cover the full
+        // window rather than being capped to a handful of recent weeks.
+        const { totals, bucketStarts } = bucketRevenue(sales, days);
         const max = Math.max(1, ...totals);
         const barAreaPx = 46;
+        const isDaily = days <= 7;
         return (
           <div className="card p-4 mb-4">
-            <p className="text-[11.5px] font-bold mb-2.5" style={{ color: "var(--text-secondary)" }}>Revenue by week</p>
-            <div className="flex items-end gap-1.5">
+            <p className="text-[11.5px] font-bold mb-2.5" style={{ color: "var(--text-secondary)" }}>
+              Revenue by {isDaily ? "day" : "week"}
+            </p>
+            <div className={`flex items-end ${totals.length > 8 ? "gap-1" : "gap-1.5"}`}>
               {totals.map((t, idx) => {
                 const isCurrent = idx === totals.length - 1;
-                const weekLabel = new Date(weekStarts[idx]).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                const bucketDate = new Date(bucketStarts[idx]);
+                const barLabel = isDaily
+                  ? bucketDate.toLocaleDateString("en-US", { weekday: "short" })
+                  : bucketDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                const tooltipDate = bucketDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
                 return (
                   <div key={idx} className="flex-1 flex flex-col items-center gap-1 min-w-0">
                     <span
@@ -164,10 +165,10 @@ export default function SalesPage() {
                         borderRadius: "5px 5px 2px 2px",
                         transition: "height .4s var(--spring)",
                       }}
-                      title={`Week of ${weekLabel}: $${t.toFixed(2)}`}
+                      title={`${isDaily ? tooltipDate : `Week of ${tooltipDate}`}: $${t.toFixed(2)}`}
                     />
                     <span className="text-[9px] truncate" style={{ color: "var(--text-tertiary)" }}>
-                      {weekLabel}
+                      {barLabel}
                     </span>
                   </div>
                 );
