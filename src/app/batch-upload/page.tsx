@@ -156,6 +156,7 @@ export default function BatchUploadPage() {
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
   const [customPrices, setCustomPrices] = useState<Record<number, string>>({});
+  const [customSkus, setCustomSkus] = useState<Record<number, string>>({});
   const [heavyItems, setHeavyItems] = useState<Record<number, boolean>>({});
   const [shippingCosts, setShippingCosts] = useState<Record<number, string>>({});
   const [listingAll, setListingAll] = useState(false);
@@ -817,6 +818,7 @@ export default function BatchUploadPage() {
         size: result.size,
         condition: result.condition,
         flaws: result.flaws,
+        customSku: customSkus[index] || undefined,
         suggestedPrice: finalPrice,
         avgSold: hasRealPricing ? suggestion.avgSold : null,
         activeRangeLow: hasRealPricing ? suggestion.activeRangeLow : null,
@@ -1731,6 +1733,19 @@ export default function BatchUploadPage() {
                           }}
                         />
                       </div>
+                    </div>
+                    <div className="mt-2">
+                      <p className="text-[10px] text-[var(--text-tertiary)] mb-0.5">SKU (optional — alphanumeric only)</p>
+                      <input
+                        className="input text-xs w-full"
+                        placeholder="e.g. HDSHIRT001"
+                        value={customSkus[i] ?? ""}
+                        disabled={!!draftIds[i]}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 50);
+                          setCustomSkus((prev) => ({ ...prev, [i]: val }));
+                        }}
+                      />
                     </div>
                     <textarea
                       className="input w-full text-xs mt-1"

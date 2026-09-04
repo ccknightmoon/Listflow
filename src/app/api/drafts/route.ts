@@ -92,6 +92,7 @@ export async function POST(req: NextRequest) {
         size: body.size ?? null,
         condition: body.condition ?? null,
         flaws: body.flaws ?? null,
+        custom_sku: body.customSku ?? null,
         suggested_price: body.suggestedPrice ?? null,
         avg_sold: body.avgSold ?? null,
         active_range_low: body.activeRangeLow ?? null,
