@@ -231,8 +231,16 @@ export default function StorePage() {
     });
   }, [filtered, sort]);
 
+  // Extra bottom clearance while the bulk-price bar is floating above
+  // BottomNav (bottom-20, plus its own card height) — pb-24 alone isn't
+  // enough room and the last listing row ends up hidden behind it.
+  const bulkBarActive = selectMode && selected.size > 0;
+
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "store-panel" }}>
+    <main
+      className={`relative min-h-screen max-w-md mx-auto px-5 pt-6 overflow-hidden ${bulkBarActive ? "pb-56" : "pb-24"}`}
+      style={{ viewTransitionName: "store-panel" }}
+    >
       <div
         className="bloom d1 stagger"
         style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
