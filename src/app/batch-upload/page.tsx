@@ -156,7 +156,7 @@ export default function BatchUploadPage() {
   const [bulkCondition, setBulkCondition] = useState<Condition>(CONDITIONS[2]);
   const [bulkHeavy, setBulkHeavy] = useState(false);
   const [bulkShippingCost, setBulkShippingCost] = useState("");
-  const [bulkOpen, setBulkOpen] = useState(true); // bulk-edit panel accordion — collapsed manually, not on selection change
+  const [bulkOpen, setBulkOpen] = useState(false); // bulk-edit panel accordion — starts collapsed per mock, opened manually
   const fileInput = useRef<HTMLInputElement | null>(null);
 
   async function handleFilesSelected(files: FileList | null) {
