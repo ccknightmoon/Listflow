@@ -265,12 +265,21 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
-      <div className="flex items-center gap-3 mb-6">
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden">
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
+      />
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 200, height: 200, top: 10, right: -70, background: "var(--glow-secondary)" }}
+      />
+
+      <div className="relative flex items-center gap-3 mb-6">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <h1 className="text-xl font-medium">Settings</h1>
+        <h1 className="font-display text-xl font-bold">Settings</h1>
       </div>
 
       <SettingsSection
