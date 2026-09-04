@@ -349,8 +349,12 @@ export default function NewListingPage() {
   return (
     <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
       <div className="flex items-center gap-3 mb-6">
-        <Link href="/dashboard">
-          <ArrowLeft className="w-5 h-5" />
+        <Link
+          href="/dashboard"
+          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
+          style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+        >
+          <ArrowLeft className="w-4 h-4" />
         </Link>
         <h1 className="text-xl font-medium">New listing</h1>
       </div>
@@ -391,28 +395,34 @@ export default function NewListingPage() {
           ))}
         </select>
 
-        <div className="flex items-center gap-2 py-1">
-          <input
-            type="checkbox"
-            id="heavy"
-            checked={isHeavy}
-            onChange={(e) => { setIsHeavy(e.target.checked); if (!e.target.checked) setShippingCost(""); }}
-            className="w-4 h-4 rounded accent-[var(--accent)]"
-          />
-          <label htmlFor="heavy" className="text-sm text-[var(--text-primary)] cursor-pointer">
-            Heavy item
-          </label>
+        <div className="flex items-center gap-1.5 py-1 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              const next = !isHeavy;
+              setIsHeavy(next);
+              if (!next) setShippingCost("");
+            }}
+            className="text-xs font-semibold rounded-full px-3 py-1.5 border"
+            style={
+              isHeavy
+                ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }
+                : { background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }
+            }
+          >
+            {isHeavy ? "Heavy item" : "Not heavy"}
+          </button>
           {isHeavy && (
-            <div className="flex items-center gap-1 ml-1">
-              <span className="text-sm text-[var(--text-secondary)]">— shipping $</span>
+            <div className="relative">
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-tertiary)" }}>$</span>
               <input
                 type="number"
                 min="0"
                 step="0.01"
-                placeholder="0.00"
+                placeholder="Shipping"
                 value={shippingCost}
                 onChange={(e) => setShippingCost(e.target.value)}
-                className="input w-20 text-sm py-0.5 px-1.5"
+                className="input w-24 text-xs py-1.5 pl-5 pr-2 rounded-full"
               />
             </div>
           )}
@@ -654,12 +664,17 @@ function PhotoSlot({
             className="absolute inset-0 w-full h-full object-cover"
           />
           <div className="absolute top-1 right-1 bg-white rounded-full p-0.5">
-            <Check className="w-3 h-3" style={{ color: "#3B6D11" }} />
+            <Check className="w-3 h-3" style={{ color: "var(--success)" }} />
           </div>
         </>
       ) : (
         <>
-          <Icon className="w-5 h-5 text-[var(--text-secondary)]" />
+          <div
+            className="w-9 h-9 rounded-lg flex items-center justify-center"
+            style={{ background: "color-mix(in srgb, var(--accent) 14%, var(--bg-surface))" }}
+          >
+            <Icon className="w-[18px] h-[18px]" style={{ color: "var(--accent)" }} />
+          </div>
           <span className="text-[10px] text-[var(--text-secondary)]">{label}</span>
         </>
       )}
@@ -689,18 +704,18 @@ function MiniStat({
     <div
       className="rounded-md p-2 text-center"
       style={{
-        background: highlight ? "#EAF3DE" : "var(--bg-page)",
+        background: highlight ? "color-mix(in srgb, var(--success) 14%, var(--bg-page))" : "var(--bg-page)",
       }}
     >
       <p
         className="text-[11px]"
-        style={{ color: highlight ? "#3B6D11" : "var(--text-secondary)" }}
+        style={{ color: highlight ? "var(--success)" : "var(--text-secondary)" }}
       >
         {label}
       </p>
       <p
         className="text-sm font-medium"
-        style={{ color: highlight ? "#3B6D11" : "var(--text-primary)" }}
+        style={{ color: highlight ? "var(--success)" : "var(--text-primary)" }}
       >
         {value}
       </p>
