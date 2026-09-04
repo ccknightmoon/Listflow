@@ -19,6 +19,8 @@ import {
   CheckSquare,
   Square,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
@@ -303,6 +305,43 @@ export default function BatchUploadPage() {
       next[toGroup] = [...next[toGroup], photoIndex];
       return next.filter((g) => g.length > 0);
     });
+  }
+
+  // Drag-and-drop (movePhoto above) only works with a mouse, so it's
+  // effectively unusable on a phone — which is how this app is actually
+  // used day to day. These give the same two corrections (fix a photo the
+  // AI put in the wrong item, fix which photo comes first) as plain
+  // buttons: tapping the edge of a group's photo strip spills the photo
+  // into the neighboring group instead of doing nothing.
+  function reorderWithinGroup(photoIndex: number, gIdx: number, direction: -1 | 1) {
+    setGroups((prev) => {
+      const next = prev.map((g) => [...g]);
+      const group = next[gIdx];
+      const pos = group.indexOf(photoIndex);
+      const swapWith = pos + direction;
+      if (pos === -1 || swapWith < 0 || swapWith >= group.length) return prev;
+      [group[pos], group[swapWith]] = [group[swapWith], group[pos]];
+      return next;
+    });
+  }
+
+  function movePhotoEarlier(photoIndex: number, gIdx: number) {
+    const pos = groups[gIdx].indexOf(photoIndex);
+    if (pos > 0) {
+      reorderWithinGroup(photoIndex, gIdx, -1);
+    } else if (gIdx > 0) {
+      movePhoto(photoIndex, gIdx, gIdx - 1);
+    }
+  }
+
+  function movePhotoLater(photoIndex: number, gIdx: number) {
+    const group = groups[gIdx];
+    const pos = group.indexOf(photoIndex);
+    if (pos < group.length - 1) {
+      reorderWithinGroup(photoIndex, gIdx, 1);
+    } else if (gIdx < groups.length - 1) {
+      movePhoto(photoIndex, gIdx, gIdx + 1);
+    }
   }
 
   function addNewGroup() {
@@ -888,9 +927,11 @@ export default function BatchUploadPage() {
       {step === "review" && (
         <>
           <p className="text-sm text-[var(--text-secondary)] mb-4">
-            Drag a photo into a different group to fix any mistakes. Only
-            the first {MAX_PHOTOS_PER_ITEM} photos per item will be used
-            for analysis.
+            Fix any mistakes before analyzing: drag a photo into a
+            different group (or use the arrows under a photo — they move
+            it into the previous/next item at either end of a group).
+            Only the first {MAX_PHOTOS_PER_ITEM} photos per item will be
+            used for analysis, in the order shown.
           </p>
           <div className="flex flex-col gap-4 mb-4">
             {groups.map((group, gIdx) => (
@@ -926,40 +967,71 @@ export default function BatchUploadPage() {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2 min-h-[64px]">
-                  {group.map((photoIdx) => (
-                    <div
-                      key={photoIdx}
-                      draggable
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData(
-                          "text/plain",
-                          JSON.stringify({ photoIndex: photoIdx, fromGroup: gIdx })
-                        );
-                      }}
-                      className="relative cursor-grab group/photo"
-                    >
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={photos[photoIdx].previewUrl}
-                        alt={`Photo ${photoIdx + 1}`}
-                        className="w-14 h-14 object-cover rounded-md"
-                      />
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          removePhoto(photoIdx, gIdx);
-                        }}
-                        className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover/photo:opacity-100 transition-opacity"
-                        style={{ background: "var(--bg-surface)", border: "1px solid var(--glass-line)" }}
-                      >
-                        <X className="w-2.5 h-2.5" style={{ color: "var(--text-secondary)" }} />
-                      </button>
-                      <GripVertical
-                        className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-white rounded-full p-0.5"
-                        style={{ color: "var(--text-tertiary)" }}
-                      />
-                    </div>
-                  ))}
+                  {group.map((photoIdx, posInGroup) => {
+                    const isFirstOverall = gIdx === 0 && posInGroup === 0;
+                    const isLastOverall = gIdx === groups.length - 1 && posInGroup === group.length - 1;
+                    return (
+                      <div key={photoIdx} className="flex flex-col items-center gap-1">
+                        <div
+                          draggable
+                          onDragStart={(e) => {
+                            e.dataTransfer.setData(
+                              "text/plain",
+                              JSON.stringify({ photoIndex: photoIdx, fromGroup: gIdx })
+                            );
+                          }}
+                          className="relative cursor-grab"
+                        >
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={photos[photoIdx].previewUrl}
+                            alt={`Photo ${photoIdx + 1}`}
+                            className="w-14 h-14 object-cover rounded-md"
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removePhoto(photoIdx, gIdx);
+                            }}
+                            className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full flex items-center justify-center"
+                            style={{ background: "var(--bg-surface)", border: "1px solid var(--glass-line)" }}
+                          >
+                            <X className="w-2.5 h-2.5" style={{ color: "var(--text-secondary)" }} />
+                          </button>
+                          <GripVertical
+                            className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-white rounded-full p-0.5"
+                            style={{ color: "var(--text-tertiary)" }}
+                          />
+                        </div>
+                        {/* Tap-to-move controls — drag-and-drop above needs a mouse and
+                            doesn't work on a phone. At either end of a group these spill
+                            the photo into the previous/next item instead of just reordering,
+                            so a mis-grouped photo can be fixed with a tap. */}
+                        <div className="flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={() => movePhotoEarlier(photoIdx, gIdx)}
+                            disabled={isFirstOverall}
+                            title={posInGroup === 0 ? "Move to previous item" : "Move earlier"}
+                            className="w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
+                            style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+                          >
+                            <ChevronLeft className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => movePhotoLater(photoIdx, gIdx)}
+                            disabled={isLastOverall}
+                            title={posInGroup === group.length - 1 ? "Move to next item" : "Move later"}
+                            className="w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
+                            style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+                          >
+                            <ChevronRight className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ))}
