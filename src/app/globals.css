@@ -101,7 +101,7 @@ html {
 
     --glass: rgba(255, 255, 255, 0.055);
     --glass-line: rgba(255, 255, 255, 0.11);
-    --glass-strong: rgba(255, 255, 255, 0.09);
+    --glass-strong: rgba(23, 22, 31, 0.92);
 
     --accent-tint: color-mix(in srgb, var(--accent) 18%, transparent);
     --glow-primary: color-mix(in srgb, var(--accent) 35%, transparent);
@@ -134,7 +134,7 @@ html {
 
   --glass: rgba(255, 255, 255, 0.055);
   --glass-line: rgba(255, 255, 255, 0.11);
-  --glass-strong: rgba(255, 255, 255, 0.09);
+  --glass-strong: rgba(23, 22, 31, 0.92);
 
   --accent-tint: color-mix(in srgb, var(--accent) 18%, transparent);
   --glow-primary: color-mix(in srgb, var(--accent) 35%, transparent);
@@ -279,6 +279,7 @@ img {
    across every screen — redefining what they render as is what re-skins
    most of the app from this one file, without touching page JSX. */
 .card {
+  position: relative;
   background: var(--glass);
   border: 1px solid var(--glass-line);
   border-radius: 18px;
@@ -289,6 +290,7 @@ img {
 }
 
 .btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -332,6 +334,7 @@ img {
 }
 
 .input {
+  position: relative;
   width: 100%;
   padding: 10px 12px;
   border-radius: 10px;
