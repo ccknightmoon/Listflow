@@ -38,7 +38,6 @@ interface StoreListing {
 export default function StorePage() {
   const [listings, setListings] = useState<StoreListing[]>(() => getPageCache<StoreListing[]>(STORE_CACHE_KEY) ?? []);
   const [loading, setLoading] = useState(() => getPageCache<StoreListing[]>(STORE_CACHE_KEY) === undefined);
-  const [ebayLoading, setEbayLoading] = useState(() => getPageCache<StoreListing[]>(STORE_CACHE_KEY) === undefined);
   const [error, setError] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -53,34 +52,25 @@ export default function StorePage() {
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkSuccessMsg, setBulkSuccessMsg] = useState("");
 
-  useEffect(() => { loadAll(); }, []);
-  // Keeps the cache in sync with every change to `listings` — both load
-  // phases below, plus delist/price-update mutations further down — without
-  // needing a separate cache write at each individual call site.
-  useEffect(() => { setPageCache(STORE_CACHE_KEY, listings); }, [listings]);
-
   async function loadAll() {
-    // No setLoading/setEbayLoading(true) here: the initial state above
-    // already reflects whether we had a cached, previously-merged list to
-    // show. loadAll() only ever runs once (on mount) — see the effect above
-    // — so there's no later re-run that would need this to flip back on.
+    // No setLoading(true) here: the initial state above already reflects
+    // whether we had a cached, previously-merged list to show. loadAll()
+    // only ever runs once (on mount, via the useEffect below) — so
+    // there's no later re-run that would need this to flip back on.
     setError(null);
 
-    // Fire both independent requests together instead of only starting the
-    // slower eBay call after the fast Supabase one has fully round-tripped —
-    // same "independent work runs concurrently" pattern already used for
-    // the Dashboard's parallel fetches. Phase 1 below still renders
-    // Listflow's own items the moment its own request resolves; eBay's
-    // request is just already in flight by the time Phase 2 reaches it
-    // instead of not having started yet.
+    // Fire both independent requests together — Listflow's own DB
+    // (Supabase, usually fast) and eBay's live listing set (Trading API,
+    // paginated, usually slower for a store of any real size). Neither is
+    // painted on its own: see the comment above this function for why.
     const supabasePromise = apiFetch<{ listings?: Array<{ listingId: string; title: string; price: string | null; thumbnail: string | null; sku: string | null; startTime: string | null; draftId: string }> }>("/api/ebay/inventory");
     const ebayPromise = apiFetch<{ listings?: StoreListing[]; total?: number; error?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/store");
 
-    // Phase 1: load Listflow items from Supabase — instant
+    let supabaseItems: StoreListing[] = [];
     let supabaseListingIds = new Set<string>();
     try {
       const data = await supabasePromise;
-      const items: StoreListing[] = (data.listings ?? []).map((l) => ({
+      supabaseItems = (data.listings ?? []).map((l) => ({
         listingId: l.listingId,
         title: l.title,
         price: l.price != null ? parseFloat(l.price) : null,
@@ -89,15 +79,12 @@ export default function StorePage() {
         startTime: l.startTime,
         draftId: l.draftId,
       }));
-      supabaseListingIds = new Set(items.map((i) => i.listingId));
-      setListings(items);
+      supabaseListingIds = new Set(supabaseItems.map((i) => i.listingId));
     } catch {
-      // non-fatal — eBay load below may still work
-    } finally {
-      setLoading(false);
+      // non-fatal — eBay load below may still work, and we fall back to
+      // an empty Supabase set rather than blocking on it.
     }
 
-    // Phase 2: eBay listings (already in flight above) — fills in items not created through Listflow
     try {
       const data = await ebayPromise;
       if (data.error) {
@@ -121,24 +108,25 @@ export default function StorePage() {
         }));
       // Only filter out sold items when we have the complete eBay listing set
       // (skip if paginated response is incomplete to avoid false negatives)
-      if (total <= ebayListings.length) {
-        setListings((prev) => [
-          ...prev.filter((l) => allActiveIds.has(l.listingId)),
-          ...ebayItems,
-        ]);
-      } else {
-        setListings((prev) => [...prev, ...ebayItems]);
-      }
+      const merged = total <= ebayListings.length
+        ? [...supabaseItems.filter((l) => allActiveIds.has(l.listingId)), ...ebayItems]
+        : [...supabaseItems, ...ebayItems];
+      setListings(merged);
     } catch (err) {
-      // Only show error if Supabase also returned nothing
-      setListings((prev) => {
-        if (prev.length === 0) setError((err as Error).message);
-        return prev;
-      });
+      // eBay failed — fall back to whatever Supabase had rather than an
+      // empty screen, and only surface an error if that was empty too.
+      setListings(supabaseItems);
+      if (supabaseItems.length === 0) setError((err as Error).message);
     } finally {
-      setEbayLoading(false);
+      setLoading(false);
     }
   }
+
+  useEffect(() => { loadAll(); }, []);
+  // Keeps the cache in sync with every change to `listings` — both load
+  // phases below, plus delist/price-update mutations further down — without
+  // needing a separate cache write at each individual call site.
+  useEffect(() => { setPageCache(STORE_CACHE_KEY, listings); }, [listings]);
 
   async function handleDelist(listing: StoreListing) {
     if (!confirm(`End listing "${listing.title}"? This will remove it from eBay.`)) return;
@@ -289,9 +277,6 @@ export default function StorePage() {
             <p className="text-xs text-[var(--text-secondary)]">All active eBay listings</p>
           )}
         </div>
-        {!loading && ebayLoading && (
-          <Loader2 className="w-4 h-4 animate-spin text-[var(--text-tertiary)]" />
-        )}
         {!loading && listings.length > 0 && (
           selectMode ? (
             <button onClick={() => { setSelectMode(false); setSelected(new Set()); setBulkPrice(""); }} className="text-sm text-[var(--text-secondary)]">Cancel</button>
@@ -365,7 +350,7 @@ export default function StorePage() {
         </div>
       )}
 
-      {!loading && !error && listings.length === 0 && !ebayLoading && (
+      {!loading && !error && listings.length === 0 && (
         <div className="card p-8 text-center">
           <p className="text-sm text-[var(--text-secondary)]">No active eBay listings found.</p>
         </div>
