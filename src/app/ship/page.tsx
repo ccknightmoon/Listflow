@@ -107,25 +107,23 @@ export default function ShipPage() {
         </button>
       </div>
 
-      {error && (
-        <div className="mb-4">
-          <Toast
-            type="error"
-            message={
-              <>
-                {error}
-                {needsConnect && (
-                  <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
-                )}
-                {needsReconnect && (
-                  <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>
-                )}
-              </>
-            }
-            onClose={() => setError(null)}
-          />
-        </div>
-      )}
+      <Toast
+        type="error"
+        message={
+          error ? (
+            <>
+              {error}
+              {needsConnect && (
+                <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
+              )}
+              {needsReconnect && (
+                <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>
+              )}
+            </>
+          ) : null
+        }
+        onClose={() => setError(null)}
+      />
 
       {loading && (
         <div className="card p-8 text-center">
