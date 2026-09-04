@@ -213,15 +213,19 @@ export default function DraftsPage() {
       />
 
       <div className="flex items-center gap-3 mb-4">
-        <Link href="/dashboard">
-          <ArrowLeft className="w-5 h-5" />
+        <Link
+          href="/dashboard"
+          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
+          style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+        >
+          <ArrowLeft className="w-4 h-4" />
         </Link>
         <h1 className="text-xl font-medium">Drafts ({q ? `${filtered.length}/` : ""}{drafts.length})</h1>
       </div>
 
       {!loading && drafts.length > 0 && (
-        <div className="flex flex-col gap-2 mb-4">
-          <div className="relative">
+        <div className="flex items-center gap-2 mb-4">
+          <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
             <input
               type="search"
@@ -240,7 +244,7 @@ export default function DraftsPage() {
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as SortKey)}
-            className="w-full text-sm rounded-xl border px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            className="shrink-0 w-[108px] text-sm rounded-xl border px-2 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
           >
             <option value="newest">Newest first</option>

@@ -62,7 +62,13 @@ export default function SalesPage() {
       />
 
       <div className="flex items-center gap-3 mb-4">
-        <Link href="/dashboard"><ArrowLeft className="w-5 h-5" /></Link>
+        <Link
+          href="/dashboard"
+          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
+          style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </Link>
         <div className="flex-1">
           <h1 className="text-xl font-medium">Sales history</h1>
           {!loading && !error && (
@@ -181,7 +187,11 @@ export default function SalesPage() {
       )}
 
       {!loading && sales.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <>
+          <p className="text-[11.5px] tracking-wide uppercase font-bold mb-2" style={{ color: "var(--text-tertiary)" }}>
+            Recent sales
+          </p>
+          <div className="flex flex-col gap-2">
           {sales.map((s, i) => (
             <div key={i} className={`card stagger p-3 flex items-center gap-3 ${i < 6 ? `d${i + 1}` : ""}`}>
               {s.thumbnail ? (
@@ -214,7 +224,8 @@ export default function SalesPage() {
               </div>
             </div>
           ))}
-        </div>
+          </div>
+        </>
       )}
     </main>
   );

@@ -275,14 +275,88 @@ export default function SettingsPage() {
       />
 
       <div className="relative flex items-center gap-3 mb-6">
-        <Link href="/dashboard">
-          <ArrowLeft className="w-5 h-5" />
+        <Link
+          href="/dashboard"
+          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
+          style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+        >
+          <ArrowLeft className="w-4 h-4" />
         </Link>
         <h1 className="font-display text-xl font-bold">Settings</h1>
       </div>
 
       <SettingsSection
         delay="d1"
+        title="Appearance"
+        description="Pick an accent color for the whole app — buttons, tiles, and highlights update everywhere, on every device you're signed into. Theme is per-device; &quot;System&quot; follows your phone or computer's own light/dark setting automatically."
+        icon={Palette}
+      >
+        <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2.5">Accent color</p>
+        <div className="flex items-center gap-2.5 mb-2">
+          {ACCENT_PRESETS.map((preset) => (
+            <button
+              key={preset.value}
+              type="button"
+              onClick={() => handleAccentSelect(preset.value)}
+              aria-label={preset.label}
+              aria-pressed={accent === preset.value}
+              title={preset.label}
+              className="w-9 h-9 rounded-full flex-shrink-0 active:scale-90"
+              style={{
+                background: preset.hex,
+                border: accent === preset.value ? "2px solid var(--text-primary)" : "2px solid transparent",
+                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.15)",
+                transition: "transform 0.2s var(--spring), border-color 0.15s ease",
+              }}
+            />
+          ))}
+          {accentSaving && <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--text-tertiary)] ml-1" />}
+        </div>
+
+        <div
+          className="rounded-2xl p-3 mb-5 flex items-center gap-3"
+          style={{ background: "var(--glass-strong)", border: "1px solid var(--glass-line)" }}
+        >
+          <div className="flex-1 rounded-xl px-3 py-2" style={{ background: "var(--accent-tint)" }}>
+            <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: "var(--accent-soft)" }}>This week</p>
+            <p className="font-display font-extrabold text-base mt-0.5" style={{ color: "var(--text-primary)" }}>$284</p>
+          </div>
+          <div
+            className="text-xs font-bold rounded-xl px-3.5 py-2.5 whitespace-nowrap"
+            style={{ background: "var(--accent)", color: "#fff" }}
+          >
+            + New listing
+          </div>
+        </div>
+
+        <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2.5">Theme</p>
+        <div className="flex flex-col gap-3">
+          <OptionCard
+            icon={Sun}
+            title="Light"
+            description="The classic white background, all the time."
+            selected={theme === "light"}
+            onClick={() => handleThemeSelect("light")}
+          />
+          <OptionCard
+            icon={Moon}
+            title="Dark"
+            description="A dark background, easier on the eyes in low light."
+            selected={theme === "dark"}
+            onClick={() => handleThemeSelect("dark")}
+          />
+          <OptionCard
+            icon={MonitorSmartphone}
+            title="System"
+            description="Match this device's own setting, and switch automatically if it changes."
+            selected={theme === "system"}
+            onClick={() => handleThemeSelect("system")}
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        delay="d2"
         title="Default shipping"
         description="Every new listing (New Listing, Batch Upload, Drafts) starts with this choice automatically, so you don&apos;t have to set it item by item. You can still switch an individual item on its own screen — this just sets what it starts as."
         icon={Truck}
@@ -338,7 +412,7 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
-        delay="d2"
+        delay="d3"
         title="Store description"
         description="Write your shop's boilerplate once — welcome message, policies, a sign-off, whatever you'd normally paste into every listing. It gets added to the end of every item's description automatically when you list it. Each item's own description above this only ever has that item's own details; you never see or edit this text on the listing screens."
         icon={FileText}
@@ -370,7 +444,7 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
-        delay="d3"
+        delay="d4"
         title="eBay Connection"
         description="Each account connects its own eBay seller account — your listings, categories, and shipping/return policies are yours alone, never shared with anyone else signed in."
         icon={Store}
@@ -457,76 +531,6 @@ export default function SettingsPage() {
             )}
           </div>
         )}
-      </SettingsSection>
-
-      <SettingsSection
-        delay="d4"
-        title="Appearance"
-        description="Pick an accent color for the whole app — buttons, tiles, and highlights update everywhere, on every device you're signed into. Theme is per-device; &quot;System&quot; follows your phone or computer's own light/dark setting automatically."
-        icon={Palette}
-      >
-        <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2.5">Accent color</p>
-        <div className="flex items-center gap-2.5 mb-2">
-          {ACCENT_PRESETS.map((preset) => (
-            <button
-              key={preset.value}
-              type="button"
-              onClick={() => handleAccentSelect(preset.value)}
-              aria-label={preset.label}
-              aria-pressed={accent === preset.value}
-              title={preset.label}
-              className="w-9 h-9 rounded-full flex-shrink-0 active:scale-90"
-              style={{
-                background: preset.hex,
-                border: accent === preset.value ? "2px solid var(--text-primary)" : "2px solid transparent",
-                boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.15)",
-                transition: "transform 0.2s var(--spring), border-color 0.15s ease",
-              }}
-            />
-          ))}
-          {accentSaving && <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--text-tertiary)] ml-1" />}
-        </div>
-
-        <div
-          className="rounded-2xl p-3 mb-5 flex items-center gap-3"
-          style={{ background: "var(--glass-strong)", border: "1px solid var(--glass-line)" }}
-        >
-          <div className="flex-1 rounded-xl px-3 py-2" style={{ background: "var(--accent-tint)" }}>
-            <p className="text-[9px] font-bold uppercase tracking-wide" style={{ color: "var(--accent-soft)" }}>This week</p>
-            <p className="font-display font-extrabold text-base mt-0.5" style={{ color: "var(--text-primary)" }}>$284</p>
-          </div>
-          <div
-            className="text-xs font-bold rounded-xl px-3.5 py-2.5 whitespace-nowrap"
-            style={{ background: "var(--accent)", color: "#fff" }}
-          >
-            + New listing
-          </div>
-        </div>
-
-        <p className="text-xs font-semibold text-[var(--text-secondary)] mb-2.5">Theme</p>
-        <div className="flex flex-col gap-3">
-          <OptionCard
-            icon={Sun}
-            title="Light"
-            description="The classic white background, all the time."
-            selected={theme === "light"}
-            onClick={() => handleThemeSelect("light")}
-          />
-          <OptionCard
-            icon={Moon}
-            title="Dark"
-            description="A dark background, easier on the eyes in low light."
-            selected={theme === "dark"}
-            onClick={() => handleThemeSelect("dark")}
-          />
-          <OptionCard
-            icon={MonitorSmartphone}
-            title="System"
-            description="Match this device's own setting, and switch automatically if it changes."
-            selected={theme === "system"}
-            onClick={() => handleThemeSelect("system")}
-          />
-        </div>
       </SettingsSection>
 
       <SettingsSection delay="d5" title="Account" icon={UserCircle}>

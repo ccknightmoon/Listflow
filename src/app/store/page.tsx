@@ -233,8 +233,12 @@ export default function StorePage() {
       />
 
       <div className="flex items-center gap-3 mb-4">
-        <Link href="/dashboard">
-          <ArrowLeft className="w-5 h-5" />
+        <Link
+          href="/dashboard"
+          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
+          style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+        >
+          <ArrowLeft className="w-4 h-4" />
         </Link>
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-medium">
@@ -258,36 +262,38 @@ export default function StorePage() {
 
       {!loading && listings.length > 0 && (
         <div className="flex flex-col gap-2 mb-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
-            <input
-              type="search"
-              placeholder="Search by title..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full text-sm rounded-xl border pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
+              <input
+                type="search"
+                placeholder="Search by title..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full text-sm rounded-xl border pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
+              />
+              {search && (
+                <button
+                  onClick={() => setSearch("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                >
+                  <X className="w-4 h-4 text-[var(--text-tertiary)]" />
+                </button>
+              )}
+            </div>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortKey)}
+              className="shrink-0 w-[108px] text-sm rounded-xl border px-2 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
-            />
-            {search && (
-              <button
-                onClick={() => setSearch("")}
-                className="absolute right-3 top-1/2 -translate-y-1/2"
-              >
-                <X className="w-4 h-4 text-[var(--text-tertiary)]" />
-              </button>
-            )}
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="price-asc">Price: low to high</option>
+              <option value="price-desc">Price: high to low</option>
+            </select>
           </div>
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
-            className="w-full text-sm rounded-xl border px-3 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
-            style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
-          >
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
-            <option value="price-asc">Price: low to high</option>
-            <option value="price-desc">Price: high to low</option>
-          </select>
           {q && (
             <p className="text-xs text-[var(--text-secondary)]">
               {sorted.length} result{sorted.length !== 1 ? "s" : ""} for &ldquo;{search.trim()}&rdquo;
@@ -426,7 +432,7 @@ export default function StorePage() {
                       {l.price != null ? `$${l.price.toFixed(2)}` : "Tap to set price"}
                       {l.sku ? ` · SKU: ${l.sku}` : ""}
                       {l.startTime ? ` · Listed ${timeAgo(l.startTime)}` : ""}
-                      <span className="ml-1 opacity-40 text-[10px]">edit</span>
+                      {l.price == null && <span className="ml-1 opacity-40 text-[10px]">edit</span>}
                     </p>
                   )}
                 </div>
@@ -468,8 +474,8 @@ export default function StorePage() {
                 <button
                   onClick={() => handleDelist(l)}
                   disabled={deleting.has(l.listingId)}
-                  className="flex items-center gap-1 text-xs hover:text-[var(--danger)] flex-1 justify-center py-1 disabled:opacity-50"
-                  style={{ color: deleting.has(l.listingId) ? undefined : "var(--text-secondary)" }}
+                  className="flex items-center gap-1 text-xs flex-1 justify-center py-1 disabled:opacity-50"
+                  style={{ color: "var(--danger)" }}
                 >
                   {deleting.has(l.listingId) ? (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />

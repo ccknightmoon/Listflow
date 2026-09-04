@@ -78,7 +78,13 @@ export default function ShipPage() {
       />
 
       <div className="flex items-center gap-3 mb-6">
-        <Link href="/dashboard"><ArrowLeft className="w-5 h-5" /></Link>
+        <Link
+          href="/dashboard"
+          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
+          style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+        >
+          <ArrowLeft className="w-4 h-4" />
+        </Link>
         <div className="flex-1">
           <h1 className="text-xl font-medium">To ship</h1>
           {!loading && !error && (
