@@ -177,6 +177,20 @@ export default function BatchUploadPage() {
   const [bulkOpen, setBulkOpen] = useState(false); // bulk-edit panel accordion — starts collapsed per mock, opened manually
   const fileInput = useRef<HTMLInputElement | null>(null);
 
+  // "Add a photo to this item" during review — lets someone patch in a
+  // shot they missed on the first upload without starting the whole
+  // batch over. One shared hidden input; addPhotoTargetGroup remembers
+  // which group's "+" tile was tapped so the picker's result lands there.
+  const addPhotoInput = useRef<HTMLInputElement | null>(null);
+  const [addPhotoTargetGroup, setAddPhotoTargetGroup] = useState<number | null>(null);
+
+  // A one-slot undo for the review screen's delete buttons (a whole item
+  // or a single photo) — snapshot the groups layout right before the
+  // destructive edit so an accidental tap has a way back. Only ever
+  // holds the most recent removal; a second delete just replaces it.
+  const [undoGroups, setUndoGroups] = useState<number[][] | null>(null);
+  const [undoLabel, setUndoLabel] = useState("");
+
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError(null);
@@ -193,6 +207,42 @@ export default function BatchUploadPage() {
       setPhotos(resized);
     } catch (err) {
       setError(`Could not process photos: ${(err as Error).message}`);
+    }
+  }
+
+  // Adds photos straight into an existing group during review — for a
+  // shot that got left off the camera roll selection or just missed on
+  // the first pass. Appended to `photos` rather than replacing it like
+  // handleFilesSelected above, since the rest of the batch is already
+  // grouped and must stay put.
+  async function handleAddPhotosToGroup(gIdx: number, files: FileList | null) {
+    if (!files || files.length === 0) return;
+    setError(null);
+
+    const room = MAX_PHOTOS - photos.length;
+    if (room <= 0) {
+      setError(`This batch is already at the ${MAX_PHOTOS}-photo limit.`);
+      return;
+    }
+    const fileArray = Array.from(files).slice(0, room);
+
+    try {
+      const startIndex = photos.length;
+      const resized = await Promise.all(
+        fileArray.map(async (file) => {
+          const { dataUrl, mediaType } = await resizeImage(file);
+          return { data: dataUrl.split(",")[1], mediaType, previewUrl: dataUrl };
+        })
+      );
+      const newIndices = resized.map((_, k) => startIndex + k);
+      setPhotos((prev) => [...prev, ...resized]);
+      setGroups((prev) => {
+        const next = prev.map((g) => [...g]);
+        next[gIdx] = [...next[gIdx], ...newIndices];
+        return next;
+      });
+    } catch (err) {
+      setError(`Could not add photo: ${(err as Error).message}`);
     }
   }
 
@@ -375,6 +425,8 @@ export default function BatchUploadPage() {
   }
 
   function removePhoto(photoIndex: number, fromGroup: number) {
+    setUndoGroups(groups.map((g) => [...g]));
+    setUndoLabel("Photo removed");
     setGroups((prev) => {
       const next = prev.map((g) => [...g]);
       next[fromGroup] = next[fromGroup].filter((i) => i !== photoIndex);
@@ -383,7 +435,21 @@ export default function BatchUploadPage() {
   }
 
   function removeGroup(gIdx: number) {
+    setUndoGroups(groups.map((g) => [...g]));
+    setUndoLabel("Item removed");
     setGroups((prev) => prev.filter((_, i) => i !== gIdx));
+  }
+
+  // Restores the groups layout exactly as it was right before the last
+  // delete (see removePhoto/removeGroup above) — a full snapshot rather
+  // than trying to re-insert one photo at one index, since deleting the
+  // last photo in a group also drops that whole group and shifts every
+  // index after it.
+  function handleUndoRemove() {
+    if (!undoGroups) return;
+    setGroups(undoGroups);
+    setUndoGroups(null);
+    setUndoLabel("");
   }
 
   // Fixes the AI's most common mistake in one tap instead of moving every
@@ -448,6 +514,7 @@ export default function BatchUploadPage() {
     };
     setResults(groups.map(() => ({ ...pendingResult })));
     setStep("results");
+    setUndoGroups(null);
 
     // A few items analyzed at once instead of strictly one at a time — the
     // same bounded worker-pool pattern already used for pricing lookups
@@ -1071,6 +1138,45 @@ export default function BatchUploadPage() {
             Only the first {MAX_PHOTOS_PER_ITEM} photos per item will be
             used for analysis, in the order shown.
           </p>
+
+          {undoGroups && (
+            <div className="card p-3 mb-4 flex items-center justify-between gap-3">
+              <p className="text-sm">{undoLabel}</p>
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={handleUndoRemove}
+                  className="text-sm font-semibold"
+                  style={{ color: "var(--accent)" }}
+                >
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUndoGroups(null)}
+                  aria-label="Dismiss"
+                  className="tap p-0.5"
+                >
+                  <X className="w-3.5 h-3.5" style={{ color: "var(--text-tertiary)" }} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          <input
+            ref={addPhotoInput}
+            type="file"
+            accept="image/*"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              const files = e.target.files;
+              const gIdx = addPhotoTargetGroup;
+              if (gIdx !== null) handleAddPhotosToGroup(gIdx, files);
+              e.target.value = "";
+            }}
+          />
+
           <div className="flex flex-col gap-4 mb-4">
             {groups.map((group, gIdx) => (
               <div
@@ -1193,6 +1299,18 @@ export default function BatchUploadPage() {
                       </div>
                     );
                   })}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddPhotoTargetGroup(gIdx);
+                      addPhotoInput.current?.click();
+                    }}
+                    className="tap w-14 h-14 rounded-md flex items-center justify-center flex-shrink-0"
+                    style={{ border: "1px dashed var(--glass-line)", background: "var(--glass)" }}
+                    title="Add a photo to this item"
+                  >
+                    <Plus className="w-4 h-4" style={{ color: "var(--text-tertiary)" }} />
+                  </button>
                 </div>
               </div>
             ))}
