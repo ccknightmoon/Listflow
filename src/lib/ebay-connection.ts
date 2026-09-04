@@ -9,7 +9,7 @@ import type { EbayConnectionContext } from "./ebay-request-context";
 // into the same {connect: true} response shape routes already returned
 // when the old shared EBAY_OAUTH_REFRESH_TOKEN env var was unset.
 export async function requireEbayConnection(auth: {
-  supabase: ReturnType<typeof getServerSupabase>;
+  supabase: Awaited<ReturnType<typeof getServerSupabase>>;
 }): Promise<EbayConnectionContext | null> {
   const { data } = await auth.supabase.from("ebay_connections").select("*").maybeSingle();
   if (!data) return null;

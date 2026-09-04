@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw } from "lucide-react";
@@ -50,7 +50,8 @@ interface Draft {
   ebay_listing_id: string | null;
 }
 
-export default function DraftDetailPage({ params }: { params: { id: string } }) {
+export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [loading, setLoading] = useState(true);
@@ -106,12 +107,12 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       // Convert null or the string "null" (from old AI responses) to empty string
       const str = (v: string | null | undefined) => (v == null || v === "null" ? "" : v);
       try {
-        const data = await apiFetch<{ draft: Draft; error?: string }>(`/api/drafts/${params.id}`);
+        const data = await apiFetch<{ draft: Draft; error?: string }>(`/api/drafts/${id}`);
         const d: Draft = data.draft;
         setDraft(d);
         setPhotoUrls(d.photo_urls ?? []);
-        const savedHeavy = localStorage.getItem(`heavy-${params.id}`);
-        const savedShippingCost = localStorage.getItem(`shippingCost-${params.id}`);
+        const savedHeavy = localStorage.getItem(`heavy-${id}`);
+        const savedShippingCost = localStorage.getItem(`shippingCost-${id}`);
         if (savedHeavy) {
           setIsHeavy(JSON.parse(savedHeavy));
         } else {
@@ -156,7 +157,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       }
     }
     load();
-  }, [params.id]);
+  }, [id]);
 
   async function handleSuggest() {
     setSuggesting(true);
@@ -193,7 +194,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
     setSaving(true);
     setSaved(false);
     try {
-      await apiFetch(`/api/drafts/${params.id}`, {
+      await apiFetch(`/api/drafts/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -227,7 +228,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       // The listing call reads the draft back from the database, so if this
       // save silently failed, it would previously go on to list whatever
       // stale data was already there with no warning at all.
-      await apiFetch(`/api/drafts/${params.id}`, {
+      await apiFetch(`/api/drafts/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -242,13 +243,13 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; url?: string; listingId?: string }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId: params.id, customSku: customSku || undefined, isHeavy, shippingCost: shippingCost ? parseFloat(shippingCost) : undefined }),
+        body: JSON.stringify({ draftId: id, customSku: customSku || undefined, isHeavy, shippingCost: shippingCost ? parseFloat(shippingCost) : undefined }),
       });
       if (data.connect) { setNeedsConnect(true); throw new Error(data.error ?? "Failed to list"); }
       if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error ?? "Failed to list"); }
       // Save all form values + ebay_listing_id together so nothing gets wiped
       if (data.listingId) {
-        await apiFetch(`/api/drafts/${params.id}`, {
+        await apiFetch(`/api/drafts/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -263,8 +264,8 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       setListingUrl(data.url ?? null);
       setJustListed(true);
       setMissingAspectsWarning(data.missingRequiredAspects && data.missingRequiredAspects.length > 0 ? data.missingRequiredAspects : null);
-      localStorage.removeItem(`heavy-${params.id}`);
-      localStorage.removeItem(`shippingCost-${params.id}`);
+      localStorage.removeItem(`heavy-${id}`);
+      localStorage.removeItem(`shippingCost-${id}`);
       window.dispatchEvent(new Event("listflow:counts-changed"));
       setTimeout(() => router.push("/store"), 1500);
     } catch (err) {
@@ -332,7 +333,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           active_range_high: data.activeRangeHigh ?? prev.active_range_high,
           sell_odds: data.sellOdds ?? prev.sell_odds,
         } : prev);
-        await apiFetch(`/api/drafts/${params.id}`, {
+        await apiFetch(`/api/drafts/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -389,7 +390,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       const [item] = next.splice(currentDrag, 1);
       next.splice(dropIdx, 0, item);
       setPhotoUrls(next);
-      await apiFetch(`/api/drafts/${params.id}`, {
+      await apiFetch(`/api/drafts/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] }),
@@ -405,7 +406,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
     if (!confirm("Delete this draft?")) return;
     setDeleting(true);
     try {
-      await apiFetch(`/api/drafts/${params.id}`, { method: "DELETE" });
+      await apiFetch(`/api/drafts/${id}`, { method: "DELETE" });
       router.push("/drafts");
     } catch (err) {
       setError((err as Error).message);
@@ -679,8 +680,8 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             checked={isHeavy}
             onChange={(e) => {
               setIsHeavy(e.target.checked);
-              localStorage.setItem(`heavy-${params.id}`, JSON.stringify(e.target.checked));
-              if (!e.target.checked) { setShippingCost(""); localStorage.removeItem(`shippingCost-${params.id}`); }
+              localStorage.setItem(`heavy-${id}`, JSON.stringify(e.target.checked));
+              if (!e.target.checked) { setShippingCost(""); localStorage.removeItem(`shippingCost-${id}`); }
             }}
             className="w-4 h-4 rounded accent-[var(--accent)]"
           />
@@ -696,7 +697,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
                 step="0.01"
                 placeholder="0.00"
                 value={shippingCost}
-                onChange={(e) => { setShippingCost(e.target.value); localStorage.setItem(`shippingCost-${params.id}`, e.target.value); }}
+                onChange={(e) => { setShippingCost(e.target.value); localStorage.setItem(`shippingCost-${id}`, e.target.value); }}
                 className="input w-20 text-sm py-0.5 px-1.5"
               />
             </div>

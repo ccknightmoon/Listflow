@@ -13,7 +13,8 @@ export async function GET() {
   if (!auth.user) return auth.unauthorized;
 
   const state = generateOAuthState();
-  cookies().set(EBAY_OAUTH_STATE_COOKIE, state, {
+  const cookieStore = await cookies();
+  cookieStore.set(EBAY_OAUTH_STATE_COOKIE, state, {
     httpOnly: true,
     secure: true,
     sameSite: "lax",

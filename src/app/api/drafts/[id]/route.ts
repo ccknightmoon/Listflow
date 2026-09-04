@@ -7,14 +7,15 @@ function isValidStoreCategoryId(value: unknown): value is string | null {
   return value === null || value === undefined || (typeof value === "string" && /^\d+$/.test(value));
 }
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  const { id } = await params;
 
   const { data, error } = await auth.supabase
     .from("drafts")
     .select("*")
-    .eq("id", params.id)
+    .eq("id", id)
     // Belt-and-suspenders alongside RLS: RLS already scopes this table to
     // auth.uid(), but an explicit ownership check here means a draft that
     // isn't the caller's own returns the same "not found" response as one
@@ -27,9 +28,10 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ draft: data });
 }
 
-export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  const { id } = await params;
 
   let body;
   try {
@@ -77,7 +79,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       ...(body.storeCategoryId !== undefined && { store_category_id: body.storeCategoryId }),
       ...(body.storeCategoryName !== undefined && { store_category_name: body.storeCategoryName }),
     })
-    .eq("id", params.id)
+    .eq("id", id)
     .eq("user_id", auth.user.id)
     .select()
     .single();
@@ -86,11 +88,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   return NextResponse.json({ draft: data });
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  const { id } = await params;
 
-  const { error } = await auth.supabase.from("drafts").delete().eq("id", params.id).eq("user_id", auth.user.id);
+  const { error } = await auth.supabase.from("drafts").delete().eq("id", id).eq("user_id", auth.user.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ deleted: true });
 }

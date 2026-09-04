@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const code = req.nextUrl.searchParams.get("code");
   const state = req.nextUrl.searchParams.get("state");
-  const cookieStore = cookies();
+  const cookieStore = await cookies();
   const expectedState = cookieStore.get(EBAY_OAUTH_STATE_COOKIE)?.value;
   cookieStore.delete(EBAY_OAUTH_STATE_COOKIE);
 

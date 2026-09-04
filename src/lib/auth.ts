@@ -12,8 +12,8 @@ import { NextResponse } from "next/server";
  * disabled or wide open. This client lets RLS policies scoped to
  * `authenticated` actually recognize who's calling.
  */
-export function getServerSupabase() {
-  const cookieStore = cookies();
+export async function getServerSupabase() {
+  const cookieStore = await cookies();
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
@@ -49,7 +49,7 @@ export function getServerSupabase() {
  *   const { supabase, user } = auth;
  */
 export async function requireUser() {
-  const supabase = getServerSupabase();
+  const supabase = await getServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) {
     return {

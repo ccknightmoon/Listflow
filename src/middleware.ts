@@ -92,7 +92,10 @@ export async function middleware(request: NextRequest) {
     const limiter = isAiPath ? aiRatelimit : generalRatelimit;
     if (limiter) {
       const forwardedFor = request.headers.get("x-forwarded-for");
-      const ip = request.ip ?? forwardedFor?.split(",", 1)[0]?.trim() ?? "127.0.0.1";
+      const ip =
+        forwardedFor?.split(",", 1)[0]?.trim() ??
+        request.headers.get("x-real-ip") ??
+        "127.0.0.1";
       const { success } = await limiter.limit(ip);
       if (!success) {
         return NextResponse.json(

@@ -32,7 +32,7 @@ export const metadata: Metadata = {
 
 const ACCENT_VALUES = ["indigo", "sapphire", "emerald", "amber", "rose", "teal"];
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -42,7 +42,8 @@ export default function RootLayout({
   // wrong theme, and no blocking <script> needed in <head>. "system" (or
   // no cookie at all) means: no attribute, let the prefers-color-scheme
   // media query in globals.css decide. See src/lib/theme.ts.
-  const themeCookie = cookies().get("theme")?.value;
+  const cookieStore = await cookies();
+  const themeCookie = cookieStore.get("theme")?.value;
   const theme = themeCookie === "light" || themeCookie === "dark" ? themeCookie : undefined;
 
   // Same zero-flash trick for the accent color, except the source of
@@ -52,7 +53,7 @@ export default function RootLayout({
   // Settings/dashboard fetch confirms it. See src/lib/accent.ts. No
   // cookie yet (new account, or a device that's never loaded Settings)
   // means: no attribute, and :root's own default (indigo) applies.
-  const accentCookie = cookies().get("accent")?.value;
+  const accentCookie = cookieStore.get("accent")?.value;
   const accent = accentCookie && ACCENT_VALUES.includes(accentCookie) ? accentCookie : undefined;
 
   return (
