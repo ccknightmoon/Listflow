@@ -203,7 +203,16 @@ export default function DraftsPage() {
 
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24" style={{ viewTransitionName: "drafts-panel" }}>
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "drafts-panel" }}>
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
+      />
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 200, height: 200, top: 10, right: -70, background: "var(--glow-secondary)" }}
+      />
+
       <div className="flex items-center gap-3 mb-4">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
@@ -320,6 +329,7 @@ export default function DraftsPage() {
                   className={`card stagger p-3 flex items-center gap-3 cursor-pointer active:scale-[.98] ${rowIndex < 6 ? `d${rowIndex + 1}` : ""}`}
                   style={{
                     borderColor: isSelected ? "var(--accent)" : undefined,
+                    background: isSelected ? "var(--accent-tint)" : undefined,
                     transitionTimingFunction: "var(--spring)",
                   }}
                 >
