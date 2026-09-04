@@ -7,6 +7,18 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { bucketRevenue, formatCompactCurrency } from "@/lib/sales-buckets";
 import { useCountUp } from "@/lib/use-count-up";
+import { getPageCache, setPageCache } from "@/lib/page-cache";
+
+// Cached per day-range (7/30/90 each get their own entry) so flipping back
+// to a tab you already viewed this session shows its numbers instantly
+// instead of reflashing the loading state while it silently refetches.
+function salesCacheKey(days: DayRange) {
+  return `sales:${days}`;
+}
+interface CachedSales {
+  sales: Sale[];
+  totalRevenue: number;
+}
 
 type DayRange = 7 | 30 | 90;
 
@@ -20,20 +32,34 @@ interface Sale {
   thumbnail: string | null;
 }
 
+const INITIAL_DAYS: DayRange = 30;
+
 export default function SalesPage() {
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [totalRevenue, setTotalRevenue] = useState(0);
+  const [sales, setSales] = useState<Sale[]>(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.sales ?? []);
+  const [totalRevenue, setTotalRevenue] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.totalRevenue ?? 0);
   const displayTotalRevenue = useCountUp(totalRevenue);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS)) === undefined);
   const [error, setError] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
-  const [days, setDays] = useState<DayRange>(30);
+  const [days, setDays] = useState<DayRange>(INITIAL_DAYS);
 
   useEffect(() => { load(days); }, [days]);
 
   async function load(d: DayRange) {
-    setLoading(true);
+    // Show whatever this specific range last loaded (if anything) right
+    // away instead of blanking to a spinner on every tab switch — the real
+    // fetch below still always runs and corrects it moments later. Written
+    // against the requested `d`, not the reactive `days` state, so a rapid
+    // tab switch can never write one range's numbers into another's cache
+    // entry.
+    const cached = getPageCache<CachedSales>(salesCacheKey(d));
+    if (cached) {
+      setSales(cached.sales);
+      setTotalRevenue(cached.totalRevenue);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     setNeedsConnect(false);
     setNeedsReconnect(false);
@@ -44,8 +70,11 @@ export default function SalesPage() {
         setNeedsReconnect(!!data.reconnect);
         throw new Error(data.error);
       }
-      setSales(data.sales ?? []);
-      setTotalRevenue(data.totalRevenue ?? 0);
+      const newSales = data.sales ?? [];
+      const newTotalRevenue = data.totalRevenue ?? 0;
+      setSales(newSales);
+      setTotalRevenue(newTotalRevenue);
+      setPageCache(salesCacheKey(d), { sales: newSales, totalRevenue: newTotalRevenue });
     } catch (err) {
       setError((err as Error).message);
     } finally {

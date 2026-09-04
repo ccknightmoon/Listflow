@@ -7,6 +7,11 @@ import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { useCountUp } from "@/lib/use-count-up";
+import { getPageCache, setPageCache } from "@/lib/page-cache";
+
+// See src/lib/page-cache.ts — shows the last merged Supabase+eBay listing
+// set instantly on revisit while both phases below quietly refresh it.
+const STORE_CACHE_KEY = "store:listings";
 
 type SortKey = "newest" | "oldest" | "price-asc" | "price-desc";
 
@@ -31,9 +36,9 @@ interface StoreListing {
 }
 
 export default function StorePage() {
-  const [listings, setListings] = useState<StoreListing[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [ebayLoading, setEbayLoading] = useState(true);
+  const [listings, setListings] = useState<StoreListing[]>(() => getPageCache<StoreListing[]>(STORE_CACHE_KEY) ?? []);
+  const [loading, setLoading] = useState(() => getPageCache<StoreListing[]>(STORE_CACHE_KEY) === undefined);
+  const [ebayLoading, setEbayLoading] = useState(() => getPageCache<StoreListing[]>(STORE_CACHE_KEY) === undefined);
   const [error, setError] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -49,10 +54,16 @@ export default function StorePage() {
   const [bulkSuccessMsg, setBulkSuccessMsg] = useState("");
 
   useEffect(() => { loadAll(); }, []);
+  // Keeps the cache in sync with every change to `listings` — both load
+  // phases below, plus delist/price-update mutations further down — without
+  // needing a separate cache write at each individual call site.
+  useEffect(() => { setPageCache(STORE_CACHE_KEY, listings); }, [listings]);
 
   async function loadAll() {
-    setLoading(true);
-    setEbayLoading(true);
+    // No setLoading/setEbayLoading(true) here: the initial state above
+    // already reflects whether we had a cached, previously-merged list to
+    // show. loadAll() only ever runs once (on mount) — see the effect above
+    // — so there's no later re-run that would need this to flip back on.
     setError(null);
 
     // Fire both independent requests together instead of only starting the

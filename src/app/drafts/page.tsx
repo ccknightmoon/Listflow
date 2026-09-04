@@ -7,6 +7,13 @@ import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X } from "lucide-rea
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
+import { getPageCache, setPageCache } from "@/lib/page-cache";
+
+// Drafts rarely changes shape between visits within one tab (add/remove a
+// few items at most) — showing the last list instantly while a fresh fetch
+// runs quietly beats reflashing the loading spinner every time you tap
+// into this tab from BottomNav.
+const DRAFTS_CACHE_KEY = "drafts:list";
 
 interface Draft {
   id: string;
@@ -33,8 +40,8 @@ type SortKey = "newest" | "oldest" | "price-desc" | "price-asc";
 
 export default function DraftsPage() {
   const router = useRouter();
-  const [drafts, setDrafts] = useState<Draft[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [drafts, setDrafts] = useState<Draft[]>(() => getPageCache<Draft[]>(DRAFTS_CACHE_KEY) ?? []);
+  const [loading, setLoading] = useState(() => getPageCache<Draft[]>(DRAFTS_CACHE_KEY) === undefined);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -48,9 +55,17 @@ export default function DraftsPage() {
   const [sort, setSort] = useState<SortKey>("newest");
 
   useEffect(() => { loadDrafts(); }, []);
+  // Keeps the cache in sync with every change to `drafts` — the initial
+  // load below, and the later mutations (delete, the post-bulk-list
+  // refresh) — without needing a cache write at each individual call site.
+  useEffect(() => { setPageCache(DRAFTS_CACHE_KEY, drafts); }, [drafts]);
 
   async function loadDrafts() {
-    setLoading(true);
+    // No setLoading(true) here: the initial state above already reflects
+    // whether we had a cached list to show. loadDrafts() runs again later
+    // (after a bulk "List on eBay" completes) purely to quietly refresh the
+    // list in place — flashing back to a full loading spinner at that point
+    // would undo the "done" state the screen just showed.
     setError(null);
     try {
       const data = await apiFetch<{ drafts?: Array<Draft & { ebay_listing_id?: string | null }>; error?: string }>("/api/drafts");

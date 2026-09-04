@@ -9,6 +9,15 @@ import { createBrowserClient } from "@supabase/ssr";
 import { apiFetch } from "@/lib/api";
 import { bucketRevenue, formatCompactCurrency, type BucketableSale } from "@/lib/sales-buckets";
 import { useCountUp } from "@/lib/use-count-up";
+import { getPageCache, setPageCache } from "@/lib/page-cache";
+
+// See src/lib/page-cache.ts. Each of this page's four independent fetches
+// gets its own entry so the hero tile can show last session's numbers the
+// instant you land here, while all four quietly refetch in the background.
+const STATS_CACHE_KEY = "dashboard:stats";
+const SHIP_COUNT_CACHE_KEY = "dashboard:shipCount";
+const DISPLAY_NAME_CACHE_KEY = "dashboard:displayName";
+const TREND_SALES_CACHE_KEY = "dashboard:trendSales";
 
 interface Stats {
   drafts: number;
@@ -30,14 +39,14 @@ function greeting(hour: number) {
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [statsLoaded, setStatsLoaded] = useState(false);
-  const [shipCount, setShipCount] = useState<number | null>(null);
-  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [stats, setStats] = useState<Stats | null>(() => getPageCache<Stats>(STATS_CACHE_KEY) ?? null);
+  const [statsLoaded, setStatsLoaded] = useState(() => getPageCache<Stats>(STATS_CACHE_KEY) !== undefined);
+  const [shipCount, setShipCount] = useState<number | null>(() => getPageCache<number>(SHIP_COUNT_CACHE_KEY) ?? null);
+  const [displayName, setDisplayName] = useState<string | null>(() => getPageCache<string>(DISPLAY_NAME_CACHE_KEY) ?? null);
   const [eyebrow, setEyebrow] = useState("Welcome back");
   // Backs the hero tile's trend sparkline — null until loaded (or if it
   // fails, which just means the tile shows no sparkline, same as today).
-  const [trendSales, setTrendSales] = useState<BucketableSale[] | null>(null);
+  const [trendSales, setTrendSales] = useState<BucketableSale[] | null>(() => getPageCache<BucketableSale[]>(TREND_SALES_CACHE_KEY) ?? null);
 
   const supabase = useMemo(
     () =>
@@ -58,6 +67,7 @@ export default function DashboardPage() {
       try {
         const statsData = await apiFetch<{ drafts: number; active: number; weeklyRevenue: number; weeklySales: number }>("/api/dashboard/stats");
         setStats(statsData);
+        setPageCache(STATS_CACHE_KEY, statsData);
       } catch {
         setStats(null);
       } finally {
@@ -69,7 +79,11 @@ export default function DashboardPage() {
       try {
         // count-only — see the thumbnails=0 comment in api/ebay/ship/route.ts
         const shipData = await apiFetch<{ count?: number; error?: string }>("/api/ebay/ship?thumbnails=0");
-        if (!shipData.error) setShipCount(shipData.count ?? 0);
+        if (!shipData.error) {
+          const count = shipData.count ?? 0;
+          setShipCount(count);
+          setPageCache(SHIP_COUNT_CACHE_KEY, count);
+        }
       } catch {
         setShipCount(null);
       }
@@ -84,6 +98,7 @@ export default function DashboardPage() {
         user?.email?.split("@")[0] ||
         null;
       setDisplayName(name);
+      if (name) setPageCache(DISPLAY_NAME_CACHE_KEY, name);
     })();
 
     // Same eBay sales endpoint the Sales page itself uses, just a fourth
@@ -93,7 +108,13 @@ export default function DashboardPage() {
     void (async () => {
       try {
         const salesData = await apiFetch<{ sales?: BucketableSale[]; error?: string }>(`/api/ebay/sales?days=${TREND_DAYS}&thumbnails=0`);
-        setTrendSales(salesData.error ? null : (salesData.sales ?? []));
+        if (salesData.error) {
+          setTrendSales(null);
+        } else {
+          const trendData = salesData.sales ?? [];
+          setTrendSales(trendData);
+          setPageCache(TREND_SALES_CACHE_KEY, trendData);
+        }
       } catch {
         setTrendSales(null);
       }
