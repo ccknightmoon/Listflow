@@ -52,7 +52,16 @@ export default function SalesPage() {
   }
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24" style={{ viewTransitionName: "sales-panel" }}>
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "sales-panel" }}>
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
+      />
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 200, height: 200, top: 10, right: -70, background: "var(--glow-success)" }}
+      />
+
       <div className="flex items-center gap-3 mb-4">
         <Link href="/dashboard"><ArrowLeft className="w-5 h-5" /></Link>
         <div className="flex-1">
@@ -131,7 +140,7 @@ export default function SalesPage() {
                   style={{
                     height: `${Math.max(6, (t / max) * 100)}%`,
                     background: "var(--accent)",
-                    opacity: idx === totals.length - 1 ? 1 : 0.6,
+                    opacity: idx === totals.length - 1 ? 1 : 0.85,
                     borderRadius: "5px 5px 2px 2px",
                     transition: "height .4s var(--spring)",
                   }}
