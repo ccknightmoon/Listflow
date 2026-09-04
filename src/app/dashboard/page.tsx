@@ -69,7 +69,9 @@ export default function DashboardPage() {
         setStats(statsData);
         setPageCache(STATS_CACHE_KEY, statsData);
       } catch {
-        setStats(null);
+        // A transient failure shouldn't blank out numbers we already have
+        // (from a successful load a moment ago, or the cache from last
+        // visit) — leave `stats` exactly as it was rather than nulling it.
       } finally {
         setStatsLoaded(true);
       }
@@ -84,8 +86,11 @@ export default function DashboardPage() {
           setShipCount(count);
           setPageCache(SHIP_COUNT_CACHE_KEY, count);
         }
+        // On a reported error, leave shipCount as whatever it already was
+        // (cached or null) — same reasoning as the catch block below.
       } catch {
-        setShipCount(null);
+        // Transient failure — don't blank out a count we may already be
+        // showing from cache; just leave it alone.
       }
     })();
 
@@ -108,15 +113,16 @@ export default function DashboardPage() {
     void (async () => {
       try {
         const salesData = await apiFetch<{ sales?: BucketableSale[]; error?: string }>(`/api/ebay/sales?days=${TREND_DAYS}&thumbnails=0`);
-        if (salesData.error) {
-          setTrendSales(null);
-        } else {
+        if (!salesData.error) {
           const trendData = salesData.sales ?? [];
           setTrendSales(trendData);
           setPageCache(TREND_SALES_CACHE_KEY, trendData);
         }
+        // On a reported error, leave trendSales as whatever it already was
+        // (cached sparkline or null) rather than yanking it away.
       } catch {
-        setTrendSales(null);
+        // Transient failure — leave the sparkline (cached or none) as-is
+        // instead of blanking it.
       }
     })();
   }, [supabase]);
