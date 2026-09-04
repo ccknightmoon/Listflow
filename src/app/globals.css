@@ -60,6 +60,8 @@
      depth/contrast against the primary glow. */
   --glow-primary: color-mix(in srgb, var(--accent) 22%, transparent);
   --glow-secondary: rgba(36, 200, 216, 0.1);
+  --glow-danger: rgba(255, 92, 114, 0.12);
+  --glow-success: rgba(51, 209, 122, 0.08);
   --accent-soft: color-mix(in srgb, var(--accent) 72%, black);
   --accent-deep: color-mix(in srgb, var(--accent) 88%, black);
 
@@ -104,6 +106,8 @@ html {
     --accent-tint: color-mix(in srgb, var(--accent) 18%, transparent);
     --glow-primary: color-mix(in srgb, var(--accent) 35%, transparent);
     --glow-secondary: rgba(36, 200, 216, 0.16);
+    --glow-danger: rgba(255, 92, 114, 0.2);
+    --glow-success: rgba(51, 209, 122, 0.13);
     --accent-soft: color-mix(in srgb, var(--accent) 55%, white);
     --accent-deep: color-mix(in srgb, var(--accent) 80%, black);
   }
@@ -135,6 +139,8 @@ html {
   --accent-tint: color-mix(in srgb, var(--accent) 18%, transparent);
   --glow-primary: color-mix(in srgb, var(--accent) 35%, transparent);
   --glow-secondary: rgba(36, 200, 216, 0.16);
+  --glow-danger: rgba(255, 92, 114, 0.2);
+  --glow-success: rgba(51, 209, 122, 0.13);
   --accent-soft: color-mix(in srgb, var(--accent) 55%, white);
   --accent-deep: color-mix(in srgb, var(--accent) 80%, black);
 }
