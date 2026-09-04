@@ -6,6 +6,7 @@ import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, Che
 import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
+import { useCountUp } from "@/lib/use-count-up";
 
 type SortKey = "newest" | "oldest" | "price-asc" | "price-desc";
 
@@ -235,6 +236,7 @@ export default function StorePage() {
   // BottomNav (bottom-20, plus its own card height) — pb-24 alone isn't
   // enough room and the last listing row ends up hidden behind it.
   const bulkBarActive = selectMode && selected.size > 0;
+  const displayCount = useCountUp(listings.length);
 
   return (
     <main
@@ -260,7 +262,7 @@ export default function StorePage() {
         </Link>
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-medium">
-            {loading ? "Store" : `Store (${listings.length})`}
+            {loading ? "Store" : `Store (${Math.round(displayCount ?? 0)})`}
           </h1>
           {!loading && !error && (
             <p className="text-xs text-[var(--text-secondary)]">All active eBay listings</p>

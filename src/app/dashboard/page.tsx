@@ -8,6 +8,7 @@ import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
 import { apiFetch } from "@/lib/api";
 import { bucketRevenue, formatCompactCurrency, type BucketableSale } from "@/lib/sales-buckets";
+import { useCountUp } from "@/lib/use-count-up";
 
 interface Stats {
   drafts: number;
@@ -104,6 +105,7 @@ export default function DashboardPage() {
   const drafts = stats?.drafts ?? null;
   const active = stats?.active ?? null;
   const revenue = stats?.weeklyRevenue ?? null;
+  const displayRevenue = useCountUp(revenue);
   const weeklySales = stats?.weeklySales ?? null;
 
   return (
@@ -142,7 +144,7 @@ export default function DashboardPage() {
           <div>
             <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }}>This week</p>
             <p className="font-display font-extrabold text-3xl mt-1.5">
-              {revenue !== null ? (revenue === 0 ? "$0" : `$${revenue.toFixed(0)}`) : "—"}
+              {displayRevenue !== null ? `$${Math.round(displayRevenue)}` : "—"}
             </p>
           </div>
 

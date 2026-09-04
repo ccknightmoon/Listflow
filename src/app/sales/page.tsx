@@ -6,6 +6,7 @@ import { ArrowLeft, ExternalLink, Loader2, RefreshCw, Shirt, TrendingUp } from "
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { bucketRevenue, formatCompactCurrency } from "@/lib/sales-buckets";
+import { useCountUp } from "@/lib/use-count-up";
 
 type DayRange = 7 | 30 | 90;
 
@@ -22,6 +23,7 @@ interface Sale {
 export default function SalesPage() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [totalRevenue, setTotalRevenue] = useState(0);
+  const displayTotalRevenue = useCountUp(totalRevenue);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
@@ -138,7 +140,7 @@ export default function SalesPage() {
             <p className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
               {sales.length} item{sales.length !== 1 ? "s" : ""} sold
             </p>
-            <p className="font-display font-extrabold text-xl">${totalRevenue.toFixed(2)}</p>
+            <p className="font-display font-extrabold text-xl">${(displayTotalRevenue ?? 0).toFixed(2)}</p>
           </div>
         </div>
       )}
