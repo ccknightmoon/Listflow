@@ -7,6 +7,7 @@ import BottomNav from "@/components/BottomNav";
 import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
 import { apiFetch } from "@/lib/api";
+import { bucketRevenueByWeek, type BucketableSale } from "@/lib/sales-buckets";
 
 interface Stats {
   drafts: number;
@@ -14,6 +15,11 @@ interface Stats {
   weeklyRevenue: number;
   weeklySales: number;
 }
+
+// How far back the hero tile's trend sparkline looks — 4 whole weeks,
+// matching a typical "how's business been lately" glance rather than the
+// full history the Sales page itself offers.
+const TREND_DAYS = 28;
 
 function greeting(hour: number) {
   if (hour < 5) return "Still up";
@@ -28,6 +34,9 @@ export default function DashboardPage() {
   const [shipCount, setShipCount] = useState<number | null>(null);
   const [displayName, setDisplayName] = useState<string | null>(null);
   const [eyebrow, setEyebrow] = useState("Welcome back");
+  // Backs the hero tile's trend sparkline — null until loaded (or if it
+  // fails, which just means the tile shows no sparkline, same as today).
+  const [trendSales, setTrendSales] = useState<BucketableSale[] | null>(null);
 
   const supabase = useMemo(
     () =>
@@ -74,7 +83,23 @@ export default function DashboardPage() {
         null;
       setDisplayName(name);
     })();
+
+    // Same eBay sales endpoint the Sales page itself uses, just a fourth
+    // independent request alongside the three above — fills the hero
+    // tile's previously-empty space with a real trend instead of leaving
+    // it blank.
+    void (async () => {
+      try {
+        const salesData = await apiFetch<{ sales?: BucketableSale[]; error?: string }>(`/api/ebay/sales?days=${TREND_DAYS}&thumbnails=0`);
+        setTrendSales(salesData.error ? null : (salesData.sales ?? []));
+      } catch {
+        setTrendSales(null);
+      }
+    })();
   }, [supabase]);
+
+  const trend = trendSales ? bucketRevenueByWeek(trendSales, TREND_DAYS) : null;
+  const trendMax = trend ? Math.max(1, ...trend.totals) : 1;
 
   const drafts = stats?.drafts ?? null;
   const active = stats?.active ?? null;
@@ -111,7 +136,7 @@ export default function DashboardPage() {
       <div className="relative grid flex-1 grid-cols-[1.3fr_1fr] gap-2.5 mb-2.5">
         <Link
           href="/sales"
-          className="card d1 stagger row-span-2 p-4 flex flex-col justify-between active:scale-[.97]"
+          className="card d1 stagger row-span-2 p-4 flex flex-col active:scale-[.97]"
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
           <div>
@@ -120,6 +145,39 @@ export default function DashboardPage() {
               {revenue !== null ? (revenue === 0 ? "$0" : `$${revenue.toFixed(0)}`) : "—"}
             </p>
           </div>
+
+          {/* Real revenue-by-week trend, same numbers the Sales page's own
+              chart shows for the same period — fills what used to be dead
+              space in this tile with something actually informative. This
+              flex-1 slot is always present (so the layout doesn't jump
+              once data loads); it only draws bars once there's real trend
+              data to show, and stays an empty spacer otherwise — same look
+              as before for a brand-new or not-yet-loaded store. */}
+          <div className="flex-1 flex flex-col justify-center min-h-0 my-1">
+            {trend && trend.totals.some((t) => t > 0) && (
+              <>
+                <p className="text-[9px] font-bold mb-1.5" style={{ color: "var(--text-tertiary)" }}>
+                  Last {trend.totals.length} weeks
+                </p>
+                <div className="flex items-end gap-1" style={{ height: 30 }}>
+                  {trend.totals.map((t, i) => (
+                    <div
+                      key={i}
+                      className="flex-1 rounded-t"
+                      style={{
+                        height: `${Math.max(3, (t / trendMax) * 30)}px`,
+                        background: "var(--accent)",
+                        opacity: i === trend.totals.length - 1 ? 1 : 0.45,
+                        borderRadius: "3px 3px 1px 1px",
+                      }}
+                      title={`$${t.toFixed(2)}`}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
           {weeklySales !== null && weeklySales > 0 && (
             <p className="text-[11.5px] font-bold mt-2 flex items-center gap-1" style={{ color: "var(--success)" }}>
               <TrendingUp className="w-3.5 h-3.5" /> {weeklySales} sold this week

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, Loader2, RefreshCw, Shirt, TrendingUp } from "lucide-react";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
+import { bucketRevenueByWeek } from "@/lib/sales-buckets";
 
 type DayRange = 7 | 30 | 90;
 
@@ -130,25 +131,14 @@ export default function SalesPage() {
       )}
 
       {!loading && !error && sales.length > 0 && (() => {
-        // Bucket sold-at timestamps into ~weekly windows ending today, most
-        // recent week last — purely client-side from the sales already on
-        // hand, no separate API call. This whole block re-runs on every
+        // Purely client-side from the sales already on hand, no separate API
+        // call — and computed by the same shared bucketing function the
+        // Dashboard's trend sparkline uses, so the two screens can never
+        // disagree about what "this week" means. Recomputed on every
         // render, so as real time passes and `sales` is refreshed, the
-        // buckets and their date labels shift forward with it automatically
-        // — there's no fixed/cached "as of" date baked in anywhere here.
-        const bucketCount = Math.max(1, Math.min(6, Math.ceil(days / 7)));
-        const weekMs = 7 * 86400000;
-        const now = Date.now();
-        const totals = new Array(bucketCount).fill(0);
-        for (const s of sales) {
-          const t = new Date(s.soldAt).getTime();
-          const idx = Math.floor((now - t) / weekMs);
-          if (idx >= 0 && idx < bucketCount) totals[bucketCount - 1 - idx] += s.total;
-        }
+        // buckets and their date labels shift forward automatically.
+        const { totals, weekStarts } = bucketRevenueByWeek(sales, days);
         const max = Math.max(1, ...totals);
-        // Each bucket's own start date, oldest first — mirrors how `totals`
-        // is filled above (idx 0 there is the current/most recent week).
-        const weekStarts = totals.map((_, pos) => now - (bucketCount - pos) * weekMs);
         const barAreaPx = 46;
         return (
           <div className="card p-4 mb-4">

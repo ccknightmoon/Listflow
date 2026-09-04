@@ -99,6 +99,11 @@ export async function GET(req: Request) {
   // limit — longer ranges are chunked into 30-day windows below and merged,
   // so "up to date" sold history means up to a year back, not just 90 days.
   const days = Math.min(parseInt(searchParams.get("days") ?? "30", 10), 365);
+  // Callers that only need the numbers (e.g. the Dashboard's trend
+  // sparkline, which never renders a single photo) can skip the thumbnail
+  // lookups below entirely — those cost real extra eBay GetItem calls per
+  // sale, which is wasted work when nothing on screen will show them.
+  const includeThumbnails = searchParams.get("thumbnails") !== "0";
 
   // eBay caps ModTimeFrom/ModTimeTo at 30 days — split longer ranges into windows
   const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -192,7 +197,7 @@ export async function GET(req: Request) {
 
   // Look up thumbnails from Supabase first (instant, no extra eBay calls —
   // covers every item that was actually listed through this app).
-  if (sales.length > 0) {
+  if (includeThumbnails && sales.length > 0) {
     const listingIds = sales.map((s) => s.listingId).filter(Boolean);
     const { data: drafts } = await supabase
       .from("drafts")
