@@ -949,9 +949,10 @@ export default function BatchUploadPage() {
                           e.stopPropagation();
                           removePhoto(photoIdx, gIdx);
                         }}
-                        className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-white border border-gray-200 rounded-full flex items-center justify-center opacity-0 group-hover/photo:opacity-100 transition-opacity"
+                        className="absolute -top-1.5 -left-1.5 w-4 h-4 rounded-full flex items-center justify-center opacity-0 group-hover/photo:opacity-100 transition-opacity"
+                        style={{ background: "var(--bg-surface)", border: "1px solid var(--glass-line)" }}
                       >
-                        <X className="w-2.5 h-2.5 text-gray-600" />
+                        <X className="w-2.5 h-2.5" style={{ color: "var(--text-secondary)" }} />
                       </button>
                       <GripVertical
                         className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-white rounded-full p-0.5"
