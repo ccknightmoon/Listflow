@@ -222,7 +222,16 @@ export default function StorePage() {
   });
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24" style={{ viewTransitionName: "store-panel" }}>
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "store-panel" }}>
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
+      />
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 200, height: 200, top: 10, right: -70, background: "var(--glow-secondary)" }}
+      />
+
       <div className="flex items-center gap-3 mb-4">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />
@@ -459,7 +468,7 @@ export default function StorePage() {
                 <button
                   onClick={() => handleDelist(l)}
                   disabled={deleting.has(l.listingId)}
-                  className="flex items-center gap-1 text-xs hover:text-red-600 flex-1 justify-center py-1 disabled:opacity-50"
+                  className="flex items-center gap-1 text-xs hover:text-[var(--danger)] flex-1 justify-center py-1 disabled:opacity-50"
                   style={{ color: deleting.has(l.listingId) ? undefined : "var(--text-secondary)" }}
                 >
                   {deleting.has(l.listingId) ? (
