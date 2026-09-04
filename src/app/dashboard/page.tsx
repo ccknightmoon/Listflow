@@ -67,7 +67,8 @@ export default function DashboardPage() {
 
     void (async () => {
       try {
-        const shipData = await apiFetch<{ count?: number; error?: string }>("/api/ebay/ship");
+        // count-only — see the thumbnails=0 comment in api/ebay/ship/route.ts
+        const shipData = await apiFetch<{ count?: number; error?: string }>("/api/ebay/ship?thumbnails=0");
         if (!shipData.error) setShipCount(shipData.count ?? 0);
       } catch {
         setShipCount(null);

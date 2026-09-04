@@ -64,7 +64,7 @@ async function fetchGalleryUrl(itemId: string): Promise<string | null> {
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
   const { supabase } = auth;
@@ -76,6 +76,15 @@ export async function GET() {
 
   return ebayContext.run(connection, async () => {
   try {
+
+  // Same escape hatch as /api/ebay/sales' own "thumbnails=0": the
+  // Dashboard's hero tile calls this route only for `count` and never
+  // renders a single item/thumbnail from the response, but was still
+  // paying for the Supabase lookup below AND its up-to-60-GetItem-call
+  // fallback loop (real eBay round trips) on every dashboard load. The
+  // Ship page itself calls this with no query string, so it's unaffected.
+  const { searchParams } = new URL(req.url);
+  const includeThumbnails = searchParams.get("thumbnails") !== "0";
 
   const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
   const to = new Date().toISOString();
@@ -147,7 +156,7 @@ export async function GET() {
 
   // Look up thumbnails from Supabase first (instant, no extra eBay calls -
   // covers every item that was actually listed through this app).
-  if (items.length > 0) {
+  if (includeThumbnails && items.length > 0) {
     const listingIds = items.map((i) => i.listingId).filter(Boolean);
     const { data: drafts } = await supabase
       .from("drafts")
