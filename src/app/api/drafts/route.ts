@@ -16,9 +16,17 @@ export async function GET() {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
 
+  // Narrowed to exactly what the Drafts list screen renders (src/app/drafts/
+  // page.tsx's own Draft interface) instead of select("*") -- the full row
+  // also carries the AI-generated description, photo_urls, and a dozen+
+  // item-attribute columns (style, material, theme, sleeve_length, ...)
+  // that this list view never reads. Those only matter once a single draft
+  // is opened for editing, which fetches its own full row separately (see
+  // GET /api/drafts/[id]). A seller with a large draft backlog was shipping
+  // all of that unused text over the wire on every visit to this page.
   const { data, error } = await auth.supabase
     .from("drafts")
-    .select("*")
+    .select("id, title, suggested_price, sell_odds, condition, thumbnail_url, created_at, ebay_listing_id")
     .order("created_at", { ascending: false });
 
   if (error) {
