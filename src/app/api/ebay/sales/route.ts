@@ -149,6 +149,18 @@ export async function GET(req: Request) {
     }
   }
 
+  // Same reasoning as dashboard/stats' weeklyRevenue/weeklySales: eBay's
+  // ModTimeFrom/ModTimeTo (used above to build the request windows) bumps on
+  // ANY change to a transaction -- a buyer leaving feedback, marking it
+  // shipped, a return being opened -- not just the original sale. Without
+  // re-checking CreatedDate here, a sale from well outside the requested
+  // range that merely got touched inside it would show up in "last N days"
+  // and inflate totalRevenue, the sale count, and the Revenue-by-week chart
+  // (which buckets straight off this list). CreatedDate is the actual sale
+  // timestamp, and ModTime is always >= CreatedDate, so this can only
+  // narrow the set -- it can never drop a real in-range sale.
+  const cutoffMs = now - days * MS_PER_DAY;
+
   const sales = allTxBlocks.map((tx) => {
     const itemBlock = xmlFind(tx, "Item");
     const title = xmlFind(itemBlock, "Title") || xmlFind(tx, "Title");
@@ -157,7 +169,11 @@ export async function GET(req: Request) {
     const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
     const soldAt = xmlFind(tx, "CreatedDate");
     return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null };
-  }).filter((s) => s.price > 0);
+  }).filter((s) => {
+    if (s.price <= 0) return false;
+    const soldMs = Date.parse(s.soldAt);
+    return !isNaN(soldMs) && soldMs >= cutoffMs;
+  });
 
   // Most-recently-sold first. Transactions arrive merged from several
   // parallel 30-day-window calls (see the chunking above) in whatever

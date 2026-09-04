@@ -8,6 +8,15 @@ import { apiFetch } from "@/lib/api";
 
 type DayRange = 7 | 30 | 90;
 
+// Compact currency for tight chart labels: $342, $1.2k, $12k — never cents,
+// since the point is a quick relative read, not a precise figure (the exact
+// total is one tap away in the stat card above and the list below).
+function formatCompactCurrency(n: number): string {
+  if (n >= 10000) return `$${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `$${(n / 1000).toFixed(1)}k`;
+  return `$${Math.round(n)}`;
+}
+
 interface Sale {
   listingId: string;
   title: string;
@@ -123,7 +132,10 @@ export default function SalesPage() {
       {!loading && !error && sales.length > 0 && (() => {
         // Bucket sold-at timestamps into ~weekly windows ending today, most
         // recent week last — purely client-side from the sales already on
-        // hand, no separate API call.
+        // hand, no separate API call. This whole block re-runs on every
+        // render, so as real time passes and `sales` is refreshed, the
+        // buckets and their date labels shift forward with it automatically
+        // — there's no fixed/cached "as of" date baked in anywhere here.
         const bucketCount = Math.max(1, Math.min(6, Math.ceil(days / 7)));
         const weekMs = 7 * 86400000;
         const now = Date.now();
@@ -134,24 +146,42 @@ export default function SalesPage() {
           if (idx >= 0 && idx < bucketCount) totals[bucketCount - 1 - idx] += s.total;
         }
         const max = Math.max(1, ...totals);
+        // Each bucket's own start date, oldest first — mirrors how `totals`
+        // is filled above (idx 0 there is the current/most recent week).
+        const weekStarts = totals.map((_, pos) => now - (bucketCount - pos) * weekMs);
+        const barAreaPx = 46;
         return (
           <div className="card p-4 mb-4">
             <p className="text-[11.5px] font-bold mb-2.5" style={{ color: "var(--text-secondary)" }}>Revenue by week</p>
-            <div className="flex items-end gap-1.5" style={{ height: 64 }}>
-              {totals.map((t, idx) => (
-                <div
-                  key={idx}
-                  className="flex-1 rounded-t"
-                  style={{
-                    height: `${Math.max(6, (t / max) * 100)}%`,
-                    background: "var(--accent)",
-                    opacity: idx === totals.length - 1 ? 1 : 0.85,
-                    borderRadius: "5px 5px 2px 2px",
-                    transition: "height .4s var(--spring)",
-                  }}
-                  title={`$${t.toFixed(2)}`}
-                />
-              ))}
+            <div className="flex items-end gap-1.5">
+              {totals.map((t, idx) => {
+                const isCurrent = idx === totals.length - 1;
+                const weekLabel = new Date(weekStarts[idx]).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+                return (
+                  <div key={idx} className="flex-1 flex flex-col items-center gap-1 min-w-0">
+                    <span
+                      className="text-[9.5px] font-semibold tabular-nums"
+                      style={{ color: isCurrent ? "var(--accent)" : "var(--text-tertiary)" }}
+                    >
+                      {formatCompactCurrency(t)}
+                    </span>
+                    <div
+                      className="w-full rounded-t"
+                      style={{
+                        height: `${Math.max(4, (t / max) * barAreaPx)}px`,
+                        background: "var(--accent)",
+                        opacity: isCurrent ? 1 : 0.85,
+                        borderRadius: "5px 5px 2px 2px",
+                        transition: "height .4s var(--spring)",
+                      }}
+                      title={`Week of ${weekLabel}: $${t.toFixed(2)}`}
+                    />
+                    <span className="text-[9px] truncate" style={{ color: "var(--text-tertiary)" }}>
+                      {weekLabel}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         );
