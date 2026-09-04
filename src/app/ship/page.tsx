@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, Loader2, Package, RefreshCw, Shirt } from "lucide-react";
-import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 
@@ -68,7 +67,7 @@ export default function ShipPage() {
   }
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "ship-panel" }}>
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-5 overflow-hidden" style={{ viewTransitionName: "ship-panel" }}>
       <div
         className="bloom d1 stagger"
         style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-danger)" }}
@@ -200,8 +199,6 @@ export default function ShipPage() {
           })}
         </div>
       )}
-
-      <BottomNav />
     </main>
   );
 }

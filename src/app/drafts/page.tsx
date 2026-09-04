@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X } from "lucide-react";
-import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
@@ -387,7 +386,7 @@ export default function DraftsPage() {
 
       {hasSelection && (
         <div
-          className="fixed bottom-20 left-0 right-0 px-5 max-w-md mx-auto"
+          className="fixed bottom-4 left-0 right-0 px-5 max-w-md mx-auto"
         >
           <div className="card p-3 flex gap-2">
             <button
@@ -418,8 +417,6 @@ export default function DraftsPage() {
           </div>
         </div>
       )}
-
-      <BottomNav />
     </main>
   );
 }
