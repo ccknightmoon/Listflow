@@ -91,13 +91,20 @@ export function getPriceSuggestion(
     sellOdds = "Medium";
   }
 
-  // Prefer the real weight-based estimate when we have an item type to work
-  // with; fall back to the old flat heavy/not-heavy guess otherwise (e.g.
-  // callers that only ever tracked the boolean).
-  const shippingCost = itemType
-    ? estimateShipping(itemType, size).cost
-    : estimateShippingCost(isHeavy);
-  const { listPrice, floorPrice } = computeListAndFloor(base, shippingCost);
+  // Heavy items get "buyer pays" (or "calculated") shipping on the actual
+  // eBay listing (see /api/ebay/list) — the buyer is charged a separate
+  // shipping amount at checkout. Baking that same shipping cost into the
+  // item price on top of that charged buyers for shipping twice: once via
+  // an inflated price, again via the separate shipping charge. Only fold
+  // shipping into the price for non-heavy items, which list with free
+  // shipping — there, the cost genuinely needs to be recovered from the
+  // item price itself.
+  const shippingCostToCover = isHeavy
+    ? 0
+    : itemType
+      ? estimateShipping(itemType, size).cost
+      : estimateShippingCost(isHeavy);
+  const { listPrice, floorPrice } = computeListAndFloor(base, shippingCostToCover);
 
   return {
     suggestedPrice: listPrice,

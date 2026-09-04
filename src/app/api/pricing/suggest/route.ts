@@ -247,13 +247,19 @@ export async function POST(req: NextRequest) {
   // as an active-listings signal rather than claiming it's sold data.
   // listPrice/floorPrice below apply the break-even formula on top of
   // whatever signal we do have (median active price, condition-adjusted).
-  // Prefer the real weight-based estimate when the caller has an item type
-  // to work with; fall back to the old flat heavy/not-heavy guess otherwise.
-  const shippingCost = itemType
-    ? estimateShipping(itemType, size).cost
-    : estimateShippingCost(Boolean(isHeavy));
+  // Same reasoning as src/lib/pricing.ts's getPriceSuggestion(): heavy
+  // items are charged a separate "buyer pays"/"calculated" shipping amount
+  // on the real eBay listing, so baking that same cost into the item price
+  // here on top of that would charge buyers for shipping twice. Only fold
+  // an estimated shipping cost into the price for non-heavy (free
+  // shipping) items, where it actually needs to come out of the price.
+  const shippingCostToCover = isHeavy
+    ? 0
+    : itemType
+      ? estimateShipping(itemType, size).cost
+      : estimateShippingCost(Boolean(isHeavy));
   const { listPrice, floorPrice } = suggestedPrice > 0
-    ? computeListAndFloor(suggestedPrice, shippingCost)
+    ? computeListAndFloor(suggestedPrice, shippingCostToCover)
     : { listPrice: 0, floorPrice: 0 };
 
   const result: PriceSuggestion = {
