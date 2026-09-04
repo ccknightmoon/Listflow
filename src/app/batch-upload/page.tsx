@@ -1657,7 +1657,7 @@ export default function BatchUploadPage() {
                     </p>
                   )}
                   {listStatus[i] === "listed" && listMissingAspects[i]?.length > 0 && (
-                    <p className="text-xs mb-2" style={{ color: "#92400E" }}>
+                    <p className="text-xs mb-2" style={{ color: "var(--warning-border)" }}>
                       Listed, but eBay wants these fields for this category and the AI
                       couldn&apos;t tell: <strong>{listMissingAspects[i].join(", ")}</strong>.
                     </p>

@@ -472,7 +472,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
       )}
 
       {missingAspectsWarning && missingAspectsWarning.length > 0 && (
-        <div className="card p-3 mb-4 text-sm" style={{ borderColor: "#F59E0B", background: "#FFFBEB", color: "#92400E" }}>
+        <div className="card p-3 mb-4 text-sm" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)", color: "var(--warning-border)" }}>
           Listed, but eBay lists these as required for this category and the
           AI couldn&apos;t determine them: <strong>{missingAspectsWarning.join(", ")}</strong>.
           Consider editing the listing on eBay to fill them in for better search placement.
