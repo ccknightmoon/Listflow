@@ -53,6 +53,13 @@
      recalculates automatically when a preset or theme changes, no lookup
      table to keep in sync */
   --accent-tint: color-mix(in srgb, var(--accent) 12%, transparent);
+  /* Ambient corner glow behind glass headers/hero tiles -- deliberately
+     stronger than --accent-tint (sized for small icon chips) so the page
+     reads as lit-from-behind, matching the original mockup bloom-a/-b.
+     --glow-secondary is a fixed cool teal, not accent-derived, purely for
+     depth/contrast against the primary glow. */
+  --glow-primary: color-mix(in srgb, var(--accent) 22%, transparent);
+  --glow-secondary: rgba(36, 200, 216, 0.1);
   --accent-soft: color-mix(in srgb, var(--accent) 72%, black);
   --accent-deep: color-mix(in srgb, var(--accent) 88%, black);
 
@@ -95,6 +102,8 @@ html {
     --glass-strong: rgba(255, 255, 255, 0.09);
 
     --accent-tint: color-mix(in srgb, var(--accent) 18%, transparent);
+    --glow-primary: color-mix(in srgb, var(--accent) 35%, transparent);
+    --glow-secondary: rgba(36, 200, 216, 0.16);
     --accent-soft: color-mix(in srgb, var(--accent) 55%, white);
     --accent-deep: color-mix(in srgb, var(--accent) 80%, black);
   }
@@ -124,6 +133,8 @@ html {
   --glass-strong: rgba(255, 255, 255, 0.09);
 
   --accent-tint: color-mix(in srgb, var(--accent) 18%, transparent);
+  --glow-primary: color-mix(in srgb, var(--accent) 35%, transparent);
+  --glow-secondary: rgba(36, 200, 216, 0.16);
   --accent-soft: color-mix(in srgb, var(--accent) 55%, white);
   --accent-deep: color-mix(in srgb, var(--accent) 80%, black);
 }

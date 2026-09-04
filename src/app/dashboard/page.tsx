@@ -80,7 +80,11 @@ export default function DashboardPage() {
     <main className="relative min-h-screen max-w-md mx-auto px-4 pt-5 pb-28 overflow-hidden">
       <div
         className="bloom d1 stagger"
-        style={{ width: 220, height: 220, top: -70, left: -60, background: "var(--accent-tint)" }}
+        style={{ width: 260, height: 260, top: -80, left: -60, background: "var(--glow-primary)" }}
+      />
+      <div
+        className="bloom d1 stagger"
+        style={{ width: 220, height: 220, top: 40, right: -80, background: "var(--glow-secondary)" }}
       />
 
       <div
