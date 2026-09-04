@@ -1064,43 +1064,54 @@ export default function BatchUploadPage() {
         <div className="flex flex-col gap-4">
           <AIDisclaimer />
           {results.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 stagger d1">
-              {results.map((r, i) => {
-                const group = groups[i] ?? [];
-                const thumb = group.map((idx) => photos[idx]?.previewUrl).find(Boolean);
-                return (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() =>
-                      document.getElementById(`result-item-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
-                    }
-                    className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden active:scale-90"
-                    style={{ border: "1px solid var(--glass-line)", transition: "transform .2s var(--spring)" }}
-                  >
-                    {thumb ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={thumb} alt={`Item ${i + 1}`} className="w-full h-full object-cover" />
-                    ) : (
-                      <div
-                        className="w-full h-full flex items-center justify-center text-[10px] font-medium"
-                        style={{ background: "var(--glass)", color: "var(--text-tertiary)" }}
-                      >
-                        #{i + 1}
-                      </div>
-                    )}
-                    {r.error && (
+            <>
+              <p className="text-xs font-semibold stagger d1" style={{ color: "var(--text-tertiary)" }}>
+                {results.length} items ready &middot; tap one to jump to it
+              </p>
+              <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 stagger d1">
+                {results.map((r, i) => {
+                  const group = groups[i] ?? [];
+                  const thumb = group.map((idx) => photos[idx]?.previewUrl).find(Boolean);
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() =>
+                        document.getElementById(`result-item-${i}`)?.scrollIntoView({ behavior: "smooth", block: "start" })
+                      }
+                      className="relative flex-shrink-0 w-14 h-14 rounded-xl overflow-hidden active:scale-90"
+                      style={{ border: "1px solid var(--glass-line)", transition: "transform .2s var(--spring)" }}
+                    >
+                      {thumb ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={thumb} alt={`Item ${i + 1}`} className="w-full h-full object-cover" />
+                      ) : (
+                        <div
+                          className="w-full h-full flex items-center justify-center text-[10px] font-medium"
+                          style={{ background: "var(--glass)", color: "var(--text-tertiary)" }}
+                        >
+                          #{i + 1}
+                        </div>
+                      )}
                       <span
-                        className="absolute inset-x-0 bottom-0 text-[8px] font-bold text-center text-white py-0.5"
-                        style={{ background: "var(--danger)" }}
+                        className="absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-bold text-white"
+                        style={{ background: "rgba(0,0,0,0.55)" }}
                       >
-                        !
+                        {i + 1}
                       </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+                      {r.error && (
+                        <span
+                          className="absolute inset-x-0 bottom-0 text-[8px] font-bold text-center text-white py-0.5"
+                          style={{ background: "var(--danger)" }}
+                        >
+                          !
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
           )}
           {(() => {
             const unsaved = results.filter((r, i) => !r.error && (saveStatus[i] ?? "idle") === "idle").length;
@@ -1328,18 +1339,53 @@ export default function BatchUploadPage() {
                         setResults((prev) => prev.map((r, j) => j === i ? { ...r, suggestedTitle: val } : r));
                       }}
                     />
-                    <select
-                      className="input w-full text-xs mb-1"
-                      value={result.condition}
-                      disabled={!!draftIds[i]}
-                      onChange={(e) => {
-                        const val = e.target.value as Condition;
-                        setResults((prev) => prev.map((r, j) => j === i ? { ...r, condition: val } : r));
-                      }}
-                    >
-                      {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <div className="grid grid-cols-3 gap-1 mt-1">
+                    <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                      <select
+                        className="text-xs font-semibold rounded-full px-3 py-1.5 border appearance-none"
+                        style={{ background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-primary)" }}
+                        value={result.condition}
+                        disabled={!!draftIds[i]}
+                        onChange={(e) => {
+                          const val = e.target.value as Condition;
+                          setResults((prev) => prev.map((r, j) => j === i ? { ...r, condition: val } : r));
+                        }}
+                      >
+                        {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const next = !(heavyItems[i] ?? false);
+                          setHeavyItems((prev) => ({ ...prev, [i]: next }));
+                          if (!next) setShippingCosts((prev) => { const n = { ...prev }; delete n[i]; return n; });
+                        }}
+                        disabled={!!draftIds[i]}
+                        className="text-xs font-semibold rounded-full px-3 py-1.5 border"
+                        style={
+                          heavyItems[i]
+                            ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }
+                            : { background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }
+                        }
+                      >
+                        {heavyItems[i] ? "Heavy item" : "Not heavy"}
+                      </button>
+                      {(heavyItems[i] ?? false) && (
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-tertiary)" }}>$</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="Shipping"
+                            value={shippingCosts[i] ?? ""}
+                            disabled={!!draftIds[i]}
+                            onChange={(e) => setShippingCosts((prev) => ({ ...prev, [i]: e.target.value }))}
+                            className="input w-24 text-xs py-1.5 pl-5 pr-2 rounded-full"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-3 gap-1 mt-2">
                       <div>
                         <p className="text-[10px] text-[var(--text-tertiary)] mb-0.5">Brand</p>
                         <input
@@ -1391,37 +1437,6 @@ export default function BatchUploadPage() {
                         setResults((prev) => prev.map((r, j) => j === i ? { ...r, flaws: val } : r));
                       }}
                     />
-                    <div className="flex items-center gap-2 mt-2 flex-wrap">
-                      <input
-                        type="checkbox"
-                        id={`heavy-${i}`}
-                        checked={heavyItems[i] ?? false}
-                        disabled={!!draftIds[i]}
-                        onChange={(e) => {
-                          setHeavyItems((prev) => ({ ...prev, [i]: e.target.checked }));
-                          if (!e.target.checked) setShippingCosts((prev) => { const n = { ...prev }; delete n[i]; return n; });
-                        }}
-                        className="w-4 h-4 rounded accent-[var(--accent)]"
-                      />
-                      <label htmlFor={`heavy-${i}`} className="text-xs text-[var(--text-secondary)] cursor-pointer">
-                        Heavy item
-                      </label>
-                      {(heavyItems[i] ?? false) && (
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-[var(--text-secondary)]">— shipping $</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            placeholder="0.00"
-                            value={shippingCosts[i] ?? ""}
-                            disabled={!!draftIds[i]}
-                            onChange={(e) => setShippingCosts((prev) => ({ ...prev, [i]: e.target.value }))}
-                            className="input w-16 text-xs py-0.5 px-1.5"
-                          />
-                        </div>
-                      )}
-                    </div>
                   </div>
 
                   <div className="flex items-baseline gap-2 mb-2 flex-wrap">
