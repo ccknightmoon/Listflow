@@ -8,7 +8,7 @@ export default function SplashPage() {
       <div className="flex flex-col items-center text-center mb-12">
         <div
           className="w-16 h-16 rounded-2xl flex items-center justify-center mb-5"
-          style={{ background: "#185FA5" }}
+          style={{ background: "var(--accent)" }}
         >
           <span className="text-white font-bold text-xl tracking-tight">LF</span>
         </div>
@@ -21,8 +21,8 @@ export default function SplashPage() {
 
       {/* Feature pills */}
       <div className="flex flex-col gap-3 mb-12">
-        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "#F0F7FF" }}>
-          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "#185FA5" }}>
+        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}>
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--accent)" }}>
             <Camera className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -31,8 +31,8 @@ export default function SplashPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "#F0F7FF" }}>
-          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "#185FA5" }}>
+        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}>
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--accent)" }}>
             <Tag className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -41,8 +41,8 @@ export default function SplashPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "#F0F7FF" }}>
-          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "#185FA5" }}>
+        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}>
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--accent)" }}>
             <Zap className="w-4 h-4 text-white" />
           </div>
           <div>
@@ -51,8 +51,8 @@ export default function SplashPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "#F0F7FF" }}>
-          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "#185FA5" }}>
+        <div className="flex items-center gap-3 p-3 rounded-xl" style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}>
+          <div className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: "var(--accent)" }}>
             <TrendingUp className="w-4 h-4 text-white" />
           </div>
           <div>

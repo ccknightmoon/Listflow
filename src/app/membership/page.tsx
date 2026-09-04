@@ -95,14 +95,14 @@ function PlanCard({
       className="card p-5 relative"
       style={
         highlighted
-          ? { border: "2px solid #378ADD" }
+          ? { border: "2px solid var(--accent)" }
           : undefined
       }
     >
       {badge && (
         <div
           className="absolute -top-2.5 left-1/2 -translate-x-1/2 text-xs px-3 py-1 rounded-md whitespace-nowrap"
-          style={{ background: "#E6F1FB", color: "#0C447C" }}
+          style={{ background: "var(--accent-tint)", color: "var(--accent)" }}
         >
           {badge}
         </div>
@@ -110,7 +110,7 @@ function PlanCard({
 
       <Icon
         className="w-5 h-5"
-        style={{ color: highlighted ? "#185FA5" : "var(--text-secondary)", marginTop: badge ? 8 : 0 }}
+        style={{ color: highlighted ? "var(--accent)" : "var(--text-secondary)", marginTop: badge ? 8 : 0 }}
       />
       <h3 className="text-base font-medium mt-3">{name}</h3>
       <p className="text-2xl font-medium mt-1 mb-3">
