@@ -132,28 +132,47 @@ export default function DraftsPage() {
     // though several items could fail independently in the same batch.
     const failures: { title: string; error: string }[] = [];
     let successCount = 0;
+    let doneCount = 0;
 
-    for (let i = 0; i < ids.length; i++) {
-      const draftTitle = drafts.find((d) => d.id === ids[i])?.title ?? `Item ${i + 1}`;
-      try {
-        const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string }>("/api/ebay/list", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ draftId: ids[i], isHeavy: heavyIds.has(ids[i]), shippingCost: shippingCostMap[ids[i]] }),
-        });
-        if (data.error) {
-          if (data.connect) setNeedsEbayConnect(true);
-          if (data.reconnect) setNeedsEbayReconnect(true);
-          failures.push({ title: draftTitle, error: data.error ?? "Unknown error" });
-        } else {
-          successCount++;
+    // A couple of listings at a time instead of strictly one at a time with
+    // an artificial 1s pause between each — same LISTING_CONCURRENCY=2
+    // pattern already proven out in batch-upload's own bulk-listing flow
+    // (handleListAllOnEbay), which hits this exact same /api/ebay/list
+    // endpoint. A single listing is already several sequential eBay calls
+    // internally (SKU cleanup, upsert, offer create/update, publish), so 2
+    // concurrent listings roughly doubles real throughput without stacking
+    // too much simultaneous load on eBay's Trading/Inventory APIs.
+    const LISTING_CONCURRENCY = 2;
+    let cursor = 0;
+
+    async function worker() {
+      while (cursor < ids.length) {
+        const i = cursor++;
+        const draftTitle = drafts.find((d) => d.id === ids[i])?.title ?? `Item ${i + 1}`;
+        try {
+          const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string }>("/api/ebay/list", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ draftId: ids[i], isHeavy: heavyIds.has(ids[i]), shippingCost: shippingCostMap[ids[i]] }),
+          });
+          if (data.error) {
+            if (data.connect) setNeedsEbayConnect(true);
+            if (data.reconnect) setNeedsEbayReconnect(true);
+            failures.push({ title: draftTitle, error: data.error ?? "Unknown error" });
+          } else {
+            successCount++;
+          }
+        } catch {
+          failures.push({ title: draftTitle, error: "Network error" });
         }
-      } catch {
-        failures.push({ title: draftTitle, error: "Network error" });
+        doneCount++;
+        setListProgress(doneCount);
       }
-      setListProgress(i + 1);
-      if (i < ids.length - 1) await new Promise((r) => setTimeout(r, 1000));
     }
+
+    await Promise.all(
+      Array.from({ length: Math.min(LISTING_CONCURRENCY, ids.length) }, () => worker())
+    );
 
     // "Listed!" now only ever means every selected item actually listed —
     // a batch with any failures shows exactly which items failed and why,
