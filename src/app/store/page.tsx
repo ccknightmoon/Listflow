@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
@@ -201,25 +201,35 @@ export default function StorePage() {
   }
 
   const q = search.trim().toLowerCase();
-  const filtered = !q ? listings : listings.filter((l) => {
-    const sku = (l.sku ?? "").toLowerCase();
-    if (q.length === 1) return sku === q;
-    if (sku && (sku === q || sku.startsWith(q))) return true;
-    const qWords = q.split(/\s+/);
-    const titleWords = l.title.toLowerCase().split(/[\s\-\/,.()&]+/);
-    return qWords.every((qw) => titleWords.some((tw) => tw.startsWith(qw)));
-  });
 
-  const sorted = [...filtered].sort((a, b) => {
-    if (sort === "newest" || sort === "oldest") {
-      const ta = a.startTime ? new Date(a.startTime).getTime() : 0;
-      const tb = b.startTime ? new Date(b.startTime).getTime() : 0;
-      return sort === "newest" ? tb - ta : ta - tb;
-    }
-    const pa = a.price ?? 0;
-    const pb = b.price ?? 0;
-    return sort === "price-asc" ? pa - pb : pb - pa;
-  });
+  // Was recomputed from scratch on every render (every keystroke in search,
+  // every price edit, every select-mode toggle) even though listings/search/
+  // sort are the only things that actually change the result — worth
+  // skipping for a store that can hold hundreds of listings.
+  const filtered = useMemo(() => {
+    if (!q) return listings;
+    return listings.filter((l) => {
+      const sku = (l.sku ?? "").toLowerCase();
+      if (q.length === 1) return sku === q;
+      if (sku && (sku === q || sku.startsWith(q))) return true;
+      const qWords = q.split(/\s+/);
+      const titleWords = l.title.toLowerCase().split(/[\s\-\/,.()&]+/);
+      return qWords.every((qw) => titleWords.some((tw) => tw.startsWith(qw)));
+    });
+  }, [listings, q]);
+
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      if (sort === "newest" || sort === "oldest") {
+        const ta = a.startTime ? new Date(a.startTime).getTime() : 0;
+        const tb = b.startTime ? new Date(b.startTime).getTime() : 0;
+        return sort === "newest" ? tb - ta : ta - tb;
+      }
+      const pa = a.price ?? 0;
+      const pb = b.price ?? 0;
+      return sort === "price-asc" ? pa - pb : pb - pa;
+    });
+  }, [filtered, sort]);
 
   return (
     <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "store-panel" }}>
@@ -391,6 +401,8 @@ export default function StorePage() {
                   <img
                     src={l.thumbnail}
                     alt={l.title}
+                    loading="lazy"
+                    decoding="async"
                     className="w-14 h-14 rounded-md object-cover flex-shrink-0"
                   />
                 ) : (

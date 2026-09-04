@@ -41,6 +41,9 @@ export default function DashboardPage() {
   useEffect(() => {
     setEyebrow(greeting(new Date().getHours()));
 
+    // Independent requests — fire together instead of one after the other,
+    // so the page isn't waiting on stats before it even starts asking eBay
+    // for the ship count (this used to be a plain sequential await chain).
     void (async () => {
       try {
         const statsData = await apiFetch<{ drafts: number; active: number; weeklyRevenue: number; weeklySales: number }>("/api/dashboard/stats");
@@ -50,7 +53,9 @@ export default function DashboardPage() {
       } finally {
         setStatsLoaded(true);
       }
+    })();
 
+    void (async () => {
       try {
         const shipData = await apiFetch<{ count?: number; error?: string }>("/api/ebay/ship");
         if (!shipData.error) setShipCount(shipData.count ?? 0);

@@ -196,7 +196,7 @@ export default function SalesPage() {
             <div key={i} className={`card stagger p-3 flex items-center gap-3 ${i < 6 ? `d${i + 1}` : ""}`}>
               {s.thumbnail ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={s.thumbnail} alt={s.title} className="w-12 h-12 rounded-md object-cover flex-shrink-0" />
+                <img src={s.thumbnail} alt={s.title} loading="lazy" decoding="async" className="w-12 h-12 rounded-md object-cover flex-shrink-0" />
               ) : (
                 <div className="w-12 h-12 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-shrink-0">
                   <Shirt className="w-5 h-5 text-[var(--text-secondary)]" />

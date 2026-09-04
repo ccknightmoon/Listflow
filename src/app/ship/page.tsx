@@ -156,6 +156,8 @@ export default function ShipPage() {
                   <img
                     src={item.thumbnail}
                     alt={item.title}
+                    loading="lazy"
+                    decoding="async"
                     className="w-12 h-12 rounded-md object-cover flex-shrink-0"
                   />
                 ) : (

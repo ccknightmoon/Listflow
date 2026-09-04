@@ -902,6 +902,8 @@ export default function BatchUploadPage() {
                     key={i}
                     src={p.previewUrl}
                     alt={`Photo ${i + 1}`}
+                    loading="lazy"
+                    decoding="async"
                     className="aspect-square object-cover rounded-md"
                   />
                 ))}
@@ -986,6 +988,8 @@ export default function BatchUploadPage() {
                           <img
                             src={photos[photoIdx].previewUrl}
                             alt={`Photo ${photoIdx + 1}`}
+                            loading="lazy"
+                            decoding="async"
                             className="w-14 h-14 object-cover rounded-md"
                           />
                           <button
@@ -1084,7 +1088,7 @@ export default function BatchUploadPage() {
                     >
                       {thumb ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={thumb} alt={`Item ${i + 1}`} className="w-full h-full object-cover" />
+                        <img src={thumb} alt={`Item ${i + 1}`} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                       ) : (
                         <div
                           className="w-full h-full flex items-center justify-center text-[10px] font-medium"
@@ -1323,6 +1327,8 @@ export default function BatchUploadPage() {
                         key={pi}
                         src={url}
                         alt={`Photo ${pi + 1}`}
+                        loading="lazy"
+                        decoding="async"
                         className="h-36 w-36 object-cover rounded-lg flex-shrink-0 snap-start"
                       />
                     ))}

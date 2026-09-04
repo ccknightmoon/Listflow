@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X } from "lucide-react";
@@ -185,18 +185,25 @@ export default function DraftsPage() {
   }
 
   const q = search.trim().toLowerCase();
-  const filtered = [...(!q ? drafts : drafts.filter((d) =>
-    (d.title ?? "").toLowerCase().includes(q)
-  ))].sort((a, b) => {
-    if (sort === "newest" || sort === "oldest") {
-      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-      return sort === "newest" ? tb - ta : ta - tb;
-    }
-    const pa = a.suggested_price ?? 0;
-    const pb = b.suggested_price ?? 0;
-    return sort === "price-desc" ? pb - pa : pa - pb;
-  });
+
+  // Recomputed from scratch on every render before this (every selection
+  // toggle, every save, every keystroke in search) — memoized since drafts
+  // can run into the hundreds for an active reseller.
+  const filtered = useMemo(() => {
+    const base = !q ? drafts : drafts.filter((d) => (d.title ?? "").toLowerCase().includes(q));
+    return [...base].sort((a, b) => {
+      if (sort === "newest" || sort === "oldest") {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        return sort === "newest" ? tb - ta : ta - tb;
+      }
+      const pa = a.suggested_price ?? 0;
+      const pb = b.suggested_price ?? 0;
+      return sort === "price-desc" ? pb - pa : pa - pb;
+    });
+  }, [drafts, q, sort]);
+
+  const noPriceDrafts = useMemo(() => drafts.filter((d) => !d.suggested_price), [drafts]);
   const allSelected = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
   const hasSelection = selected.size > 0;
 
@@ -278,11 +285,11 @@ export default function DraftsPage() {
         </div>
       )}
 
-      {!loading && drafts.filter((d) => !d.suggested_price).length > 0 && (
+      {!loading && noPriceDrafts.length > 0 && (
         <div className="card p-3 mb-4 flex items-center gap-2 text-sm" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
           <span className="text-base">⚠️</span>
           <p style={{ color: "var(--text-primary)" }}>
-            {drafts.filter((d) => !d.suggested_price).length} draft{drafts.filter((d) => !d.suggested_price).length !== 1 ? "s" : ""} have no price — set one before listing.
+            {noPriceDrafts.length} draft{noPriceDrafts.length !== 1 ? "s" : ""} have no price — set one before listing.
           </p>
         </div>
       )}
@@ -356,6 +363,8 @@ export default function DraftsPage() {
                     <img
                       src={d.thumbnail_url}
                       alt={d.title ?? "Draft"}
+                      loading="lazy"
+                      decoding="async"
                       className="w-10 h-10 rounded-md object-cover flex-shrink-0"
                     />
                   ) : (
