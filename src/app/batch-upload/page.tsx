@@ -44,6 +44,11 @@ interface SlotImage {
 interface AiResult extends BaseAiResult {
   pricing?: PriceSuggestion;
   error?: string;
+  // Set on the placeholder rows handleAnalyzeBatch fills `results` with
+  // before an item has actually been analyzed, so its card can show a
+  // live "still analyzing" state instead of blank fields the instant the
+  // results screen appears.
+  pending?: boolean;
 }
 
 interface Thumbnail {
@@ -51,7 +56,7 @@ interface Thumbnail {
   mediaType: string;
 }
 
-type Step = "upload" | "grouping" | "review" | "analyzing" | "results";
+type Step = "upload" | "grouping" | "review" | "results";
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 const CONDITIONS: Condition[] = [
@@ -68,7 +73,14 @@ const THUMB_QUALITY = 0.5;
 const MAX_PHOTOS = 100;
 const MAX_PHOTOS_PER_ITEM = 6;
 const GROUPING_CHUNK_SIZE = 15;
-const DELAY_BETWEEN_CHUNKS_MS = 1500;
+// Was 1500ms — purely a defensive buffer against OpenAI's per-minute
+// rate limit between grouping chunks. The server already detects a real
+// 429 and backs off on its own (RATE_LIMIT_DELAY_MS in
+// /api/group-photos), so this only needs to be a light pace-setter, not
+// a second safety net — a big batch (60-100 photos, 4-6 chunks) used to
+// lose 6-9 extra seconds here for no benefit on a run that never got
+// rate-limited.
+const DELAY_BETWEEN_CHUNKS_MS = 300;
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -199,7 +211,7 @@ export default function BatchUploadPage() {
     setSavingAll(true);
     const indices = results
       .map((_, i) => i)
-      .filter((i) => !results[i].error && (saveStatus[i] ?? "idle") === "idle");
+      .filter((i) => !results[i].error && !results[i].pending && (saveStatus[i] ?? "idle") === "idle");
 
     // Each item's save is just Supabase writes (a few photo uploads + one
     // drafts insert/update) — no eBay calls, so this can run at a higher
@@ -414,10 +426,28 @@ export default function BatchUploadPage() {
 
   async function handleAnalyzeBatch() {
     setError(null);
-    setStep("analyzing");
     setAnalyzingProgress({ done: 0, total: groups.length });
 
     const allResults: AiResult[] = new Array(groups.length);
+
+    // Put every item on screen right away, each as a placeholder "still
+    // analyzing" card, instead of blocking the whole screen behind one
+    // spinner until the slowest item in the batch finishes. Items are
+    // analyzed ANALYSIS_CONCURRENCY at a time below, so the first few are
+    // usually done well before the last — no reason to make the user
+    // wait to start reviewing/editing them.
+    const pendingResult: AiResult = {
+      itemType: "",
+      brand: "",
+      color: "",
+      size: "",
+      condition: "Good - minor flaws",
+      flaws: "",
+      suggestedTitle: "",
+      pending: true,
+    };
+    setResults(groups.map(() => ({ ...pendingResult })));
+    setStep("results");
 
     // A few items analyzed at once instead of strictly one at a time — the
     // same bounded worker-pool pattern already used for pricing lookups
@@ -446,9 +476,19 @@ export default function BatchUploadPage() {
         data = { error: error instanceof Error ? error.message : "Analysis failed" };
       }
 
-      allResults[i] = !data.results
+      const result: AiResult = !data.results
         ? { itemType: "", brand: "", color: "", size: "", condition: "Good - minor flaws", flaws: "", suggestedTitle: "", error: data.error || "Analysis failed" }
         : data.results[0];
+      allResults[i] = result;
+
+      // Reveal this item the moment it's done rather than waiting for the
+      // whole batch — the results screen is already up (see above), so
+      // this just swaps that one item's placeholder card for the real one.
+      setResults((prev) => {
+        const next = [...prev];
+        next[i] = result;
+        return next;
+      });
 
       doneCount++;
       setAnalyzingProgress({ done: doneCount, total: groups.length });
@@ -466,8 +506,6 @@ export default function BatchUploadPage() {
         Array.from({ length: Math.min(ANALYSIS_CONCURRENCY, groups.length) }, () => worker())
       );
 
-      setResults(allResults);
-      setStep("results");
       // Auto-fill shipping tier AND an actual estimated dollar cost per item
       // from the AI-detected item type/size/material instead of leaving
       // every item on the manual default.
@@ -490,8 +528,12 @@ export default function BatchUploadPage() {
       });
       fetchPricingForAll(allResults);
     } catch (err) {
+      // Each item already catches and records its own failure inside
+      // analyzeOne, so this only fires for something unexpected outside
+      // that — leave whatever's already on screen (a mix of finished and
+      // still-pending items) as it is rather than yanking the user back
+      // to the grouping screen and losing that progress.
       setError((err as Error).message);
-      setStep("review");
     } finally {
       setAnalyzingProgress(null);
     }
@@ -535,7 +577,7 @@ export default function BatchUploadPage() {
   async function fetchPricingForAll(allResults: AiResult[]) {
     const queue = allResults
       .map((result, i) => ({ result, i }))
-      .filter(({ result }) => !result.error);
+      .filter(({ result }) => !result.error && !result.pending);
 
     let cursor = 0;
     async function worker() {
@@ -799,7 +841,7 @@ export default function BatchUploadPage() {
   async function handleListAllOnEbay() {
     const indices = results
       .map((_, i) => i)
-      .filter((i) => !results[i].error && listStatus[i] !== "listed");
+      .filter((i) => !results[i].error && !results[i].pending && listStatus[i] !== "listed");
 
     setListingAll(true);
     setListingAllProgress({ done: 0, total: indices.length });
@@ -842,7 +884,7 @@ export default function BatchUploadPage() {
   function getSelectableIndices(): number[] {
     return results
       .map((_, i) => i)
-      .filter((i) => !results[i].error && !draftIds[i]);
+      .filter((i) => !results[i].error && !results[i].pending && !draftIds[i]);
   }
 
   function toggleSelected(i: number) {
@@ -1168,39 +1210,15 @@ export default function BatchUploadPage() {
         </>
       )}
 
-      {step === "analyzing" && (
-        <div className="card p-8 text-center">
-          <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)] mb-3">
-            {analyzingProgress
-              ? `Analyzing ${analyzingProgress.done}/${analyzingProgress.total} items...`
-              : `Analyzing ${groups.length} item${groups.length !== 1 ? "s" : ""}...`}
-          </p>
-          {analyzingProgress && analyzingProgress.total > 1 && (
-            <div
-              className="h-1.5 rounded-full mx-auto overflow-hidden"
-              style={{ background: "var(--glass)", maxWidth: 200 }}
-            >
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${Math.round((analyzingProgress.done / analyzingProgress.total) * 100)}%`,
-                  background: "var(--accent)",
-                  transition: "width .3s var(--spring)",
-                }}
-              />
-            </div>
-          )}
-        </div>
-      )}
-
       {step === "results" && (
         <div className="flex flex-col gap-4">
           <AIDisclaimer />
           {results.length > 1 && (
             <>
               <p className="text-xs font-semibold stagger d1" style={{ color: "var(--text-tertiary)" }}>
-                {results.length} items ready &middot; tap one to jump to it
+                {analyzingProgress && analyzingProgress.done < analyzingProgress.total
+                  ? `Analyzing — ${analyzingProgress.done}/${analyzingProgress.total} ready so far`
+                  : `${results.length} items ready · tap one to jump to it`}
               </p>
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 stagger d1">
                 {results.map((r, i) => {
@@ -1233,6 +1251,14 @@ export default function BatchUploadPage() {
                       >
                         {i + 1}
                       </span>
+                      {r.pending && (
+                        <span
+                          className="absolute inset-0 flex items-center justify-center"
+                          style={{ background: "rgba(0,0,0,0.45)" }}
+                        >
+                          <Loader2 className="w-3.5 h-3.5 text-white animate-spin" />
+                        </span>
+                      )}
                       {r.error && (
                         <span
                           className="absolute inset-x-0 bottom-0 text-[8px] font-bold text-center text-white py-0.5"
@@ -1248,9 +1274,9 @@ export default function BatchUploadPage() {
             </>
           )}
           {(() => {
-            const unsaved = results.filter((r, i) => !r.error && (saveStatus[i] ?? "idle") === "idle").length;
+            const unsaved = results.filter((r, i) => !r.error && !r.pending && (saveStatus[i] ?? "idle") === "idle").length;
             const allSaved = results.every((r, i) => r.error || saveStatus[i] === "saved");
-            const unlistedCount = results.filter((r, i) => !r.error && listStatus[i] !== "listed").length;
+            const unlistedCount = results.filter((r, i) => !r.error && !r.pending && listStatus[i] !== "listed").length;
             const allListed = results.filter((r) => !r.error).length > 0 && results.every((r, i) => r.error || listStatus[i] === "listed");
             const failedCount = results.filter((r) => r.error).length;
             const anyRetrying = Object.values(retrying).some(Boolean);
@@ -1395,6 +1421,32 @@ export default function BatchUploadPage() {
             const group = groups[i] ?? [];
             const groupPhotos = group.map((idx) => photos[idx]?.previewUrl).filter(Boolean) as string[];
             const status = saveStatus[i] ?? "idle";
+
+            if (result.pending) {
+              return (
+                <div key={i} id={`result-item-${i}`} className="card overflow-hidden">
+                  {groupPhotos.length > 0 && (
+                    <div className="flex gap-2 overflow-x-auto px-4 pt-4 pb-2 snap-x snap-mandatory">
+                      {groupPhotos.map((url, pi) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          key={pi}
+                          src={url}
+                          alt={`Photo ${pi + 1}`}
+                          loading="lazy"
+                          decoding="async"
+                          className="h-36 w-36 object-cover rounded-lg flex-shrink-0 snap-start opacity-60"
+                        />
+                      ))}
+                    </div>
+                  )}
+                  <div className="px-4 pb-4 flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Analyzing item {i + 1}...
+                  </div>
+                </div>
+              );
+            }
 
             if (result.error) {
               return (
