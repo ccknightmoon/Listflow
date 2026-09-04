@@ -432,7 +432,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
         <Link href="/drafts" className="inline-flex mb-4">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <div className="card p-4" style={{ color: "#B3261E" }}>{error}</div>
+        <div className="card p-4" style={{ color: "var(--danger)" }}>{error}</div>
       </main>
     );
   }
@@ -452,15 +452,15 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
           className="p-2 rounded-lg hover:bg-[var(--bg-page)]"
         >
           {deleting ? (
-            <Loader2 className="w-4 h-4 animate-spin" style={{ color: "#B3261E" }} />
+            <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--danger)" }} />
           ) : (
-            <Trash2 className="w-4 h-4" style={{ color: "#B3261E" }} />
+            <Trash2 className="w-4 h-4" style={{ color: "var(--danger)" }} />
           )}
         </button>
       </div>
 
       {error && (
-        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
+        <div className="card p-3 mb-4 text-sm" style={{ color: "var(--danger)" }}>
           {error}
           {needsConnect && (
             <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
@@ -603,7 +603,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
             {draft.sell_odds && (
               <div>
                 <p className="text-xs text-[var(--text-secondary)]">Sell odds</p>
-                <p className="font-medium" style={{ color: draft.sell_odds === "High" ? "#3B6D11" : undefined }}>
+                <p className="font-medium" style={{ color: draft.sell_odds === "High" ? "var(--success)" : undefined }}>
                   {draft.sell_odds}
                 </p>
               </div>
@@ -839,7 +839,7 @@ export default function DraftDetailPage({ params }: { params: { id: string } }) 
                 target="_blank"
                 rel="noopener noreferrer"
                 className="btn flex-1 flex items-center justify-center gap-2 text-sm"
-                style={{ color: "#3B6D11" }}
+                style={{ color: "var(--success)" }}
               >
                 <BadgeCheck className="w-4 h-4" />
                 {justListed ? "Listed! Returning to store…" : "Live on eBay — tap to view"}

@@ -907,7 +907,7 @@ export default function BatchUploadPage() {
       </div>
 
       {error && (
-        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
+        <div className="card p-3 mb-4 text-sm" style={{ color: "var(--danger)" }}>
           {error}
         </div>
       )}
@@ -1048,7 +1048,7 @@ export default function BatchUploadPage() {
                     Item {gIdx + 1} &middot; {group.length} photo
                     {group.length !== 1 ? "s" : ""}
                     {group.length > MAX_PHOTOS_PER_ITEM && (
-                      <span style={{ color: "#B3261E" }}>
+                      <span style={{ color: "var(--danger)" }}>
                         {" "}
                         (only first {MAX_PHOTOS_PER_ITEM} will be used)
                       </span>
@@ -1400,7 +1400,7 @@ export default function BatchUploadPage() {
               return (
                 <div key={i} id={`result-item-${i}`} className="card p-4">
                   <p className="text-sm font-medium mb-1">Item {i + 1}</p>
-                  <p className="text-sm mb-3" style={{ color: "#B3261E" }}>
+                  <p className="text-sm mb-3" style={{ color: "var(--danger)" }}>
                     {result.error}
                   </p>
                   <button
@@ -1636,17 +1636,17 @@ export default function BatchUploadPage() {
                   </div>
 
                   {status === "error" && (
-                    <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
+                    <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>
                       Could not save draft. Try again.
                     </p>
                   )}
                   {photoUploadWarnings[i] && (
-                    <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
+                    <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>
                       {photoUploadWarnings[i]}
                     </p>
                   )}
                   {listStatus[i] === "error" && listErrors[i] && (
-                    <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
+                    <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>
                       {listErrors[i]}
                       {needsEbayConnect && (
                         <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
@@ -1672,7 +1672,7 @@ export default function BatchUploadPage() {
                       {status === "saving" ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
                       ) : status === "saved" ? (
-                        <Check className="w-4 h-4" style={{ color: "#3B6D11" }} />
+                        <Check className="w-4 h-4" style={{ color: "var(--success)" }} />
                       ) : (
                         <FileText className="w-4 h-4" />
                       )}
@@ -1715,17 +1715,17 @@ function MiniStat({
   return (
     <div
       className="rounded-md p-2 text-center"
-      style={{ background: highlight ? "#EAF3DE" : "var(--bg-page)" }}
+      style={{ background: highlight ? "color-mix(in srgb, var(--success) 14%, var(--bg-page))" : "var(--bg-page)" }}
     >
       <p
         className="text-[11px]"
-        style={{ color: highlight ? "#3B6D11" : "var(--text-secondary)" }}
+        style={{ color: highlight ? "var(--success)" : "var(--text-secondary)" }}
       >
         {label}
       </p>
       <p
         className="text-sm font-medium"
-        style={{ color: highlight ? "#3B6D11" : "var(--text-primary)" }}
+        style={{ color: highlight ? "var(--success)" : "var(--text-primary)" }}
       >
         {value}
       </p>

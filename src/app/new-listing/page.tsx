@@ -451,7 +451,7 @@ export default function NewListingPage() {
       </button>
 
       {error && (
-        <div className="card p-3 mb-4 text-sm" style={{ color: "#B3261E" }}>
+        <div className="card p-3 mb-4 text-sm" style={{ color: "var(--danger)" }}>
           {error}
         </div>
       )}
@@ -570,7 +570,7 @@ export default function NewListingPage() {
               )}
 
               {listError && (
-                <p className="text-xs mb-2" style={{ color: "#B3261E" }}>
+                <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>
                   {listError}
                   {needsConnect && (
                     <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
@@ -581,7 +581,7 @@ export default function NewListingPage() {
                 </p>
               )}
               {photoUploadWarning && (
-                <p className="text-xs mb-2" style={{ color: "#B3261E" }}>{photoUploadWarning}</p>
+                <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>{photoUploadWarning}</p>
               )}
               {missingAspectsWarning && missingAspectsWarning.length > 0 && (
                 <p className="text-xs mb-2" style={{ color: "#92400E" }}>

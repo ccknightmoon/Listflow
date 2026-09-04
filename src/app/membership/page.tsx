@@ -132,7 +132,7 @@ function PlanCard({
             }}
           >
             {f.included ? (
-              <Check className="w-3.5 h-3.5" style={{ color: "#3B6D11" }} />
+              <Check className="w-3.5 h-3.5" style={{ color: "var(--success)" }} />
             ) : (
               <X className="w-3.5 h-3.5" />
             )}
