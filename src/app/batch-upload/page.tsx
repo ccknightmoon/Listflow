@@ -21,6 +21,10 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Images,
+  ListChecks,
+  ArrowUpToLine,
+  Scissors,
 } from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
@@ -241,11 +245,17 @@ export default function BatchUploadPage() {
       const finalGroups: number[][] = [];
       let pending: number[] = [];
       let cursor = 0;
-      let chunkNum = 0;
+      // Large batches take several sequential AI calls (see the chunking
+      // below) with a deliberate pause between each to stay under OpenAI's
+      // rate limit — that's real wait time, not wasted time, but it reads
+      // as "stuck" without a number moving. Report actual photos organized
+      // so far instead of an opaque "part N" so progress is always visible.
+      const showProgress = totalPhotos > GROUPING_CHUNK_SIZE;
 
       while (cursor < totalPhotos) {
-        chunkNum += 1;
-        setGroupingProgress(`Grouping photos (part ${chunkNum})...`);
+        if (showProgress) {
+          setGroupingProgress(`Grouping photos — ${cursor} of ${totalPhotos} organized...`);
+        }
 
         const take = Math.max(GROUPING_CHUNK_SIZE - pending.length, 1);
         const newIndices: number[] = [];
@@ -279,6 +289,10 @@ export default function BatchUploadPage() {
         } else {
           finalGroups.push(...remapped.slice(0, -1));
           pending = remapped[remapped.length - 1] ?? [];
+        }
+
+        if (showProgress) {
+          setGroupingProgress(`Grouping photos — ${Math.min(cursor, totalPhotos)} of ${totalPhotos} organized...`);
         }
 
         if (!isLastChunk) {
@@ -358,6 +372,37 @@ export default function BatchUploadPage() {
 
   function removeGroup(gIdx: number) {
     setGroups((prev) => prev.filter((_, i) => i !== gIdx));
+  }
+
+  // Fixes the AI's most common mistake in one tap instead of moving every
+  // photo across the boundary individually: when a single item's photos
+  // got split into two adjacent groups, this folds gIdx's photos into the
+  // group right before it and drops the now-empty group.
+  function mergeGroupUp(gIdx: number) {
+    if (gIdx <= 0) return;
+    setGroups((prev) => {
+      const next = prev.map((g) => [...g]);
+      next[gIdx - 1] = [...next[gIdx - 1], ...next[gIdx]];
+      next.splice(gIdx, 1);
+      return next;
+    });
+  }
+
+  // The opposite mistake: the AI merged two different items into one
+  // group. Splits everything from this photo onward into a brand new
+  // group inserted right after the current one, instead of requiring
+  // each photo to be moved out individually.
+  function splitGroupAt(gIdx: number, photoIndex: number) {
+    setGroups((prev) => {
+      const next = prev.map((g) => [...g]);
+      const group = next[gIdx];
+      const pos = group.indexOf(photoIndex);
+      if (pos <= 0) return prev; // already the start of this item — nothing to split off
+      const tail = group.slice(pos);
+      next[gIdx] = group.slice(0, pos);
+      next.splice(gIdx + 1, 0, tail);
+      return next;
+    });
   }
 
   function groupImagesForRequest(group: number[]) {
@@ -869,6 +914,51 @@ export default function BatchUploadPage() {
 
       {step === "upload" && (
         <>
+          {photos.length === 0 && (
+            <div className="card p-4 mb-4 stagger d1">
+              <p
+                className="text-xs font-semibold uppercase tracking-wide mb-3"
+                style={{ color: "var(--text-tertiary)" }}
+              >
+                How batch upload works
+              </p>
+              <div className="flex flex-col gap-3">
+                {[
+                  {
+                    icon: Images,
+                    label: "Select every photo for this batch",
+                    desc: "Upload in order: front of item 1, its other shots, then front of item 2, and so on.",
+                  },
+                  {
+                    icon: Sparkles,
+                    label: "AI groups your photos into items",
+                    desc: "Each item's photos get bundled together automatically, then drafted with a title, price, and details.",
+                  },
+                  {
+                    icon: ListChecks,
+                    label: "Review, tweak, and list",
+                    desc: "Fix any mis-grouped photos, adjust the details, then save everything as drafts or list it all at once.",
+                  },
+                ].map((s, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div
+                      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                      style={{ background: "color-mix(in srgb, var(--accent) 14%, var(--bg-surface))" }}
+                    >
+                      <s.icon className="w-4 h-4" style={{ color: "var(--accent)" }} />
+                    </div>
+                    <div className="flex-1 pt-0.5">
+                      <p className="text-sm font-medium">{s.label}</p>
+                      <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--text-tertiary)" }}>
+                        {s.desc}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div
             onClick={() => fileInput.current?.click()}
             className="card border-dashed text-center py-10 mb-4 cursor-pointer"
@@ -930,8 +1020,12 @@ export default function BatchUploadPage() {
         <>
           <p className="text-sm text-[var(--text-secondary)] mb-4">
             Fix any mistakes before analyzing: drag a photo into a
-            different group (or use the arrows under a photo — they move
-            it into the previous/next item at either end of a group).
+            different group, or use the arrows under a photo to nudge it
+            into the previous/next item. If the AI split one item into two
+            groups, tap <ArrowUpToLine className="inline w-3 h-3 -mt-0.5" /> on
+            the second group to merge them. If it merged two items
+            together, tap <Scissors className="inline w-3 h-3 -mt-0.5" /> on
+            the photo where the second item starts to split them apart.
             Only the first {MAX_PHOTOS_PER_ITEM} photos per item will be
             used for analysis, in the order shown.
           </p>
@@ -960,13 +1054,24 @@ export default function BatchUploadPage() {
                       </span>
                     )}
                   </p>
-                  <button
-                    onClick={() => removeGroup(gIdx)}
-                    className="p-1 rounded hover:bg-[var(--bg-page)]"
-                    title="Delete group"
-                  >
-                    <Trash2 className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {gIdx > 0 && (
+                      <button
+                        onClick={() => mergeGroupUp(gIdx)}
+                        className="p-1 rounded hover:bg-[var(--bg-page)]"
+                        title={`Merge into Item ${gIdx} — use if the AI split one item into two groups`}
+                      >
+                        <ArrowUpToLine className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => removeGroup(gIdx)}
+                      className="p-1 rounded hover:bg-[var(--bg-page)]"
+                      title="Delete group"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-[var(--text-tertiary)]" />
+                    </button>
+                  </div>
                 </div>
                 <div className="flex flex-wrap gap-2 min-h-[64px]">
                   {group.map((photoIdx, posInGroup) => {
@@ -1024,6 +1129,16 @@ export default function BatchUploadPage() {
                           </button>
                           <button
                             type="button"
+                            onClick={() => splitGroupAt(gIdx, photoIdx)}
+                            disabled={posInGroup === 0}
+                            title={posInGroup === 0 ? "Already the start of this item" : "Split into a new item starting here"}
+                            className="w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
+                            style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+                          >
+                            <Scissors className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => movePhotoLater(photoIdx, gIdx)}
                             disabled={isLastOverall}
                             title={posInGroup === group.length - 1 ? "Move to next item" : "Move later"}
@@ -1056,11 +1171,26 @@ export default function BatchUploadPage() {
       {step === "analyzing" && (
         <div className="card p-8 text-center">
           <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)]">
+          <p className="text-sm text-[var(--text-secondary)] mb-3">
             {analyzingProgress
               ? `Analyzing ${analyzingProgress.done}/${analyzingProgress.total} items...`
               : `Analyzing ${groups.length} item${groups.length !== 1 ? "s" : ""}...`}
           </p>
+          {analyzingProgress && analyzingProgress.total > 1 && (
+            <div
+              className="h-1.5 rounded-full mx-auto overflow-hidden"
+              style={{ background: "var(--glass)", maxWidth: 200 }}
+            >
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${Math.round((analyzingProgress.done / analyzingProgress.total) * 100)}%`,
+                  background: "var(--accent)",
+                  transition: "width .3s var(--spring)",
+                }}
+              />
+            </div>
+          )}
         </div>
       )}
 
