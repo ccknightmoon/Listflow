@@ -55,10 +55,20 @@ export default function StorePage() {
     setEbayLoading(true);
     setError(null);
 
+    // Fire both independent requests together instead of only starting the
+    // slower eBay call after the fast Supabase one has fully round-tripped —
+    // same "independent work runs concurrently" pattern already used for
+    // the Dashboard's parallel fetches. Phase 1 below still renders
+    // Listflow's own items the moment its own request resolves; eBay's
+    // request is just already in flight by the time Phase 2 reaches it
+    // instead of not having started yet.
+    const supabasePromise = apiFetch<{ listings?: Array<{ listingId: string; title: string; price: string | null; thumbnail: string | null; sku: string | null; startTime: string | null; draftId: string }> }>("/api/ebay/inventory");
+    const ebayPromise = apiFetch<{ listings?: StoreListing[]; total?: number; error?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/store");
+
     // Phase 1: load Listflow items from Supabase — instant
     let supabaseListingIds = new Set<string>();
     try {
-      const data = await apiFetch<{ listings?: Array<{ listingId: string; title: string; price: string | null; thumbnail: string | null; sku: string | null; startTime: string | null; draftId: string }> }>("/api/ebay/inventory");
+      const data = await supabasePromise;
       const items: StoreListing[] = (data.listings ?? []).map((l) => ({
         listingId: l.listingId,
         title: l.title,
@@ -76,9 +86,9 @@ export default function StorePage() {
       setLoading(false);
     }
 
-    // Phase 2: load all eBay listings async — fills in items not created through Listflow
+    // Phase 2: eBay listings (already in flight above) — fills in items not created through Listflow
     try {
-      const data = await apiFetch<{ listings?: StoreListing[]; total?: number; error?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/store");
+      const data = await ebayPromise;
       if (data.error) {
         setNeedsConnect(!!data.connect);
         setNeedsReconnect(!!data.reconnect);
