@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -57,7 +57,13 @@ interface Thumbnail {
 }
 
 type Step = "upload" | "grouping" | "review" | "results";
-type SaveStatus = "idle" | "saving" | "saved" | "error";
+type SaveStatus = "idle" | "saving" | "saved" | "auto" | "error";
+// "auto" marks an item that has a real draft row in the database but
+// hasn't been explicitly confirmed by the seller yet — see the
+// auto-save effect below handleSaveDraft. It behaves like "idle" for
+// every "still needs a save" computation (it is not locked/disabled,
+// it still counts toward "unsaved"), and only the explicit "saved"
+// value locks the review fields.
 
 const CONDITIONS: Condition[] = [
   "New with tags",
@@ -168,7 +174,7 @@ export default function BatchUploadPage() {
   // or heavy-item shipping across many items at once instead of one row at
   // a time, the single most-requested gap found in the "list 40 a day"
   // workflow audit. Only items that haven't been saved/listed yet are
-  // selectable, matching every per-item control's own disabled={!!draftIds[i]}
+  // selectable, matching every per-item control's own disabled={saveStatus[i] === "saved"}
   // rule below — editing a value that's already locked in on eBay would be
   // silently meaningless.
   const [selected, setSelected] = useState<Record<number, boolean>>({});
@@ -177,6 +183,10 @@ export default function BatchUploadPage() {
   const [bulkShippingCost, setBulkShippingCost] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false); // bulk-edit panel accordion — starts collapsed per mock, opened manually
   const fileInput = useRef<HTMLInputElement | null>(null);
+  // Indices the auto-save effect (below handleSaveDraft) has already
+  // persisted, so it never re-saves an item just because `results`
+  // changed again for an unrelated reason (a pricing lookup landing).
+  const autoSavedForIndex = useRef<Set<number>>(new Set());
 
   // "Add a photo to this item" during review — lets someone patch in a
   // shot they missed on the first upload without starting the whole
@@ -262,7 +272,7 @@ export default function BatchUploadPage() {
     setSavingAll(true);
     const indices = results
       .map((_, i) => i)
-      .filter((i) => !results[i].error && !results[i].pending && (saveStatus[i] ?? "idle") === "idle");
+      .filter((i) => !results[i].error && !results[i].pending && saveStatus[i] !== "saved");
 
     // Each item's save is just Supabase writes (a few photo uploads + one
     // drafts insert/update) — no eBay calls, so this can run at a higher
@@ -754,7 +764,15 @@ export default function BatchUploadPage() {
     }
   }
 
-  async function handleSaveDraft(index: number): Promise<string | null> {
+  // `silent` is set by the auto-save effect below: it persists the item
+  // the instant its AI analysis lands, without flipping saveStatus to the
+  // "saving"/"saved" states the explicit Save button and the disabled={}
+  // field locks key off. That keeps every field editable exactly as
+  // before an explicit save, while guaranteeing there's already a real
+  // draft row (with photos uploaded) in the database if the seller gets
+  // distracted, navigates away, or loses their connection before ever
+  // touching "Save draft".
+  async function handleSaveDraft(index: number, opts?: { silent?: boolean }): Promise<string | null> {
     // NOTE: this used to short-circuit with `if (draftIds[index]) return
     // draftIds[index];`, and handleListOnEbay only ever called this when
     // no draft existed yet — so editing a row in the results table (title,
@@ -764,7 +782,10 @@ export default function BatchUploadPage() {
     // there. Now every call does a real, full sync — POST once to create,
     // PATCH every time after — and handleListOnEbay always calls this
     // first so a listing attempt is always built from what's on screen.
-    setSaveStatus((prev) => ({ ...prev, [index]: "saving" }));
+    const silent = opts?.silent ?? false;
+    if (!silent) {
+      setSaveStatus((prev) => ({ ...prev, [index]: "saving" }));
+    }
 
     try {
       const result = results[index];
@@ -864,13 +885,53 @@ export default function BatchUploadPage() {
 
       if (!id) throw new Error("Failed to save draft");
       setDraftIds((prev) => ({ ...prev, [index]: id }));
-      setSaveStatus((prev) => ({ ...prev, [index]: "saved" }));
+      setSaveStatus((prev) => {
+        // Never downgrade an explicit confirmation: if the seller has
+        // already hit "Save draft" (or "List on eBay") by the time a
+        // silent auto-save from an earlier moment resolves, leave the
+        // confirmed "saved" status alone instead of reverting it to "auto".
+        if (!silent) return { ...prev, [index]: "saved" };
+        return prev[index] === "saved" ? prev : { ...prev, [index]: "auto" };
+      });
       return id;
     } catch {
-      setSaveStatus((prev) => ({ ...prev, [index]: "error" }));
+      setSaveStatus((prev) => {
+        if (silent && prev[index] === "saved") return prev;
+        return { ...prev, [index]: "error" };
+      });
       return null;
     }
   }
+
+  // Auto-save each item the moment its AI analysis finishes, instead of
+  // only ever persisting on an explicit "Save draft"/"Save all"/"List on
+  // eBay" click. A batch upload can be a dozen-plus items each waiting on
+  // a slow AI call — if the seller gets distracted, hits "Home", or their
+  // connection drops before they've reviewed anything, everything the AI
+  // already produced (and every photo) used to exist only in this page's
+  // React state and vanish with it. autoSavedForIndex tracks which items
+  // this effect has already persisted so it fires exactly once per item —
+  // `results` changes again shortly after (pricing lookups patch each
+  // entry in place), and that shouldn't trigger a second, redundant save.
+  // handleSaveDraft's `silent: true` here is what keeps this invisible:
+  // no "saving" spinner, and — critically — it does NOT set saveStatus to
+  // "saved", so the disabled={} locks on every field below (keyed off
+  // saveStatus === "saved", not off draftIds) stay off until the seller
+  // actually reviews and explicitly saves. This only ever creates/updates
+  // the draft row; it never lists anything on eBay.
+  useEffect(() => {
+    results.forEach((r, i) => {
+      if (r.pending || r.error) return;
+      if (autoSavedForIndex.current.has(i)) return;
+      autoSavedForIndex.current.add(i);
+      handleSaveDraft(i, { silent: true });
+    });
+    // Deliberately keyed only on `results`: handleSaveDraft reads
+    // groups/heavyItems/customPrices/customSkus/draftIds via this render's
+    // own closure, which is exactly the freshly-analyzed data we want
+    // saved, not a snapshot frozen at some earlier dependency list.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [results]);
 
   async function handleListOnEbay(index: number): Promise<boolean> {
     setListStatus((prev) => ({ ...prev, [index]: "saving" }));
@@ -946,14 +1007,14 @@ export default function BatchUploadPage() {
   }
 
   // Items still open for bulk editing -- once a draft is saved (draftIds[i]
-  // set), every per-item field below locks with disabled={!!draftIds[i]},
+  // set), every per-item field below locks with disabled={saveStatus[i] === "saved"},
   // so bulk-applying a new value to an already-saved item would silently
   // do nothing. Errored items are excluded too; they have no editable
   // fields to apply to until retried.
   function getSelectableIndices(): number[] {
     return results
       .map((_, i) => i)
-      .filter((i) => !results[i].error && !results[i].pending && !draftIds[i]);
+      .filter((i) => !results[i].error && !results[i].pending && saveStatus[i] !== "saved");
   }
 
   function toggleSelected(i: number) {
@@ -1394,7 +1455,7 @@ export default function BatchUploadPage() {
             </>
           )}
           {(() => {
-            const unsaved = results.filter((r, i) => !r.error && !r.pending && (saveStatus[i] ?? "idle") === "idle").length;
+            const unsaved = results.filter((r, i) => !r.error && !r.pending && saveStatus[i] !== "saved").length;
             const allSaved = results.every((r, i) => r.error || saveStatus[i] === "saved");
             const unlistedCount = results.filter((r, i) => !r.error && !r.pending && listStatus[i] !== "listed").length;
             const allListed = results.filter((r) => !r.error).length > 0 && results.every((r, i) => r.error || listStatus[i] === "listed");
@@ -1607,18 +1668,35 @@ export default function BatchUploadPage() {
 
             return (
               <div key={i} id={`result-item-${i}`} className="card overflow-hidden">
-                {!draftIds[i] && (
-                  <button
-                    onClick={() => toggleSelected(i)}
-                    className="flex items-center gap-2 px-4 pt-3 text-xs text-[var(--text-tertiary)] w-full"
-                  >
-                    {selected[i] ? (
-                      <CheckSquare className="w-4 h-4 text-[var(--accent)]" />
-                    ) : (
-                      <Square className="w-4 h-4" />
+                {saveStatus[i] !== "saved" && (
+                  <div className="flex items-center gap-2 px-4 pt-3">
+                    <button
+                      onClick={() => toggleSelected(i)}
+                      className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] flex-1"
+                    >
+                      {selected[i] ? (
+                        <CheckSquare className="w-4 h-4 text-[var(--accent)]" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                      Item {i + 1}
+                    </button>
+                    {status === "auto" && (
+                      // Auto-saved in the background right after analysis
+                      // (see the effect above handleListOnEbay) — reassures
+                      // the seller this item is already safe to walk away
+                      // from, without implying they've reviewed and
+                      // confirmed it the way an explicit "Save draft" does.
+                      <span
+                        className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full"
+                        style={{ background: "var(--glass)", color: "var(--text-tertiary)" }}
+                        title="Saved as a draft in the background — click Save draft to confirm your edits"
+                      >
+                        <Check className="w-3 h-3" />
+                        Backed up
+                      </span>
                     )}
-                    Item {i + 1}
-                  </button>
+                  </div>
                 )}
                 {/* Scrollable photo strip — swipe to see all photos in this group */}
                 {groupPhotos.length > 0 && (
@@ -1641,7 +1719,7 @@ export default function BatchUploadPage() {
                     <input
                       className="input w-full text-sm font-medium mb-1"
                       value={result.suggestedTitle}
-                      disabled={!!draftIds[i]}
+                      disabled={saveStatus[i] === "saved"}
                       onChange={(e) => {
                         const val = e.target.value;
                         setResults((prev) => prev.map((r, j) => j === i ? { ...r, suggestedTitle: val } : r));
@@ -1652,7 +1730,7 @@ export default function BatchUploadPage() {
                         className="tap text-xs font-semibold rounded-full px-3 py-1.5 border appearance-none"
                         style={{ background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-primary)" }}
                         value={result.condition}
-                        disabled={!!draftIds[i]}
+                        disabled={saveStatus[i] === "saved"}
                         onChange={(e) => {
                           const val = e.target.value as Condition;
                           setResults((prev) => prev.map((r, j) => j === i ? { ...r, condition: val } : r));
@@ -1667,7 +1745,7 @@ export default function BatchUploadPage() {
                           setHeavyItems((prev) => ({ ...prev, [i]: next }));
                           if (!next) setShippingCosts((prev) => { const n = { ...prev }; delete n[i]; return n; });
                         }}
-                        disabled={!!draftIds[i]}
+                        disabled={saveStatus[i] === "saved"}
                         className="tap text-xs font-semibold rounded-full px-3 py-1.5 border"
                         style={
                           heavyItems[i]
@@ -1686,7 +1764,7 @@ export default function BatchUploadPage() {
                             step="0.01"
                             placeholder="Shipping"
                             value={shippingCosts[i] ?? ""}
-                            disabled={!!draftIds[i]}
+                            disabled={saveStatus[i] === "saved"}
                             onChange={(e) => setShippingCosts((prev) => ({ ...prev, [i]: e.target.value }))}
                             className="input w-24 text-xs py-1.5 pl-5 pr-2 rounded-full"
                           />
@@ -1700,7 +1778,7 @@ export default function BatchUploadPage() {
                           className="input text-xs w-full"
                           placeholder="Brand"
                           value={result.brand}
-                          disabled={!!draftIds[i]}
+                          disabled={saveStatus[i] === "saved"}
                           onChange={(e) => {
                             const val = e.target.value;
                             setResults((prev) => prev.map((r, j) => j === i ? { ...r, brand: val } : r));
@@ -1713,7 +1791,7 @@ export default function BatchUploadPage() {
                           className="input text-xs w-full"
                           placeholder="Color"
                           value={result.color}
-                          disabled={!!draftIds[i]}
+                          disabled={saveStatus[i] === "saved"}
                           onChange={(e) => {
                             const val = e.target.value;
                             setResults((prev) => prev.map((r, j) => j === i ? { ...r, color: val } : r));
@@ -1726,7 +1804,7 @@ export default function BatchUploadPage() {
                           className="input text-xs w-full"
                           placeholder="Size"
                           value={result.size}
-                          disabled={!!draftIds[i]}
+                          disabled={saveStatus[i] === "saved"}
                           onChange={(e) => {
                             const val = e.target.value;
                             setResults((prev) => prev.map((r, j) => j === i ? { ...r, size: val } : r));
@@ -1740,7 +1818,7 @@ export default function BatchUploadPage() {
                         className="input text-xs w-full"
                         placeholder="e.g. HDSHIRT001"
                         value={customSkus[i] ?? ""}
-                        disabled={!!draftIds[i]}
+                        disabled={saveStatus[i] === "saved"}
                         onChange={(e) => {
                           const val = e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 50);
                           setCustomSkus((prev) => ({ ...prev, [i]: val }));
@@ -1752,7 +1830,7 @@ export default function BatchUploadPage() {
                       rows={2}
                       placeholder="Flaws (e.g. small stain on sleeve)"
                       value={result.flaws}
-                      disabled={!!draftIds[i]}
+                      disabled={saveStatus[i] === "saved"}
                       onChange={(e) => {
                         const val = e.target.value;
                         setResults((prev) => prev.map((r, j) => j === i ? { ...r, flaws: val } : r));
