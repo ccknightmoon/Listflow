@@ -7,14 +7,18 @@
 // service_role only -- same pattern as the login-lockout RPCs in 006/007,
 // so it can't be called or spoofed directly from the browser.
 //
-// 400/month is a starting point: generous enough that a real reseller doing
-// a big batch-upload day (dozens of items) never notices it, while still
-// putting a hard ceiling on a single account's worst-case monthly OpenAI
-// bill. Adjust this constant once real usage patterns are visible in
-// OpenAI's own usage dashboard -- no migration needed to change it.
+// Raised from 400 to 3,000/month after pricing this against real OpenAI
+// rates: grouping now runs on gpt-4o-mini (see group-photos/route.ts), so a
+// full 40-item batch-upload session costs roughly $0.15-0.20 in AI calls.
+// Even a daily power user doing that every day of the month lands around
+// $5-6/month in worst-case OpenAI spend -- 3,000 calls/month gives real
+// headroom above normal heavy use while still capping worst-case abuse to a
+// small, known dollar amount. Adjust this constant once real usage patterns
+// are visible in OpenAI's own usage dashboard -- no migration needed to
+// change it.
 import { createClient } from "@supabase/supabase-js";
 
-export const MONTHLY_AI_CALL_LIMIT = 400;
+export const MONTHLY_AI_CALL_LIMIT = 3000;
 
 export const AI_USAGE_LIMIT_MESSAGE =
   "You've reached this month's AI usage limit. It resets on the 1st.";
