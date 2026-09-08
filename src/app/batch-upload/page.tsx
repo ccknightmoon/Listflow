@@ -187,6 +187,15 @@ export default function BatchUploadPage() {
   // persisted, so it never re-saves an item just because `results`
   // changed again for an unrelated reason (a pricing lookup landing).
   const autoSavedForIndex = useRef<Set<number>>(new Set());
+  // Supabase Storage URL each photo slot has already uploaded to, keyed by
+  // photo index (not group/item index -- a photo's own data never changes
+  // once picked, only which item it belongs to). handleSaveDraft now runs
+  // repeatedly per item -- once silently right after analysis, again on an
+  // explicit "Save draft", again inside handleListOnEbay's internal
+  // re-save -- and before this cache existed every one of those re-ran the
+  // full photo upload for the whole group. Across a real batch that meant
+  // the same unchanged photos crossing the network 2-3x each for nothing.
+  const uploadedPhotoUrls = useRef<Record<number, string>>({});
 
   // "Add a photo to this item" during review — lets someone patch in a
   // shot they missed on the first upload without starting the whole
@@ -800,22 +809,30 @@ export default function BatchUploadPage() {
         ? suggestion.suggestedPrice
         : customPrices[index] ? Number(customPrices[index]) : suggestion.suggestedPrice;
 
-      // Upload all photos in the group; first becomes the thumbnail. Only
+      // Upload each photo in the group that hasn't already been uploaded
+      // (see uploadedPhotoUrls above); first becomes the thumbnail. Only
       // overwrite photoUrls/thumbnailUrl on a re-save if something actually
-      // uploaded this time — an empty result shouldn't wipe out photos a
-      // previous save already stored. Each photo's upload is independent of
-      // the others, so they run concurrently instead of one at a time —
-      // with up to MAX_PHOTOS_PER_ITEM (6) photos per item across a
-      // 40-item batch, this used to mean hundreds of sequential Supabase
-      // Storage round trips. Promise.all preserves the group's original
-      // order in its results regardless of which upload finishes first, so
-      // photoUrls[0] is still reliably the group's first/front photo.
+      // uploaded (or was cached) this time — an empty result shouldn't wipe
+      // out photos a previous save already stored. Each photo's upload is
+      // independent of the others, so they run concurrently instead of one
+      // at a time — with up to MAX_PHOTOS_PER_ITEM (6) photos per item
+      // across a 40-item batch, sequential uploads used to mean hundreds of
+      // Supabase Storage round trips, and now that handleSaveDraft can run
+      // several times per item (auto-save, explicit save, list-on-eBay's
+      // internal re-save), the cache is what keeps that from multiplying.
+      // Promise.all preserves the group's original order in its results
+      // regardless of which upload finishes first, so photoUrls[0] is
+      // still reliably the group's first/front photo.
       const uploadOutcomes = await Promise.all(
         group.map(async (photoIdx) => {
+          const cachedUrl = uploadedPhotoUrls.current[photoIdx];
+          if (cachedUrl) return cachedUrl;
           const dataUrl = photos[photoIdx]?.previewUrl;
           if (!dataUrl) return null;
           try {
-            return await uploadThumbnail(dataUrl);
+            const url = await uploadThumbnail(dataUrl);
+            uploadedPhotoUrls.current[photoIdx] = url;
+            return url;
           } catch (err) {
             console.error("Photo upload failed:", (err as Error).message);
             return undefined; // distinguish "no photo at this slot" from "upload failed"
