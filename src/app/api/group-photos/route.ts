@@ -85,10 +85,20 @@ in exactly one group. Order the groups by the index of their first photo.`;
 
   let lastError: string | null = null;
 
+  // gpt-4o-mini, not gpt-4o: deciding "does this photo start a new item"
+  // is an easier call than the full per-item analysis below it (which also
+  // runs on gpt-4o-mini), and grouping was the only step still paying
+  // full gpt-4o pricing -- roughly 17x gpt-4o-mini's per-token rate --
+  // for the simpler of the two tasks. Mini is also typically faster,
+  // which matters here since chunks process strictly one after another
+  // (each chunk needs to know where the previous one's last group got cut
+  // off, so they can't run concurrently). Re-check grouping accuracy on a
+  // real batch after this ships; if mini visibly mis-groups more often,
+  // reverting this one line is the whole rollback.
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const data = await openAIPost(apiKey, {
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         max_tokens: 1000,
         messages: [
           {
