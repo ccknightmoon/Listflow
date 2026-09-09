@@ -137,8 +137,18 @@ export async function GET(req: Request) {
       // "Not connected" is already checked up front via requireEbayConnection()
       // before this ever runs — an auth failure reaching here means a
       // revoked/expired token, not a never-connected account.
-      const isAuth = errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission");
-      return NextResponse.json({ error: errMsg, sales: [], connect: false, reconnect: isAuth }, { status: 200 });
+      // "scope" added after a real incident: eBay's own error text for a
+      // token whose granted scopes don't match what's being requested on
+      // refresh ("...exceeds the scope granted to the client") doesn't
+      // contain "auth"/"token"/"permission" -- it was slipping past this
+      // check entirely and showing as a raw, unhelpful error with no
+      // reconnect prompt. Confirmed against a real occurrence, not a guess.
+      const isAuth = errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("scope");
+      console.error("GET /api/ebay/sales: eBay returned an error:", errMsg);
+      const friendlyError = isAuth
+        ? "Your eBay connection needs to be refreshed. Go to Settings and tap Reconnect, then try again."
+        : "Couldn't load sales from eBay right now. Try refreshing in a moment.";
+      return NextResponse.json({ error: friendlyError, sales: [], connect: false, reconnect: isAuth }, { status: 200 });
     }
   }
 
@@ -189,6 +199,14 @@ export async function GET(req: Request) {
       // thumbnails -- null for anything not listed through this app, or
       // simply never given a cost by the seller.
       costBasis: null as number | null,
+      // Same drafts lookup, same caveat: null for anything not listed
+      // through this app (older/manually-listed items have no Supabase
+      // row to join against). draftCreatedAt is an approximation of "when
+      // this went live" -- see the Sourcing insights section in CLAUDE.md
+      // for why it's not a real listing-start date.
+      itemType: null as string | null,
+      storeCategoryName: null as string | null,
+      draftCreatedAt: null as string | null,
     };
   }).filter((s) => {
     if (s.price <= 0) return false;
@@ -217,15 +235,21 @@ export async function GET(req: Request) {
     const listingIds = sales.map((s) => s.listingId).filter(Boolean);
     const { data: drafts } = await supabase
       .from("drafts")
-      .select("ebay_listing_id, thumbnail_url, cost_basis")
+      .select("ebay_listing_id, thumbnail_url, cost_basis, item_type, store_category_name, created_at")
       .in("ebay_listing_id", listingIds);
 
     if (drafts && drafts.length > 0) {
       const thumbMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.thumbnail_url as string | null]));
       const costMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.cost_basis as number | null]));
+      const itemTypeMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.item_type as string | null]));
+      const categoryMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.store_category_name as string | null]));
+      const draftCreatedMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.created_at as string | null]));
       for (const sale of sales) {
         sale.thumbnail = thumbMap.get(sale.listingId) ?? null;
         sale.costBasis = costMap.get(sale.listingId) ?? null;
+        sale.itemType = itemTypeMap.get(sale.listingId) ?? null;
+        sale.storeCategoryName = categoryMap.get(sale.listingId) ?? null;
+        sale.draftCreatedAt = draftCreatedMap.get(sale.listingId) ?? null;
       }
     }
 
@@ -305,7 +329,12 @@ export async function GET(req: Request) {
     },
   });
   } catch (err) {
-    return NextResponse.json({ error: (err as Error).message, sales: [] }, { status: 500 });
+    // Logged server-side for real debugging; the client only ever sees a
+    // plain-English message -- a raw thrown error (e.g. an eBay OAuth
+    // refresh failure) used to reach the Sales page's error banner verbatim,
+    // which is confusing rather than actionable for a non-technical seller.
+    console.error("GET /api/ebay/sales failed:", err);
+    return NextResponse.json({ error: "Couldn't load sales right now. Try refreshing -- if it keeps happening, reconnect eBay in Settings.", sales: [] }, { status: 500 });
   }
   });
 }
