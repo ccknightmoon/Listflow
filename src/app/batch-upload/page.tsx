@@ -338,6 +338,15 @@ export default function BatchUploadPage() {
   // src/lib/use-ai-usage-warning.ts.
   const { showWarning: showUsageWarning, message: usageWarningMessage } = useAiUsageWarning();
 
+  // Checked once on load (not blocking anything) so a seller who isn't
+  // connected to eBay finds out before spending an hour uploading/
+  // reviewing a batch, not after clicking "List on eBay" on item 30 --
+  // that discovery used to only happen at listing time, and reconnecting
+  // then is a full-page OAuth redirect that loses all of this page's
+  // in-memory review state. null = still checking, so the banner below
+  // stays hidden rather than flashing a false "not connected" on load.
+  const [ebayConnected, setEbayConnected] = useState<boolean | null>(null);
+
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => r.json())
@@ -350,6 +359,10 @@ export default function BatchUploadPage() {
       .then((r) => r.json())
       .then((data) => setStoreCategories(Array.isArray(data.categories) ? data.categories : []))
       .catch(() => {});
+    fetch("/api/ebay/connection-status")
+      .then((r) => r.json())
+      .then((data) => setEbayConnected(!!data.connected))
+      .catch(() => {}); // Unknown on failure -- stays null, banner stays hidden rather than guessing.
   }, []);
 
   // Toggles photoIndex as the SKU/number photo that ends the current item
@@ -1461,6 +1474,20 @@ export default function BatchUploadPage() {
         >
           <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "var(--danger)" }} />
           <span>{usageWarningMessage}</span>
+        </div>
+      )}
+
+      {ebayConnected === false && (
+        <div
+          className="card p-3 mb-4 text-sm flex items-center gap-2"
+          style={{ background: "var(--warning-bg)", borderColor: "var(--warning-border)" }}
+        >
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "var(--danger)" }} />
+          <span>
+            eBay isn&apos;t connected. You can still upload and review items, but reconnect before
+            listing them, or they&apos;ll only be saved as drafts.{" "}
+            <a href="/api/ebay/connect" className="underline font-medium">Connect eBay →</a>
+          </span>
         </div>
       )}
 

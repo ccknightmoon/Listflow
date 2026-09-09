@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight, Tag, MessageCircle } from "lucide-react";
+import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight, Tag, MessageCircle, Clock } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api";
 import { bucketRevenue, formatCompactCurrency, type BucketableSale } from "@/lib/sales-buckets";
 import { useCountUp } from "@/lib/use-count-up";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import { isStale } from "@/lib/stale-listings";
 
 // See src/lib/page-cache.ts. Each of this page's four independent fetches
 // gets its own entry so the hero tile can show last session's numbers the
@@ -20,6 +21,7 @@ const DISPLAY_NAME_CACHE_KEY = "dashboard:displayName";
 const TREND_SALES_CACHE_KEY = "dashboard:trendSales";
 const PENDING_OFFERS_CACHE_KEY = "dashboard:pendingOffers";
 const BUYER_QUESTIONS_CACHE_KEY = "dashboard:buyerQuestions";
+const STALE_LISTINGS_CACHE_KEY = "dashboard:staleListings";
 
 interface Stats {
   drafts: number;
@@ -59,6 +61,13 @@ export default function DashboardPage() {
   // cheap call, fired once when the dashboard loads), so it's fine to
   // check on every visit the same way.
   const [buyerQuestionsCount, setBuyerQuestionsCount] = useState<number | null>(() => getPageCache<number>(BUYER_QUESTIONS_CACHE_KEY) ?? null);
+  // Stale listings (30+ days active, no sale) -- every other "needs
+  // attention" state already has a Dashboard tile; this one didn't, so it
+  // was easy to go unnoticed unless Sel happened to open /store itself.
+  // Reuses the same GET /api/ebay/store call and STALE_DAYS_THRESHOLD
+  // formula /store itself uses (src/lib/stale-listings.ts), so the two
+  // counts can't drift apart.
+  const [staleListingsCount, setStaleListingsCount] = useState<number | null>(() => getPageCache<number>(STALE_LISTINGS_CACHE_KEY) ?? null);
 
   const supabase = useMemo(
     () =>
@@ -161,6 +170,19 @@ export default function DashboardPage() {
           const count = questionsData.questions?.length ?? 0;
           setBuyerQuestionsCount(count);
           setPageCache(BUYER_QUESTIONS_CACHE_KEY, count);
+        }
+      } catch {
+        // Transient failure — leave the cached count (or null) alone.
+      }
+    })();
+
+    void (async () => {
+      try {
+        const storeData = await apiFetch<{ listings?: Array<{ status: string; startTime: string | null }>; error?: string }>("/api/ebay/store");
+        if (!storeData.error) {
+          const count = (storeData.listings ?? []).filter((l) => l.status !== "ended" && isStale(l.startTime)).length;
+          setStaleListingsCount(count);
+          setPageCache(STALE_LISTINGS_CACHE_KEY, count);
         }
       } catch {
         // Transient failure — leave the cached count (or null) alone.
@@ -398,6 +420,38 @@ export default function DashboardPage() {
             </span>
           )}
           <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--accent)" }} />
+        </Link>
+
+        <Link
+          href="/store"
+          className="card d6 stagger col-span-2 p-3.5 flex items-center gap-3 active:scale-[.98]"
+          style={{ transitionTimingFunction: "var(--spring)" }}
+        >
+          <div
+            className="w-[34px] h-[34px] rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "var(--warning-bg)", color: "var(--warning-border)" }}
+          >
+            <Clock className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold">Stale listings</p>
+            <p className="text-[11.5px]" style={{ color: "var(--text-tertiary)" }}>
+              {staleListingsCount === null
+                ? "Check for stale listings"
+                : staleListingsCount === 0
+                ? "Nothing sitting too long"
+                : "30+ days, no sale · tap to view"}
+            </p>
+          </div>
+          {staleListingsCount !== null && staleListingsCount > 0 && (
+            <span
+              className="text-[11px] font-extrabold min-w-[20px] h-5 rounded-full flex items-center justify-center px-1.5 text-white flex-shrink-0"
+              style={{ background: "var(--warning-border)" }}
+            >
+              {staleListingsCount}
+            </span>
+          )}
+          <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--warning-border)" }} />
         </Link>
       </div>
 

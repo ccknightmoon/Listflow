@@ -8,6 +8,7 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { useCountUp } from "@/lib/use-count-up";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import { STALE_DAYS_THRESHOLD, isStale } from "@/lib/stale-listings";
 
 // See src/lib/page-cache.ts — shows the last merged Supabase+eBay listing
 // set instantly on revisit while both phases below quietly refresh it.
@@ -23,19 +24,6 @@ function timeAgo(dateStr: string | null): string {
   if (d < 7) return `${d}d ago`;
   if (d < 30) return `${Math.floor(d / 7)}w ago`;
   return `${Math.floor(d / 30)}mo ago`;
-}
-
-// An active listing sitting this long with no sale is a real, actionable
-// signal to a reseller (eBay's own search ranking rewards freshness, and a
-// stale listing is the natural next thing to price-drop or refresh) -- flag
-// it rather than let it silently sit unnoticed among newer listings.
-const STALE_DAYS_THRESHOLD = 30;
-
-function daysSinceDate(dateStr: string | null): number | null {
-  if (!dateStr) return null;
-  const ms = Date.now() - new Date(dateStr).getTime();
-  if (isNaN(ms)) return null;
-  return Math.floor(ms / 86400000);
 }
 
 interface StoreListing {
@@ -289,8 +277,7 @@ export default function StorePage() {
 
   const staleCount = useMemo(
     () => tabListings.filter((l) => {
-      const d = daysSinceDate(l.startTime);
-      return d !== null && d >= STALE_DAYS_THRESHOLD;
+      return isStale(l.startTime);
     }).length,
     [tabListings]
   );
@@ -302,8 +289,7 @@ export default function StorePage() {
   const filtered = useMemo(() => {
     const base = staleOnly
       ? tabListings.filter((l) => {
-          const d = daysSinceDate(l.startTime);
-          return d !== null && d >= STALE_DAYS_THRESHOLD;
+          return isStale(l.startTime);
         })
       : tabListings;
     if (!q) return base;
@@ -631,8 +617,7 @@ export default function StorePage() {
                         : (l.startTime ? ` · Listed ${timeAgo(l.startTime)}` : "")}
                       {l.price == null && l.status !== "ended" && <span className="ml-1 opacity-40 text-[10px]">edit</span>}
                       {l.status !== "ended" && (() => {
-                        const d = daysSinceDate(l.startTime);
-                        return d !== null && d >= STALE_DAYS_THRESHOLD ? (
+                        return isStale(l.startTime) ? (
                           <span
                             className="inline-flex items-center ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold align-middle"
                             style={{ background: "var(--warning-bg)", color: "var(--danger)", border: "1px solid var(--warning-border)" }}
