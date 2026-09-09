@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -19,6 +19,7 @@ import { Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
 import { apiFetch } from "@/lib/api";
 import { AiResult, formatMeasurements } from "@/lib/ai-result";
+import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import { estimateShipping } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
 
@@ -108,6 +109,56 @@ export default function NewListingPage() {
   const [brand, setBrand] = useState("");
   const [size, setSize] = useState("");
   const [color, setColor] = useState("");
+  // Store category: same pattern as batch-upload/drafts[id] -- a free
+  // keyword match against the seller's real Store Categories runs on every
+  // analysis automatically, upgraded by an AI pass if Settings -> "Store
+  // category suggestions" -> AI suggestions is on. See
+  // src/lib/store-category-match.ts.
+  const [storeCategories, setStoreCategories] = useState<StoreCategoryLite[]>([]);
+  const [storeCategoryId, setStoreCategoryId] = useState<string | null>(null);
+  const [storeCategoryName, setStoreCategoryName] = useState<string | null>(null);
+  const [storeCategoryPickerOpen, setStoreCategoryPickerOpen] = useState(false);
+  const [aiStoreCategorySuggestions, setAiStoreCategorySuggestions] = useState(false);
+  const [suggestingStoreCategory, setSuggestingStoreCategory] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => setAiStoreCategorySuggestions(!!data.aiStoreCategorySuggestions))
+      .catch(() => {});
+    fetch("/api/ebay/store-categories")
+      .then((r) => r.json())
+      .then((data) => setStoreCategories(Array.isArray(data.categories) ? data.categories : []))
+      .catch(() => {});
+  }, []);
+
+  async function requestStoreCategoryAi(item: {
+    title: string | null;
+    itemType?: string | null;
+    brand: string | null;
+    color: string | null;
+    description?: string | null;
+  }): Promise<StoreCategoryLite | null> {
+    const data = await apiFetch<{ categoryId: string | null; categoryPath: string | null }>(
+      "/api/ebay/store-categories/suggest",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: item.title,
+          itemType: item.itemType,
+          brand: item.brand,
+          color: item.color,
+          description: item.description,
+        }),
+      }
+    );
+    if (!data.categoryId) return null;
+    return (
+      storeCategories.find((c) => c.id === data.categoryId) ??
+      (data.categoryPath ? { id: data.categoryId, name: data.categoryPath, path: data.categoryPath } : null)
+    );
+  }
 
   const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -193,6 +244,37 @@ export default function NewListingPage() {
       const shipEstimate = estimateShipping(data.itemType, data.size, data.material);
       setIsHeavy(shipEstimate.isHeavy);
       setShippingCost(shipEstimate.isHeavy ? String(shipEstimate.cost) : "");
+
+      // Store category: re-suggest fresh on every analysis, same as
+      // brand/color/size above -- re-running Analyze is expected to
+      // refresh the AI-derived fields, this is one of them.
+      const keywordMatch =
+        storeCategories.length > 0
+          ? matchStoreCategoryByKeyword(
+              { title: data.suggestedTitle, itemType: data.itemType, brand: data.brand },
+              storeCategories
+            )
+          : null;
+      setStoreCategoryId(keywordMatch?.id ?? null);
+      setStoreCategoryName(keywordMatch?.path ?? null);
+      if (aiStoreCategorySuggestions && storeCategories.length > 0) {
+        setSuggestingStoreCategory(true);
+        requestStoreCategoryAi({
+          title: data.suggestedTitle,
+          itemType: data.itemType,
+          brand: data.brand,
+          color: data.color,
+          description: data.description,
+        })
+          .then((match) => {
+            if (match) {
+              setStoreCategoryId(match.id);
+              setStoreCategoryName(match.path);
+            }
+          })
+          .catch(() => {})
+          .finally(() => setSuggestingStoreCategory(false));
+      }
 
       // The first pricing call above almost always ran with an empty title
       // (the AI hadn't determined it yet). Now that we actually know the
@@ -288,6 +370,8 @@ export default function NewListingPage() {
         characterFamily: aiResult?.characterFamily ?? null,
         yearManufactured: aiResult?.yearManufactured ?? null,
         season: aiResult?.season ?? null,
+        storeCategoryId,
+        storeCategoryName,
       };
 
       let id = savedDraftId;
@@ -502,6 +586,61 @@ export default function NewListingPage() {
             {aiResult.waist && <DetectedField label="Waist" value={aiResult.waist} />}
             {aiResult.inseam && <DetectedField label="Inseam" value={aiResult.inseam} />}
           </div>
+          {storeCategories.length > 0 && (
+            <div className="relative mt-3 pt-3 border-t border-[var(--border)]">
+              <p className="text-[11px] text-[var(--text-tertiary)] mb-1">
+                Store category{suggestingStoreCategory ? " (getting AI suggestion...)" : ""}
+              </p>
+              <button
+                type="button"
+                onClick={() => setStoreCategoryPickerOpen((prev) => !prev)}
+                className="tap text-xs font-semibold rounded-lg px-3 py-2 border w-full text-left truncate"
+                style={
+                  storeCategoryId
+                    ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }
+                    : { background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }
+                }
+              >
+                {storeCategoryName ?? "No store category — tap to pick"}
+              </button>
+              {storeCategoryPickerOpen && (
+                <>
+                  <div className="fixed inset-0 z-10" onClick={() => setStoreCategoryPickerOpen(false)} />
+                  <div
+                    className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto card p-1"
+                    style={{ background: "var(--bg-surface)" }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStoreCategoryId(null);
+                        setStoreCategoryName(null);
+                        setStoreCategoryPickerOpen(false);
+                      }}
+                      className="tap w-full text-left text-xs px-2 py-1.5 rounded"
+                    >
+                      — None —
+                    </button>
+                    {storeCategories.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => {
+                          setStoreCategoryId(c.id);
+                          setStoreCategoryName(c.path);
+                          setStoreCategoryPickerOpen(false);
+                        }}
+                        className="tap w-full text-left text-xs px-2 py-1.5 rounded truncate"
+                        style={storeCategoryId === c.id ? { background: "var(--accent-tint)", color: "var(--accent)" } : undefined}
+                      >
+                        {c.path}
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           {aiResult.description && (
             <p className="text-xs text-[var(--text-secondary)] mt-3 pt-3 border-t border-[var(--border)] leading-relaxed">
               {aiResult.description}
