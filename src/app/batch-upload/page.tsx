@@ -88,6 +88,14 @@ const GROUPING_CHUNK_SIZE = 15;
 // rate-limited.
 const DELAY_BETWEEN_CHUNKS_MS = 300;
 
+// Kept in sync with AI_USAGE_LIMIT_MESSAGE in src/lib/ai-usage.ts. Used
+// only to recognize a cap-triggered item failure in handleAnalyzeBatch
+// below (so one clear banner can summarize a batch that ran into the cap,
+// instead of the same message just repeating on every affected item's
+// card) -- not imported directly from ai-usage.ts so this client bundle
+// doesn't pull in that file's server-only Supabase service-role client.
+const AI_CAP_MESSAGE = "You've reached this month's AI usage limit. It resets on the 1st.";
+
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -144,18 +152,21 @@ function resizeImage(file: File): Promise<{ dataUrl: string; mediaType: string }
   });
 }
 
-// Builds groups from photo indices the seller explicitly tapped as "last
-// photo of this item" on the upload screen. Unlike the AI-detected-marker
-// version below, a manually tapped divider photo IS a real item photo
-// (the seller is marking their own last shot, not a separate throwaway
-// marker), so it stays IN the group it closes.
+// Builds groups from photo indices the seller explicitly tapped as "this
+// is my SKU/number photo -- end this item here" on the upload screen.
+// Same exclusion rule as buildGroupsFromMarkers below: the tapped photo is
+// treated as a throwaway marker (a card, tag, or bag shot with the item's
+// number on it), not real item content, so it's left out of the group it
+// closes -- the seller never has to remember to delete it before listing.
 function buildGroupsFromManualDividers(dividerIndices: Set<number>, totalPhotos: number): number[][] {
   const sorted = Array.from(dividerIndices).sort((a, b) => a - b);
   const groups: number[][] = [];
   let start = 0;
   for (const d of sorted) {
     if (d < start || d >= totalPhotos) continue;
-    groups.push(Array.from({ length: d - start + 1 }, (_, k) => start + k));
+    if (d > start) {
+      groups.push(Array.from({ length: d - start }, (_, k) => start + k));
+    }
     start = d + 1;
   }
   if (start < totalPhotos) {
@@ -220,8 +231,9 @@ export default function BatchUploadPage() {
   const [analyzingProgress, setAnalyzingProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [groupingProgress, setGroupingProgress] = useState<string>("");
-  // Photo indices the seller tapped as "last photo of this item" on the
-  // upload screen (Scissors button on each thumbnail). Any non-empty set
+  // Photo indices the seller tapped as "this is my SKU/number photo" on
+  // the upload screen (Scissors button on each thumbnail) -- excluded from
+  // the listing photos, same as an AI-detected marker. Any non-empty set
   // here always wins over both AI grouping paths in handleGroupPhotos --
   // it's the most explicit signal available, costs nothing, and can't be
   // wrong the way an AI guess can.
@@ -277,9 +289,11 @@ export default function BatchUploadPage() {
       .catch(() => {});
   }, []);
 
-  // Toggles photoIndex as an "end of item" divider on the upload screen.
-  // Any non-empty manualDividers set makes handleGroupPhotos skip AI
-  // grouping entirely -- see buildGroupsFromManualDividers above.
+  // Toggles photoIndex as the SKU/number photo that ends the current item
+  // on the upload screen. Any non-empty manualDividers set makes
+  // handleGroupPhotos skip AI grouping entirely, and every tapped photo is
+  // excluded from its item's listing photos -- see
+  // buildGroupsFromManualDividers above.
   function toggleDivider(photoIndex: number) {
     setManualDividers((prev) => {
       const next = new Set(prev);
@@ -391,7 +405,9 @@ export default function BatchUploadPage() {
 
     // Manual dividers are the most explicit signal available -- if the
     // seller tapped any, skip AI grouping entirely (free, instant, and
-    // can't be mis-grouped) instead of the two AI-based paths below.
+    // can't be mis-grouped) instead of the two AI-based paths below. Each
+    // tapped photo is excluded from its item's listing photos, same as an
+    // AI-detected marker -- see buildGroupsFromManualDividers.
     if (manualDividers.size > 0) {
       const finalGroups = buildGroupsFromManualDividers(manualDividers, photos.length);
       setManualDividers(new Set());
@@ -734,6 +750,18 @@ export default function BatchUploadPage() {
       await Promise.all(
         Array.from({ length: Math.min(ANALYSIS_CONCURRENCY, groups.length) }, () => worker())
       );
+
+      // One clear banner instead of the same "usage limit" message just
+      // repeating on every affected item's card -- a seller scanning a
+      // 40-item results screen could easily miss that they're all the
+      // same cause. Per-item Retry buttons (rendered below for any item
+      // with .error set) still work once the cap resets.
+      const cappedCount = allResults.filter((r) => r.error === AI_CAP_MESSAGE).length;
+      if (cappedCount > 0) {
+        setError(
+          `You've reached this month's AI usage limit -- ${cappedCount} item${cappedCount !== 1 ? "s" : ""} below couldn't be analyzed. It resets on the 1st; retry them (or this whole batch) once it does.`
+        );
+      }
 
       // Auto-fill shipping tier AND an actual estimated dollar cost per item
       // from the AI-detected item type/size/material instead of leaving
@@ -1318,9 +1346,10 @@ export default function BatchUploadPage() {
               </p>
               <p className="text-xs text-[var(--text-tertiary)] mb-2">
                 Optional: tap <Scissors className="inline w-3 h-3 -mt-0.5" /> on
-                a photo to mark it as the last photo of that item — this
-                skips AI grouping for this batch and uses your taps exactly
-                as marked.
+                your item&apos;s SKU/number photo (a card, tag, or bag shot with
+                the number on it) to mark the end of that item — this skips
+                AI grouping for this batch, and the marked photo is left
+                out of the listing so it never gets posted by accident.
               </p>
               {manualDividers.size > 0 && (
                 <p className="text-xs mb-2" style={{ color: "var(--accent)" }}>
@@ -1349,7 +1378,7 @@ export default function BatchUploadPage() {
                           background: isDivider ? "var(--accent)" : "color-mix(in srgb, black 55%, transparent)",
                           color: "white",
                         }}
-                        aria-label={isDivider ? "Unmark end of item" : "Mark as last photo of this item"}
+                        aria-label={isDivider ? "Unmark as SKU/number photo" : "Mark as this item's SKU/number photo"}
                       >
                         <Scissors className="w-3.5 h-3.5" />
                       </button>

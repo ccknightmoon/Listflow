@@ -457,7 +457,7 @@ export default function SettingsPage() {
           <OptionCard
             icon={Sparkles}
             title="Off — group with AI only"
-            description="Default. Upload photos in order and AI groups them by comparing photos. You can still tap manual dividers on the upload screen any time -- that always skips AI grouping for that batch, whether this is on or off."
+            description="Default. Upload photos in order and AI groups them by comparing photos. You can still tap a photo as its item's SKU/number marker on the upload screen any time -- that skips AI grouping for that batch and leaves the tapped photo out of the listing, whether this is on or off."
             selected={!autoDetectDividers}
             onClick={() => handleAutoDetectToggle(false)}
           />
