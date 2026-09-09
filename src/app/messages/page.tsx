@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, RefreshCw, MessageCircle, Shirt, Send } from "lucide-react";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
+import { getPageCache, setPageCache } from "@/lib/page-cache";
 
 interface BuyerQuestion {
   messageId: string;
@@ -32,9 +33,13 @@ function timeAgo(dateStr: string): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+// See src/lib/page-cache.ts — shows the last-loaded questions list
+// instantly on revisit while load() quietly refreshes it in the background.
+const MESSAGES_CACHE_KEY = "messages:questions";
+
 export default function MessagesPage() {
-  const [questions, setQuestions] = useState<BuyerQuestion[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [questions, setQuestions] = useState<BuyerQuestion[]>(() => getPageCache<BuyerQuestion[]>(MESSAGES_CACHE_KEY) ?? []);
+  const [loading, setLoading] = useState(() => getPageCache<BuyerQuestion[]>(MESSAGES_CACHE_KEY) === undefined);
   const [error, setError] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -42,10 +47,16 @@ export default function MessagesPage() {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [replyText, setReplyText] = useState<Record<string, string>>({});
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load({ silent: getPageCache<BuyerQuestion[]>(MESSAGES_CACHE_KEY) !== undefined });
+  }, []);
 
-  async function load() {
-    setLoading(true);
+  // Mirror the list back into the cache so the next visit (within this
+  // tab, before it backgrounds) can paint instantly.
+  useEffect(() => { setPageCache(MESSAGES_CACHE_KEY, questions); }, [questions]);
+
+  async function load(opts: { silent?: boolean } = {}) {
+    if (!opts.silent) setLoading(true);
     setError(null);
     setNeedsConnect(false);
     setNeedsReconnect(false);
@@ -129,7 +140,7 @@ export default function MessagesPage() {
           )}
         </div>
         <button
-          onClick={load}
+          onClick={() => load()}
           disabled={loading}
           className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
         >

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, RefreshCw, Shirt, Tag, Check, X, PencilLine } from "lucide-react";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
+import { getPageCache, setPageCache } from "@/lib/page-cache";
 
 interface PendingOffer {
   itemId: string;
@@ -45,9 +46,13 @@ function pctOfAsking(offerPrice: number | null, askingPrice: number | null): str
   return `${Math.round((offerPrice / askingPrice) * 100)}% of asking`;
 }
 
+// See src/lib/page-cache.ts — shows the last-loaded offers list instantly
+// on revisit while load() quietly refreshes it in the background.
+const OFFERS_CACHE_KEY = "offers:list";
+
 export default function OffersPage() {
-  const [offers, setOffers] = useState<PendingOffer[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [offers, setOffers] = useState<PendingOffer[]>(() => getPageCache<PendingOffer[]>(OFFERS_CACHE_KEY) ?? []);
+  const [loading, setLoading] = useState(() => getPageCache<PendingOffer[]>(OFFERS_CACHE_KEY) === undefined);
   const [error, setError] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -57,10 +62,16 @@ export default function OffersPage() {
   const [counterOpenKey, setCounterOpenKey] = useState<string | null>(null);
   const [counterPrices, setCounterPrices] = useState<Record<string, string>>({});
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load({ silent: getPageCache<PendingOffer[]>(OFFERS_CACHE_KEY) !== undefined });
+  }, []);
 
-  async function load() {
-    setLoading(true);
+  // Mirror the merged list back into the cache so the next visit
+  // (within this tab, before it backgrounds) can paint instantly.
+  useEffect(() => { setPageCache(OFFERS_CACHE_KEY, offers); }, [offers]);
+
+  async function load(opts: { silent?: boolean } = {}) {
+    if (!opts.silent) setLoading(true);
     setError(null);
     setNeedsConnect(false);
     setNeedsReconnect(false);
@@ -167,7 +178,7 @@ export default function OffersPage() {
           )}
         </div>
         <button
-          onClick={load}
+          onClick={() => load()}
           disabled={loading}
           className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
         >

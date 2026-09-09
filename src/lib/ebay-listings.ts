@@ -1,4 +1,5 @@
 import { tradingRequest } from "@/lib/ebay-inventory";
+import { getEbayContext } from "@/lib/ebay-request-context";
 
 // Shared XML helpers + eBay "My eBay Selling" listing-fetch logic, used by
 // both /api/ebay/store (all active/unsold listings) and /api/ebay/offers
@@ -67,7 +68,7 @@ export function isListTypeError(r: unknown): r is ListTypeError {
 // silently lose everything past page 1. UnsoldList = listings that ended
 // without selling (eBay only retains a recent window of these, not full
 // history — there's no way to widen that from our side).
-export async function fetchAllOfListType(listType: ListType): Promise<{ items: string[]; total: number } | ListTypeError> {
+async function fetchAllOfListTypeUncached(listType: ListType): Promise<{ items: string[]; total: number } | ListTypeError> {
   const { status, body } = await fetchListPage(listType, 1);
 
   if (status >= 400) {
@@ -101,6 +102,55 @@ export async function fetchAllOfListType(listType: ListType): Promise<{ items: s
   }
 
   return { items, total: total || items.length };
+}
+
+// A single Dashboard load fans out to /api/dashboard/stats, /api/ebay/offers,
+// /api/ebay/messages, and /api/ebay/store nearly simultaneously -- and
+// offers, messages, and store all independently call
+// fetchAllOfListTypeUncached("ActiveList") to get essentially the same
+// "every active listing" snapshot. Without this, one dashboard view could
+// mean 3+ near-duplicate GetMyeBaySelling round trips to eBay at once. Same
+// "thundering herd" shape as getAccessToken() in ebay-oauth.ts, so the same
+// fix: a short-lived cache keyed by userId+listType, with concurrent
+// callers sharing one in-flight fetch instead of each firing their own.
+//
+// TTL is deliberately short (15s, not the 2-minute client-side page-cache
+// window in src/lib/page-cache.ts) -- this backs server-side reads that
+// should still reflect a listing edited moments ago; it only exists to
+// collapse requests that land within the same page load, not to replace a
+// real refresh.
+const LISTINGS_CACHE_TTL_MS = 15_000;
+type ListingsResult = { items: string[]; total: number } | ListTypeError;
+const listingsCache = new Map<string, { value: ListingsResult; expires: number }>();
+const inFlightListings = new Map<string, Promise<ListingsResult>>();
+
+export async function fetchAllOfListType(listType: ListType): Promise<ListingsResult> {
+  const { userId } = getEbayContext();
+  const cacheKey = `${userId}:${listType}`;
+
+  const cached = listingsCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) {
+    return cached.value;
+  }
+
+  const existing = inFlightListings.get(cacheKey);
+  if (existing) return existing;
+
+  const promise = fetchAllOfListTypeUncached(listType)
+    .then((result) => {
+      // Don't cache a failure -- a transient eBay error shouldn't be
+      // replayed to every other concurrent caller for the next 15s.
+      if (!isListTypeError(result)) {
+        listingsCache.set(cacheKey, { value: result, expires: Date.now() + LISTINGS_CACHE_TTL_MS });
+      }
+      return result;
+    })
+    .finally(() => {
+      inFlightListings.delete(cacheKey);
+    });
+
+  inFlightListings.set(cacheKey, promise);
+  return promise;
 }
 
 export function toListing(item: string, status: "active" | "ended") {
