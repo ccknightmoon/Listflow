@@ -295,6 +295,10 @@ export default function BatchUploadPage() {
   const [bulkCondition, setBulkCondition] = useState<Condition>(CONDITIONS[2]);
   const [bulkHeavy, setBulkHeavy] = useState(false);
   const [bulkShippingCost, setBulkShippingCost] = useState("");
+  // Bulk store category -- holds the picked category's id (a <select>
+  // needs a string value); resolved back to the real StoreCategoryLite
+  // object from `storeCategories` at apply time. "" means "— None —".
+  const [bulkStoreCategoryId, setBulkStoreCategoryId] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false); // bulk-edit panel accordion — starts collapsed per mock, opened manually
   const fileInput = useRef<HTMLInputElement | null>(null);
   // Indices the auto-save effect (below handleSaveDraft) has already
@@ -1404,6 +1408,19 @@ export default function BatchUploadPage() {
     });
   }
 
+  function applyBulkStoreCategory() {
+    const targets = getSelectableIndices().filter((i) => selected[i]);
+    if (targets.length === 0) return;
+    const chosen = storeCategories.find((c) => c.id === bulkStoreCategoryId) ?? null;
+    setStoreCategoryChoice((prev) => {
+      const next = { ...prev };
+      targets.forEach((i) => {
+        next[i] = chosen;
+      });
+      return next;
+    });
+  }
+
   return (
     <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "batch-panel" }}>
       <div
@@ -1982,6 +1999,23 @@ export default function BatchUploadPage() {
                           Set shipping
                         </button>
                       </div>
+                      {storeCategories.length > 0 && (
+                        <div className="flex items-center gap-2">
+                          <select
+                            className="input flex-1 text-xs"
+                            value={bulkStoreCategoryId}
+                            onChange={(e) => setBulkStoreCategoryId(e.target.value)}
+                          >
+                            <option value="">— None —</option>
+                            {storeCategories.map((c) => (
+                              <option key={c.id} value={c.id}>{c.path}</option>
+                            ))}
+                          </select>
+                          <button onClick={applyBulkStoreCategory} className="btn text-xs px-3 py-1.5 whitespace-nowrap">
+                            Set category
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
