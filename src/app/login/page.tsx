@@ -128,6 +128,11 @@ export default function LoginPage() {
             required
             autoComplete="current-password"
           />
+          <div className="flex justify-end -mt-1">
+            <Link href="/forgot-password" className="text-xs text-[var(--text-tertiary)] underline">
+              Forgot password?
+            </Link>
+          </div>
           {error && (
             <p className="text-sm" style={{ color: "var(--danger)" }}>{error}</p>
           )}

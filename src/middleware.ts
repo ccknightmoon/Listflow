@@ -27,7 +27,7 @@ import { Redis } from "@upstash/redis";
 // every API route reachable with zero authentication, reopening exactly
 // the bypass this middleware was rewritten to close. Do not reintroduce
 // a blanket "/api" public rule.
-const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms"];
+const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms", "/forgot-password", "/reset-password"];
 const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout"];
 
 // Self-service account deletion (src/lib/account-deletion.ts): a signed-in
