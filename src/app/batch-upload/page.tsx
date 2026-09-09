@@ -78,9 +78,29 @@ const CONDITIONS: Condition[] = [
 const MAX_DIMENSION = 1024;
 const THUMB_DIMENSION = 256;
 const THUMB_QUALITY = 0.5;
-const MAX_PHOTOS = 100;
+// Was 100 -- too tight for the app's own "list 40 items in a session"
+// goal once you do the math: 40 items x even a modest 3 real photos each
+// is 120, past the old cap before a seller could even finish uploading.
+// The item-divider marker photos (see buildGroupsFromMarkers/
+// buildGroupsFromManualDividers above) make this worse, not better -- a
+// marker adds one more photo per item on top of the real ones. Raised to
+// 200 (40 items x up to 5 photos each, comfortable headroom past
+// MAX_PHOTOS_PER_ITEM below). Nothing downstream needed to change to
+// support this: grouping/analysis/save/listing were already chunked or
+// concurrency-pooled rather than looping the whole batch in one shot --
+// see LARGE_BATCH_NOTICE_THRESHOLD below for the one real user-facing
+// consequence of a bigger batch (it takes longer, not that it breaks).
+const MAX_PHOTOS = 200;
 const MAX_PHOTOS_PER_ITEM = 6;
 const GROUPING_CHUNK_SIZE = 15;
+// Past this many photos, AI grouping alone needs 5+ sequential chunks
+// (see DELAY_BETWEEN_CHUNKS_MS below) even before analysis starts -- long
+// enough that a seller deserves a heads-up before they tap "Group photos"
+// and watch a progress bar for a while, instead of just finding out.
+// Manual/auto-detected dividers skip AI grouping entirely regardless of
+// batch size, so this is purely about setting expectations, never a
+// block.
+const LARGE_BATCH_NOTICE_THRESHOLD = 60;
 // Was 1500ms — purely a defensive buffer against OpenAI's per-minute
 // rate limit between grouping chunks. The server already detects a real
 // 429 and backs off on its own (RATE_LIMIT_DELAY_MS in
@@ -1362,6 +1382,13 @@ export default function BatchUploadPage() {
               <p className="text-sm text-[var(--text-secondary)] mb-2">
                 {photos.length} photo{photos.length !== 1 ? "s" : ""} selected
               </p>
+              {photos.length > LARGE_BATCH_NOTICE_THRESHOLD && manualDividers.size === 0 && (
+                <p className="text-xs mb-2" style={{ color: "var(--text-tertiary)" }}>
+                  Large batch — AI grouping will take a few minutes across
+                  several rounds. Tapping dividers instead (below) skips
+                  that wait entirely.
+                </p>
+              )}
               <p className="text-xs text-[var(--text-tertiary)] mb-2">
                 Optional: tap <Scissors className="inline w-3 h-3 -mt-0.5" /> on
                 your item&apos;s SKU/number photo (a card, tag, or bag shot with
