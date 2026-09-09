@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { isValidCostBasis } from "@/lib/profit";
 
+// isHeavy/shippingCost mirror the same fields POST /api/ebay/list already
+// accepts at listing time -- persisting them here too means a heavy item
+// saved as a draft (not listed immediately) keeps its shipping flag instead
+// of silently losing it (previously the flag only ever reached the DB via
+// drafts/[id]'s own localStorage cache, which a draft saved from
+// new-listing/batch-upload never touched at all).
+function isValidShippingCost(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
 // eBay Store Category IDs are always numeric (see ebay-store-categories.ts,
 // which already guards its own XML-interpolation point the same way). This
 // app never lets a seller type a category ID by hand — it's always picked
@@ -27,7 +37,7 @@ export async function GET() {
   // all of that unused text over the wire on every visit to this page.
   const { data, error } = await auth.supabase
     .from("drafts")
-    .select("id, title, suggested_price, sell_odds, condition, thumbnail_url, created_at, ebay_listing_id")
+    .select("id, title, suggested_price, sell_odds, condition, thumbnail_url, created_at, ebay_listing_id, is_heavy, shipping_cost")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -82,6 +92,12 @@ export async function POST(req: NextRequest) {
   if (body.costBasis !== undefined && body.costBasis !== null && !isValidCostBasis(body.costBasis)) {
     return NextResponse.json({ error: "costBasis must be a non-negative number, or null." }, { status: 400 });
   }
+  if (body.isHeavy !== undefined && typeof body.isHeavy !== "boolean") {
+    return NextResponse.json({ error: "isHeavy must be a boolean." }, { status: 400 });
+  }
+  if (body.shippingCost !== undefined && body.shippingCost !== null && !isValidShippingCost(body.shippingCost)) {
+    return NextResponse.json({ error: "shippingCost must be a non-negative number, or null." }, { status: 400 });
+  }
 
   const { data, error } = await auth.supabase
     .from("drafts")
@@ -121,6 +137,8 @@ export async function POST(req: NextRequest) {
         store_category_id: body.storeCategoryId ?? null,
         store_category_name: body.storeCategoryName ?? null,
         cost_basis: body.costBasis ?? null,
+        is_heavy: body.isHeavy ?? false,
+        shipping_cost: body.shippingCost ?? null,
       },
     ])
     .select();

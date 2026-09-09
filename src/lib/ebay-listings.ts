@@ -14,6 +14,20 @@ export function xmlFind(xml: string, tag: string): string {
   return m?.[1]?.trim() ?? "";
 }
 
+// Same idea as xmlFind but for a repeated sibling tag (e.g. every <Question>
+// in a GetMemberMessages response, every <BestOffer> in a GetBestOffers
+// response) -- moved here after this exact same regex loop turned up
+// copy-pasted, near-identically, in both offers/route.ts and
+// ebay-messages.ts, the same duplication this file's header comment
+// already exists to avoid for xmlFind.
+export function xmlFindAll(xml: string, tag: string): string[] {
+  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "g");
+  const results: string[] = [];
+  let m;
+  while ((m = re.exec(xml)) !== null) results.push(m[1].trim());
+  return results;
+}
+
 export function extractItemBlocks(xml: string): string[] {
   const arrayBlock = xmlFind(xml, "ItemArray");
   if (!arrayBlock) return [];

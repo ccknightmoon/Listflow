@@ -13,15 +13,23 @@ export async function GET() {
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {
-    return NextResponse.json({ error: "eBay not connected.", connect: true }, { status: 502 });
+    // 200, not 502 -- apiFetch() (src/lib/api.ts) throws on any non-ok
+    // status and discards the parsed body doing so, which meant this
+    // page's needsConnect/needsReconnect handling never actually ran on
+    // a hard-error status. Matches the shape /api/ebay/sales and
+    // /api/ebay/ship already use for the same condition.
+    return NextResponse.json({ error: "eBay not connected.", connect: true, reconnect: false }, { status: 200 });
   }
 
   return ebayContext.run(connection, async () => {
     try {
-      const { questions, error } = await fetchUnansweredQuestions();
+      const { questions, error, reconnect } = await fetchUnansweredQuestions();
       if (error) {
         console.error("GET /api/ebay/messages: eBay returned an error:", error);
-        return NextResponse.json({ error: "Couldn't load buyer questions, try refreshing." }, { status: 502 });
+        const friendlyError = reconnect
+          ? "Your eBay connection needs to be refreshed. Go to Settings and tap Reconnect, then try again."
+          : "Couldn't load buyer questions right now. Try refreshing in a moment.";
+        return NextResponse.json({ error: friendlyError, connect: false, reconnect: !!reconnect }, { status: 200 });
       }
 
       // Attach title/thumbnail from active listings for any question that
@@ -47,7 +55,7 @@ export async function GET() {
       return NextResponse.json({ questions: enriched });
     } catch (err) {
       console.error("GET /api/ebay/messages failed:", err);
-      return NextResponse.json({ error: "Couldn't load buyer questions, try refreshing." }, { status: 500 });
+      return NextResponse.json({ error: "Couldn't load buyer questions right now. Try refreshing in a moment." }, { status: 500 });
     }
   });
 }

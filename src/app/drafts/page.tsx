@@ -23,6 +23,8 @@ interface Draft {
   condition: string | null;
   thumbnail_url: string | null;
   created_at: string | null;
+  is_heavy: boolean | null;
+  shipping_cost: number | null;
 }
 
 type ListStatus = "idle" | "listing" | "done";
@@ -71,9 +73,26 @@ export default function DraftsPage() {
       const data = await apiFetch<{ drafts?: Array<Draft & { ebay_listing_id?: string | null }>; error?: string }>("/api/drafts");
       const loaded = (data.drafts ?? []).filter((d) => !d.ebay_listing_id) as Draft[];
       setDrafts(loaded);
-      setHeavyIds(new Set(loaded.filter((d) => JSON.parse(localStorage.getItem(`heavy-${d.id}`) ?? "false")).map((d) => d.id)));
+      // Prefer the draft's own saved is_heavy/shipping_cost (now persisted
+      // by every save path -- new-listing, batch-upload, and drafts/[id])
+      // over localStorage, which only ever got set by opening this exact
+      // draft in drafts/[id] specifically -- a heavy item saved elsewhere
+      // used to silently list here as non-heavy since heavyIds only ever
+      // came from localStorage before. Still falls back to localStorage for
+      // any draft saved before this migration that hasn't been re-saved yet.
+      setHeavyIds(
+        new Set(
+          loaded
+            .filter((d) => d.is_heavy ?? JSON.parse(localStorage.getItem(`heavy-${d.id}`) ?? "false"))
+            .map((d) => d.id)
+        )
+      );
       const costMap: Record<string, number> = {};
       for (const d of loaded) {
+        if (d.shipping_cost != null && d.shipping_cost > 0) {
+          costMap[d.id] = d.shipping_cost;
+          continue;
+        }
         const saved = localStorage.getItem(`shippingCost-${d.id}`);
         if (saved) { const n = parseFloat(saved); if (n > 0) costMap[d.id] = n; }
       }

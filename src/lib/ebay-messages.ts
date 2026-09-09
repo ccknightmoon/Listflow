@@ -1,5 +1,5 @@
 import { tradingRequest } from "@/lib/ebay-inventory";
-import { xmlFind } from "@/lib/ebay-listings";
+import { xmlFind, xmlFindAll } from "@/lib/ebay-listings";
 
 // Buyer questions come in through eBay's "Ask seller a question" flow on a
 // listing. Confirmed against eBay's Trading API reference before writing
@@ -8,14 +8,6 @@ import { xmlFind } from "@/lib/ebay-listings";
 // this isn't scoped to one listing. MessageStatus=Unanswered narrows the
 // result to just what actually needs a reply.
 const QUESTION_WINDOW_DAYS = 30;
-
-function xmlFindAll(xml: string, tag: string): string[] {
-  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "g");
-  const results: string[] = [];
-  let m;
-  while ((m = re.exec(xml)) !== null) results.push(m[1]);
-  return results;
-}
 
 export interface BuyerQuestion {
   messageId: string;
@@ -35,12 +27,17 @@ function makeGetMemberMessagesXml(): string {
 // Single call covering every listing at once (unlike GetBestOffers, which
 // is one call per active listing) -- no worker-pool/concurrency cap needed
 // here.
-export async function fetchUnansweredQuestions(): Promise<{ questions: BuyerQuestion[]; error?: string }> {
+export async function fetchUnansweredQuestions(): Promise<{ questions: BuyerQuestion[]; error?: string; reconnect?: boolean }> {
   const { body } = await tradingRequest("GetMemberMessages", makeGetMemberMessagesXml());
 
   if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) {
     const errMsg = xmlFind(body, "LongMessage") || xmlFind(body, "ShortMessage") || "Couldn't load buyer questions.";
-    return { questions: [], error: errMsg };
+    // Same auth/scope classification as /api/ebay/sales -- this page had
+    // no reconnect detection at all before, unlike every other eBay page,
+    // so a routine expired-token error here showed a dead-end "try
+    // refreshing" instead of the reconnect prompt every sibling page shows.
+    const isAuth = errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission") || errMsg.toLowerCase().includes("scope");
+    return { questions: [], error: errMsg, reconnect: isAuth };
   }
 
   const questions = xmlFindAll(body, "Question")

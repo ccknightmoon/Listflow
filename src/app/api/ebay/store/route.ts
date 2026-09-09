@@ -12,7 +12,13 @@ export async function GET() {
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {
-    return NextResponse.json({ error: "eBay not connected.", connect: true }, { status: 502 });
+    // 200, not 502/4xx: apiFetch() (src/lib/api.ts) throws on any non-ok
+    // status and discards the parsed body doing so -- this page's own
+    // `if (data.error) { setNeedsConnect(...) }` handling never even ran
+    // when this was a hard-error status, silently losing the "Connect
+    // eBay" prompt. Matches the shape /api/ebay/sales and /api/ebay/ship
+    // already use for the exact same condition.
+    return NextResponse.json({ error: "eBay not connected.", connect: true, reconnect: false }, { status: 200 });
   }
 
   return ebayContext.run(connection, async () => {
@@ -26,7 +32,10 @@ export async function GET() {
     // hard error if that call fails. If only Unsold fails, don't block the
     // whole page over it; just report zero ended listings.
     if (isListTypeError(activeResult)) {
-      return NextResponse.json(activeResult, { status: 502 });
+      // Same reasoning as the not-connected check above -- keep this a
+      // 200 so the structured {error, connect, reconnect} body actually
+      // reaches the page instead of apiFetch() throwing it away.
+      return NextResponse.json(activeResult, { status: 200 });
     }
 
     const activeListings = activeResult.items.map((item) => toListing(item, "active"));

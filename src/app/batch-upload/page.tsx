@@ -243,6 +243,7 @@ export default function BatchUploadPage() {
   const [listStatus, setListStatus] = useState<Record<number, "idle" | "saving" | "listing" | "listed" | "error">>({});
   const [listErrors, setListErrors] = useState<Record<number, string>>({});
   const [listMissingAspects, setListMissingAspects] = useState<Record<number, string[]>>({});
+  const [listStoreCategoryWarnings, setListStoreCategoryWarnings] = useState<Record<number, string>>({});
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
   const [customPrices, setCustomPrices] = useState<Record<number, string>>({});
@@ -1216,6 +1217,8 @@ export default function BatchUploadPage() {
         season: result.season ?? null,
         storeCategoryId: storeCategoryChoice[index]?.id ?? null,
         storeCategoryName: storeCategoryChoice[index]?.path ?? null,
+        isHeavy: heavyItems[index] ?? estimateIsHeavy(result.itemType, result.material),
+        shippingCost: shippingCosts[index] ? Number(shippingCosts[index]) : null,
       };
 
       let id: string = existingId ?? "";
@@ -1295,7 +1298,7 @@ export default function BatchUploadPage() {
 
     setListStatus((prev) => ({ ...prev, [index]: "listing" }));
     try {
-      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[] }>("/api/ebay/list", {
+      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draftId: id, isHeavy: heavyItems[index] ?? false, shippingCost: shippingCosts[index] ? parseFloat(shippingCosts[index]) : undefined }),
@@ -1309,6 +1312,9 @@ export default function BatchUploadPage() {
           ...prev,
           [index]: [...missingRequiredAspects],
         }));
+      }
+      if (data.storeCategoryWarning) {
+        setListStoreCategoryWarnings((prev) => ({ ...prev, [index]: data.storeCategoryWarning as string }));
       }
       window.dispatchEvent(new Event("listflow:counts-changed"));
       return true;
@@ -2425,6 +2431,9 @@ export default function BatchUploadPage() {
                       Listed, but eBay wants these fields for this category and the AI
                       couldn&apos;t tell: <strong>{listMissingAspects[i].join(", ")}</strong>.
                     </p>
+                  )}
+                  {listStatus[i] === "listed" && listStoreCategoryWarnings[i] && (
+                    <p className="text-xs mb-2" style={{ color: "var(--warning-border)" }}>{listStoreCategoryWarnings[i]}</p>
                   )}
 
                   <div className="flex gap-2">

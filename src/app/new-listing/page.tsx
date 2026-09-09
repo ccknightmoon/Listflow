@@ -101,6 +101,7 @@ export default function NewListingPage() {
   const [listStatus, setListStatus] = useState<"idle" | "listing" | "listed" | "error">("idle");
   const [listError, setListError] = useState<string | null>(null);
   const [missingAspectsWarning, setMissingAspectsWarning] = useState<string[] | null>(null);
+  const [storeCategoryWarning, setStoreCategoryWarning] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [isHeavy, setIsHeavy] = useState(false);
@@ -378,6 +379,8 @@ export default function NewListingPage() {
         storeCategoryId,
         storeCategoryName,
         costBasis: cost ? Number(cost) : null,
+        isHeavy,
+        shippingCost: shippingCost ? Number(shippingCost) : null,
       };
 
       let id = savedDraftId;
@@ -413,7 +416,7 @@ export default function NewListingPage() {
     try {
       const draftId = await handleSaveDraft();
       if (!draftId) throw new Error("Could not save draft before listing");
-      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[] }>("/api/ebay/list", {
+      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draftId, isHeavy, shippingCost: shippingCost ? parseFloat(shippingCost) : undefined }),
@@ -423,6 +426,7 @@ export default function NewListingPage() {
       setListStatus("listed");
       const missingRequiredAspects = data.missingRequiredAspects ?? [];
       setMissingAspectsWarning(missingRequiredAspects.length > 0 ? missingRequiredAspects : null);
+      setStoreCategoryWarning(data.storeCategoryWarning ?? null);
       window.dispatchEvent(new Event("listflow:counts-changed"));
       setTimeout(() => router.push("/store"), 1500);
     } catch (err) {
@@ -751,6 +755,9 @@ export default function NewListingPage() {
                   Listed, but eBay wants these fields for this category and the AI
                   couldn&apos;t tell: <strong>{missingAspectsWarning.join(", ")}</strong>.
                 </p>
+              )}
+              {storeCategoryWarning && (
+                <p className="text-xs mb-2" style={{ color: "var(--warning-border)" }}>{storeCategoryWarning}</p>
               )}
               <div className="flex gap-2">
                 <button

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw } from "lucide-react";
 import { estimateShipping } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
+import { uploadThumbnail } from "@/lib/storage";
 import { AiResult } from "@/lib/ai-result";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import AIDisclaimer from "@/components/AIDisclaimer";
@@ -52,6 +53,8 @@ interface Draft {
   ebay_listing_id: string | null;
   store_category_id: string | null;
   store_category_name: string | null;
+  is_heavy: boolean | null;
+  shipping_cost: number | null;
 }
 
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -79,6 +82,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null);
   const [refreshingPrice, setRefreshingPrice] = useState(false);
   const [missingAspectsWarning, setMissingAspectsWarning] = useState<string[] | null>(null);
+  const [storeCategoryWarning, setStoreCategoryWarning] = useState<string | null>(null);
   // Store category: the seller's real eBay Store Categories, fetched once
   // on mount (empty if eBay isn't connected or none are set up, in which
   // case the picker below just doesn't render). storeCategoryId/Name are
@@ -132,10 +136,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         const d: Draft = data.draft;
         setDraft(d);
         setPhotoUrls(d.photo_urls ?? []);
+        // Priority: an unsynced local choice (localStorage, pre-dates the
+        // is_heavy/shipping_cost columns and could still hold an edit that
+        // hasn't made it to the draft row yet) beats the draft's own saved
+        // value, which beats an AI-estimated default. Once this page's own
+        // Save/List path runs again below, the DB value becomes current and
+        // the localStorage copy is cleared, so this fallback chain is only
+        // ever needed for a draft not yet touched under the new behavior.
         const savedHeavy = localStorage.getItem(`heavy-${id}`);
         const savedShippingCost = localStorage.getItem(`shippingCost-${id}`);
         if (savedHeavy) {
           setIsHeavy(JSON.parse(savedHeavy));
+        } else if (d.is_heavy != null) {
+          setIsHeavy(d.is_heavy);
         } else {
           // No explicit choice saved yet — auto-fill from the AI-detected
           // item type/size/material instead of defaulting to "not heavy"
@@ -146,7 +159,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             setShippingCost(String(shipEstimate.cost));
           }
         }
-        if (savedShippingCost) setShippingCost(savedShippingCost);
+        if (savedShippingCost) {
+          setShippingCost(savedShippingCost);
+        } else if (d.shipping_cost != null) {
+          setShippingCost(String(d.shipping_cost));
+        }
         setTitle(str(d.title));
         setBrand(str(d.brand));
         setColor(str(d.color));
@@ -304,6 +321,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
           storeCategoryId, storeCategoryName,
+          isHeavy, shippingCost: shippingCost ? Number(shippingCost) : null,
         }),
       });
       setSaved(true);
@@ -340,10 +358,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
           storeCategoryId, storeCategoryName,
+          isHeavy, shippingCost: shippingCost ? Number(shippingCost) : null,
         }),
       });
 
-      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; url?: string; listingId?: string }>("/api/ebay/list", {
+      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; url?: string; listingId?: string; storeCategoryWarning?: string }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draftId: id, customSku: customSku || undefined, isHeavy, shippingCost: shippingCost ? parseFloat(shippingCost) : undefined }),
@@ -369,6 +388,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       setListingUrl(data.url ?? null);
       setJustListed(true);
       setMissingAspectsWarning(data.missingRequiredAspects && data.missingRequiredAspects.length > 0 ? data.missingRequiredAspects : null);
+      setStoreCategoryWarning(data.storeCategoryWarning ?? null);
       localStorage.removeItem(`heavy-${id}`);
       localStorage.removeItem(`shippingCost-${id}`);
       window.dispatchEvent(new Event("listflow:counts-changed"));
@@ -412,6 +432,36 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       if (data.material) setMaterial(data.material);
       if (data.pattern) setPattern(data.pattern);
       if (data.description) setDescription(data.description);
+
+      // Merge the photos Sel retook specifically to fix this draft into the
+      // listing's own photos instead of discarding them once the AI has
+      // read them -- previously these were sent to analyze-item purely to
+      // refresh text fields and then thrown away, which is surprising: a
+      // seller who retakes a flaw/measurement shot expects it to become a
+      // real listing photo, not vanish with no indication why.
+      const uploadedUrls = (
+        await Promise.all(
+          reanalyzePhotos.map(async (p) => {
+            try {
+              return await uploadThumbnail(p.previewUrl);
+            } catch {
+              return null;
+            }
+          })
+        )
+      ).filter((u): u is string => !!u);
+      if (uploadedUrls.length > 0) {
+        const nextPhotoUrls = [...photoUrls, ...uploadedUrls];
+        setPhotoUrls(nextPhotoUrls);
+        await apiFetch(`/api/drafts/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            photoUrls: nextPhotoUrls,
+            ...(photoUrls.length === 0 ? { thumbnailUrl: nextPhotoUrls[0] } : {}),
+          }),
+        });
+      }
       setReanalyzePhotos([]);
     } catch (err) {
       setError((err as Error).message);
@@ -584,6 +634,12 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           Listed, but eBay lists these as required for this category and the
           AI couldn&apos;t determine them: <strong>{missingAspectsWarning.join(", ")}</strong>.
           Consider editing the listing on eBay to fill them in for better search placement.
+        </div>
+      )}
+
+      {storeCategoryWarning && (
+        <div className="card p-3 mb-4 text-sm" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)", color: "var(--warning-border)" }}>
+          {storeCategoryWarning}
         </div>
       )}
 

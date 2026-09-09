@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { isValidCostBasis } from "@/lib/profit";
 
+// Same guard as POST /api/drafts -- see that file for why isHeavy/
+// shippingCost are persisted here now instead of living only in
+// drafts/[id]'s own localStorage cache.
+function isValidShippingCost(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
 // Same guard as POST /api/drafts — store category IDs are always numeric
 // and always picked from a live dropdown, never hand-typed.
 function isValidStoreCategoryId(value: unknown): value is string | null {
@@ -47,6 +54,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.costBasis !== undefined && body.costBasis !== null && !isValidCostBasis(body.costBasis)) {
     return NextResponse.json({ error: "costBasis must be a non-negative number, or null." }, { status: 400 });
   }
+  if (body.isHeavy !== undefined && typeof body.isHeavy !== "boolean") {
+    return NextResponse.json({ error: "isHeavy must be a boolean." }, { status: 400 });
+  }
+  if (body.shippingCost !== undefined && body.shippingCost !== null && !isValidShippingCost(body.shippingCost)) {
+    return NextResponse.json({ error: "shippingCost must be a non-negative number, or null." }, { status: 400 });
+  }
 
   const { data, error } = await auth.supabase
     .from("drafts")
@@ -83,6 +96,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.storeCategoryId !== undefined && { store_category_id: body.storeCategoryId }),
       ...(body.storeCategoryName !== undefined && { store_category_name: body.storeCategoryName }),
       ...(body.costBasis !== undefined && { cost_basis: body.costBasis }),
+      ...(body.isHeavy !== undefined && { is_heavy: body.isHeavy }),
+      ...(body.shippingCost !== undefined && { shipping_cost: body.shippingCost }),
     })
     .eq("id", id)
     .eq("user_id", auth.user.id)

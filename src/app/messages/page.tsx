@@ -37,6 +37,7 @@ export default function MessagesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
+  const [needsReconnect, setNeedsReconnect] = useState(false);
   const [replying, setReplying] = useState<Set<string>>(new Set());
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [replyText, setReplyText] = useState<Record<string, string>>({});
@@ -47,11 +48,13 @@ export default function MessagesPage() {
     setLoading(true);
     setError(null);
     setNeedsConnect(false);
+    setNeedsReconnect(false);
     try {
-      const data = await apiFetch<{ questions?: BuyerQuestion[]; error?: string; connect?: boolean }>("/api/ebay/messages");
+      const data = await apiFetch<{ questions?: BuyerQuestion[]; error?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/messages");
       if (data.error) {
         setError(data.error);
         setNeedsConnect(!!data.connect);
+        setNeedsReconnect(!!data.reconnect);
         setQuestions([]);
         return;
       }
@@ -145,6 +148,9 @@ export default function MessagesPage() {
               {error}
               {needsConnect && (
                 <a href="/api/ebay/connect" className="underline ml-2 font-medium">Connect eBay →</a>
+              )}
+              {needsReconnect && (
+                <a href="/api/ebay/connect" className="underline ml-2 font-medium">Reconnect eBay →</a>
               )}
             </>
           ) : null

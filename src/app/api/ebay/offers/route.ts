@@ -3,17 +3,9 @@ import { tradingRequest } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
-import { fetchAllOfListType, isListTypeError, toListing, xmlFind } from "@/lib/ebay-listings";
+import { fetchAllOfListType, isListTypeError, toListing, xmlFind, xmlFindAll } from "@/lib/ebay-listings";
 
 export const runtime = "nodejs";
-
-function xmlFindAll(xml: string, tag: string): string[] {
-  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "g");
-  const results: string[] = [];
-  let m;
-  while ((m = re.exec(xml)) !== null) results.push(m[1].trim());
-  return results;
-}
 
 const OFFERS_LOOKUP_CONCURRENCY = 5;
 // Upper bound on how many GetBestOffers calls one /offers page load makes --
@@ -92,14 +84,19 @@ export async function GET() {
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {
-    return NextResponse.json({ error: "eBay not connected.", connect: true }, { status: 502 });
+    // 200, not 502 -- apiFetch() (src/lib/api.ts) throws on any non-ok
+    // status and discards the parsed body doing so, so this page's own
+    // needsConnect/needsReconnect handling never ran on a hard-error
+    // status. Matches the shape /api/ebay/sales and /api/ebay/ship use.
+    return NextResponse.json({ error: "eBay not connected.", connect: true, reconnect: false }, { status: 200 });
   }
 
   return ebayContext.run(connection, async () => {
     try {
       const activeResult = await fetchAllOfListType("ActiveList");
       if (isListTypeError(activeResult)) {
-        return NextResponse.json(activeResult, { status: 502 });
+        // Same reasoning as the not-connected check above.
+        return NextResponse.json(activeResult, { status: 200 });
       }
 
       const activeListings: ActiveListingInfo[] = activeResult.items
