@@ -1,0 +1,34 @@
+name: CI
+
+# Lint + typecheck on every push and PR. Deliberately does NOT run `next
+# build` -- a full production build needs this app's real secrets
+# (Supabase, OpenAI, eBay OAuth env vars), none of which exist as GitHub
+# Actions secrets, so a build step here would likely fail for reasons
+# unrelated to whether the code is actually correct and give a misleading
+# red CI status. Lint + typecheck catch the same class of bug (bad
+# imports, type errors, unused vars) without needing any of that.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit
