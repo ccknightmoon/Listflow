@@ -210,9 +210,21 @@ export async function POST(req: NextRequest) {
 
     if (!offerId) return NextResponse.json({ error: "No offer ID returned" }, { status: 500 });
 
-    // Brief pause so eBay's inventory service indexes the item before publishing
-    await new Promise((r) => setTimeout(r, 1500));
+    // Try publishing right away instead of always paying a fixed wait for
+    // eBay's inventory service to index the item first -- this used to be
+    // a flat 1500ms tax on every single listing, win or lose, on the
+    // app's most-used action. If eBay genuinely hasn't indexed the item
+    // yet, this first attempt fails fast and cheaply; only then do we
+    // wait and retry the identical publish call once, before falling
+    // into the broader error handling below (unchanged from here on).
+    // Worst case (indexing really does need the full ~1500ms) costs one
+    // extra failed round trip versus before; best case -- most listings,
+    // if eBay's real indexing time is usually under that -- costs nothing.
     let publishResult = await publishOffer(offerId);
+    if (publishResult.status >= 400) {
+      await new Promise((r) => setTimeout(r, 1500));
+      publishResult = await publishOffer(offerId);
+    }
     if (publishResult.status >= 400) {
       const publishErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
       const errMsg = publishErr?.longMessage ?? publishErr?.message ?? "";
@@ -232,7 +244,18 @@ export async function POST(req: NextRequest) {
         // categoryId is immutable on an existing offer — delete and recreate with safe clothing category.
         // Also handles "item specific missing" errors caused by wrong taxonomy category (e.g. shirt → pants).
         await deleteOffer(offerId);
-        // Wait for eBay to process the deletion before creating a new offer
+        // Deliberately left as an unconditional wait, unlike the two
+        // try-then-retry spots elsewhere in this route: the loop below
+        // tries several conditions and just `continue`s past whichever
+        // upsertInventoryItem call fails, with no way to tell "this
+        // condition is genuinely invalid" apart from "the delete above
+        // hasn't propagated yet." Removing this wait risks silently
+        // burning through every entry in conditionsToTry on a listing
+        // that would have worked fine with it, which is a worse outcome
+        // than the flat 2s here -- this is also a rare path (only
+        // reached when the very first publish attempt already failed for
+        // a real category/condition reason), so the payoff for
+        // optimizing it is much smaller than the primary publish wait.
         await new Promise((r) => setTimeout(r, 2000));
         const safeCategory = getSafeFallbackCategory(draft.title || "");
         const originalCondition = CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
@@ -252,9 +275,15 @@ export async function POST(req: NextRequest) {
           const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter);
           if (upsertResult.status >= 400) continue;
           missingRequiredAspects = upsertResult.missingRequiredAspects ?? missingRequiredAspects;
-          // Brief pause so eBay's inventory service indexes the item before we try to publish
-          await new Promise((r) => setTimeout(r, 1500));
-          const freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, shippingMode, shippingCost);
+          // Same try-then-retry-once-on-failure treatment as the primary
+          // publish attempt above, for the same reason -- this was a flat
+          // 1500ms wait on every fallback attempt whether or not eBay
+          // actually needed it.
+          let freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, shippingMode, shippingCost);
+          if (freshOffer.status >= 400) {
+            await new Promise((r) => setTimeout(r, 1500));
+            freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, shippingMode, shippingCost);
+          }
           const freshOfferId = (freshOffer.data as { offerId?: string }).offerId;
           if (freshOffer.status >= 400 || !freshOfferId) continue;
           publishResult = await publishOffer(freshOfferId);
