@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Loader2, RefreshCw, Shirt, TrendingUp } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Loader2, RefreshCw, Shirt, TrendingUp } from "lucide-react";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { bucketRevenue, formatCompactCurrency } from "@/lib/sales-buckets";
@@ -15,6 +15,11 @@ import { getPageCache, setPageCache } from "@/lib/page-cache";
 function salesCacheKey(days: DayRange) {
   return `sales:${days}`;
 }
+interface RealFees {
+  totalFees: number;
+  saleCount: number;
+  truncated: boolean;
+}
 interface CachedSales {
   sales: Sale[];
   totalRevenue: number;
@@ -24,6 +29,7 @@ interface CachedSales {
   trueProfit: number;
   itemsWithCost: number;
   itemsMissingCost: number;
+  realFees: RealFees | null;
 }
 
 type DayRange = 7 | 30 | 90;
@@ -41,6 +47,36 @@ interface Sale {
   // optional here only so an old cached page-cache entry (pre-this-feature)
   // doesn't crash the render.
   estimatedFee?: number;
+  // Seller-entered cost of the item, from drafts.cost_basis -- null when
+  // never entered (see src/lib/profit.ts). Optional for the same
+  // old-cache-entry reason as estimatedFee above.
+  costBasis?: number | null;
+}
+
+// RFC 4180-ish: quote any field containing a comma, quote, or newline, and
+// double up embedded quotes. Titles routinely contain commas, so this
+// isn't optional -- an unescaped one would silently shift every later
+// column in that row.
+function csvField(value: string | number): string {
+  const s = String(value);
+  if (/[",\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+
+function downloadCsv(filename: string, rows: string[][]) {
+  const csv = rows.map((row) => row.map(csvField).join(",")).join("\r\n");
+  // Leading BOM so Excel (still the most likely place this gets opened)
+  // detects UTF-8 instead of guessing a local codepage and mangling any
+  // non-ASCII characters in a title.
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 const INITIAL_DAYS: DayRange = 30;
@@ -54,6 +90,11 @@ export default function SalesPage() {
   const [trueProfit, setTrueProfit] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.trueProfit ?? 0);
   const [itemsWithCost, setItemsWithCost] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.itemsWithCost ?? 0);
   const [itemsMissingCost, setItemsMissingCost] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.itemsMissingCost ?? 0);
+  // Real, eBay-reported fee total for the current window -- only present
+  // once the seller has reconnected eBay with the sell.finances scope
+  // (see EBAY_SCOPES in ebay-oauth.ts). null means "not available yet,"
+  // not an error -- the estimate above always renders regardless.
+  const [realFees, setRealFees] = useState<RealFees | null>(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.realFees ?? null);
   const displayTotalRevenue = useCountUp(totalRevenue);
   const [loading, setLoading] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS)) === undefined);
   const [error, setError] = useState<string | null>(null);
@@ -81,7 +122,7 @@ export default function SalesPage() {
     setNeedsConnect(false);
     setNeedsReconnect(false);
     try {
-      const data = await apiFetch<{ sales?: Sale[]; totalRevenue?: number; totalFees?: number; netRevenue?: number; feePercent?: number; trueProfit?: number; itemsWithCost?: number; itemsMissingCost?: number; error?: string; connect?: boolean; reconnect?: boolean }>(`/api/ebay/sales?days=${d}`);
+      const data = await apiFetch<{ sales?: Sale[]; totalRevenue?: number; totalFees?: number; netRevenue?: number; feePercent?: number; trueProfit?: number; itemsWithCost?: number; itemsMissingCost?: number; realFees?: RealFees | null; error?: string; connect?: boolean; reconnect?: boolean }>(`/api/ebay/sales?days=${d}`);
       if (data.error) {
         setNeedsConnect(!!data.connect);
         setNeedsReconnect(!!data.reconnect);
@@ -95,6 +136,7 @@ export default function SalesPage() {
       const newTrueProfit = data.trueProfit ?? newNetRevenue;
       const newItemsWithCost = data.itemsWithCost ?? 0;
       const newItemsMissingCost = data.itemsMissingCost ?? 0;
+      const newRealFees = data.realFees ?? null;
       setSales(newSales);
       setTotalRevenue(newTotalRevenue);
       setTotalFees(newTotalFees);
@@ -103,6 +145,7 @@ export default function SalesPage() {
       setTrueProfit(newTrueProfit);
       setItemsWithCost(newItemsWithCost);
       setItemsMissingCost(newItemsMissingCost);
+      setRealFees(newRealFees);
       setPageCache(salesCacheKey(d), {
         sales: newSales,
         totalRevenue: newTotalRevenue,
@@ -112,12 +155,39 @@ export default function SalesPage() {
         trueProfit: newTrueProfit,
         itemsWithCost: newItemsWithCost,
         itemsMissingCost: newItemsMissingCost,
+        realFees: newRealFees,
       });
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleExportCsv() {
+    const header = ["Date", "Title", "Listing ID", "Qty", "Price", "Total", "Est. fee", "Cost", "Profit"];
+    const rows = sales.map((s) => {
+      const fee = s.estimatedFee ?? 0;
+      const cost = s.costBasis ?? null;
+      // Only claim a profit figure when a real cost was entered -- with no
+      // cost on file this would otherwise silently pass off "revenue minus
+      // estimated fee" as profit, the exact estimate/actual conflation the
+      // summary card's own disclaimer exists to avoid.
+      const profit = cost != null ? s.total - fee - cost : null;
+      return [
+        s.soldAt ? new Date(s.soldAt).toLocaleDateString("en-US") : "",
+        s.title || "Unknown item",
+        s.listingId,
+        String(s.qty),
+        s.price.toFixed(2),
+        s.total.toFixed(2),
+        fee.toFixed(2),
+        cost != null ? cost.toFixed(2) : "",
+        profit != null ? profit.toFixed(2) : "",
+      ];
+    });
+    const today = new Date().toISOString().slice(0, 10);
+    downloadCsv(`listflow-sales-${days}d-${today}.csv`, [header, ...rows]);
   }
 
   return (
@@ -145,6 +215,15 @@ export default function SalesPage() {
             <p className="text-xs text-[var(--text-secondary)]">{sales.length} sale{sales.length !== 1 ? "s" : ""} in last {days} days</p>
           )}
         </div>
+        {!loading && !error && sales.length > 0 && (
+          <button
+            onClick={handleExportCsv}
+            title="Export CSV"
+            className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
+          >
+            <Download className="w-4 h-4 text-[var(--text-secondary)]" />
+          </button>
+        )}
         <button
           onClick={() => load(days)}
           disabled={loading}
@@ -226,6 +305,12 @@ export default function SalesPage() {
             Estimated at {feePercent}% + eBay&apos;s per-order fee — not your exact eBay invoice.{" "}
             <Link href="/settings" className="underline">Adjust rate</Link>
           </p>
+          {realFees && realFees.saleCount > 0 && (
+            <p className="text-[10px] mt-1 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
+              Actual fees eBay reported for this period: <span className="font-semibold">${realFees.totalFees.toFixed(2)}</span>
+              {" "}({realFees.saleCount} transaction{realFees.saleCount !== 1 ? "s" : ""} from your Finances data{realFees.truncated ? ", partial" : ""})
+            </p>
+          )}
           {itemsWithCost > 0 && (
             <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
               <p className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>True profit (after fees &amp; cost)</p>
