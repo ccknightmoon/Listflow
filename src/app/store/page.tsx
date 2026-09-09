@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
@@ -285,6 +285,25 @@ export default function StorePage() {
           )
         )}
       </div>
+
+      {!loading && !error && (
+        <Link
+          href="/offers"
+          className="tap card p-3 flex items-center gap-3 mb-4"
+        >
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "color-mix(in srgb, var(--accent) 16%, var(--bg-surface))", color: "var(--accent)" }}
+          >
+            <Tag className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Pending offers</p>
+            <p className="text-xs text-[var(--text-secondary)]">Review and respond to Best Offers</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-[var(--text-tertiary)] flex-shrink-0" />
+        </Link>
+      )}
 
       {!loading && listings.length > 0 && (
         <div className="flex flex-col gap-2 mb-4">
