@@ -22,9 +22,11 @@ import {
   ScanLine,
   Sparkles,
   Tags,
+  DollarSign,
 } from "lucide-react";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
+import { EBAY_STANDARD_FEE_PERCENT } from "@/lib/ebay-fees";
 
 type DefaultShippingMode = "free" | "calculated";
 
@@ -71,6 +73,18 @@ export default function SettingsPage() {
   const [aiStoreCategorySaving, setAiStoreCategorySaving] = useState(false);
   const [aiStoreCategorySaved, setAiStoreCategorySaved] = useState(false);
   const [aiStoreCategoryError, setAiStoreCategoryError] = useState<string | null>(null);
+
+  // Settings -> "Fee estimate" -- lets a seller override the percentage
+  // used in the Sales page's estimated fee/net-profit calc. Kept as a
+  // string while editing (so "13." or an empty field mid-type doesn't get
+  // clobbered by a parsed-number round-trip); parsed to a number (or null
+  // to reset to the standard rate) only on save. See src/lib/ebay-fees.ts.
+  const [feePercentInput, setFeePercentInput] = useState("");
+  const [savedFeePercentOverride, setSavedFeePercentOverride] = useState<number | null>(null);
+  const [feePercentSaving, setFeePercentSaving] = useState(false);
+  const [feePercentSaved, setFeePercentSaved] = useState(false);
+  const [feePercentError, setFeePercentError] = useState<string | null>(null);
+
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -109,6 +123,9 @@ export default function SettingsPage() {
         setStoredAccent(serverAccent);
         setAutoDetectDividers(!!data.autoDetectItemDividers);
         setAiStoreCategory(!!data.aiStoreCategorySuggestions);
+        const override = typeof data.ebayFeePercentOverride === "number" ? data.ebayFeePercentOverride : null;
+        setSavedFeePercentOverride(override);
+        setFeePercentInput(override !== null ? String(override) : "");
       })
       .catch(() => setError("Could not load settings"))
       .finally(() => setLoading(false));
@@ -159,6 +176,32 @@ export default function SettingsPage() {
       setAiStoreCategoryError("Could not save — try again.");
     } finally {
       setAiStoreCategorySaving(false);
+    }
+  }
+
+  async function handleSaveFeePercent(nextValue: number | null) {
+    if (feePercentSaving) return;
+    setFeePercentSaving(true);
+    setFeePercentSaved(false);
+    setFeePercentError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ebayFeePercentOverride: nextValue }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Failed to save");
+      }
+      setSavedFeePercentOverride(nextValue);
+      setFeePercentInput(nextValue !== null ? String(nextValue) : "");
+      setFeePercentSaved(true);
+      setTimeout(() => setFeePercentSaved(false), 2000);
+    } catch (err) {
+      setFeePercentError((err as Error).message || "Could not save — try again.");
+    } finally {
+      setFeePercentSaving(false);
     }
   }
 
@@ -681,7 +724,64 @@ export default function SettingsPage() {
         )}
       </SettingsSection>
 
-      <SettingsSection delay="d7" title="Account" icon={UserCircle}>
+      <SettingsSection
+        delay="d7"
+        title="Fee estimate"
+        description={`Sales history shows an estimated eBay fee and net profit per sale, using eBay's standard final value fee (${EBAY_STANDARD_FEE_PERCENT}% of the sale total, most categories) plus their per-order fee. If you know your actual effective rate differs -- a different category, a Store subscription discount, a seller promotion -- enter it here instead. This never reflects your real eBay invoice; eBay doesn't give this app access to that.`}
+        icon={DollarSign}
+      >
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <input
+              type="number"
+              inputMode="decimal"
+              step="0.1"
+              min="0"
+              max="100"
+              className="input"
+              placeholder={`${EBAY_STANDARD_FEE_PERCENT} (standard)`}
+              value={feePercentInput}
+              onChange={(e) => { setFeePercentInput(e.target.value); setFeePercentSaved(false); }}
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-tertiary)] pointer-events-none">%</span>
+          </div>
+          <button
+            onClick={() => {
+              const trimmed = feePercentInput.trim();
+              if (trimmed === "") { handleSaveFeePercent(null); return; }
+              const parsed = Number(trimmed);
+              if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) {
+                setFeePercentError("Enter a percentage between 0 and 100.");
+                return;
+              }
+              handleSaveFeePercent(parsed);
+            }}
+            disabled={feePercentSaving || (feePercentInput.trim() === "" ? savedFeePercentOverride === null : Number(feePercentInput) === savedFeePercentOverride)}
+            className="btn btn-primary text-xs px-3 py-2 flex-none"
+          >
+            {feePercentSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save"}
+          </button>
+        </div>
+        {savedFeePercentOverride !== null && (
+          <button
+            onClick={() => handleSaveFeePercent(null)}
+            disabled={feePercentSaving}
+            className="text-xs mt-2 underline text-[var(--text-secondary)]"
+          >
+            Reset to standard ({EBAY_STANDARD_FEE_PERCENT}%)
+          </button>
+        )}
+        {feePercentError && (
+          <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{feePercentError}</p>
+        )}
+        {feePercentSaved && (
+          <p className="text-xs flex items-center gap-1 mt-2" style={{ color: "var(--success)" }}>
+            <Check className="w-3 h-3" /> Saved
+          </p>
+        )}
+      </SettingsSection>
+
+      <SettingsSection delay="d8" title="Account" icon={UserCircle}>
         <button
           onClick={handleSignOut}
           disabled={signingOut}

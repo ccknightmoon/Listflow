@@ -206,6 +206,7 @@ img {
 .d5 { animation-delay: 0.15s; }
 .d6 { animation-delay: 0.18s; }
 .d7 { animation-delay: 0.21s; }
+.d8 { animation-delay: 0.24s; }
 
 /* View Transitions: the "container transform" a tapped Dashboard tile
    (MorphLink, e.g. the To-ship card) grows into the destination screen's

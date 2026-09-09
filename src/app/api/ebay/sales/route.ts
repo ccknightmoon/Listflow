@@ -3,6 +3,7 @@ import { tradingRequest } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
+import { EBAY_STANDARD_FEE_PERCENT, estimateEbayFee, isValidFeePercent } from "@/lib/ebay-fees";
 
 export const runtime = "nodejs";
 
@@ -84,7 +85,7 @@ async function fetchGalleryUrl(itemId: string): Promise<string | null> {
 export async function GET(req: Request) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
-  const { supabase } = auth;
+  const { supabase, user } = auth;
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {
@@ -173,7 +174,7 @@ export async function GET(req: Request) {
     const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
     const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
     const soldAt = xmlFind(tx, "CreatedDate");
-    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null };
+    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null, estimatedFee: 0 };
   }).filter((s) => {
     if (s.price <= 0) return false;
     const soldMs = Date.parse(s.soldAt);
@@ -238,7 +239,28 @@ export async function GET(req: Request) {
 
   const totalRevenue = sales.reduce((sum, s) => sum + s.total, 0);
 
-  return NextResponse.json({ sales, totalRevenue, days });
+  // Estimated fees/net-profit -- NOT real eBay invoice data. This app's
+  // eBay integration is Trading-API-based (GetSellerTransactions) and was
+  // never granted the sell.finances OAuth scope that would provide actual
+  // per-order fee amounts, so every number here is computed from eBay's
+  // published standard fee schedule (src/lib/ebay-fees.ts), optionally
+  // overridden by the seller's own percentage from Settings. Always
+  // surfaced to the UI clearly labeled as an estimate.
+  const { data: settingsRow } = await supabase
+    .from("app_settings")
+    .select("ebay_fee_percent_override")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const feePercent = isValidFeePercent(settingsRow?.ebay_fee_percent_override)
+    ? settingsRow.ebay_fee_percent_override
+    : EBAY_STANDARD_FEE_PERCENT;
+  for (const sale of sales) {
+    sale.estimatedFee = estimateEbayFee(sale.total, feePercent);
+  }
+  const totalFees = sales.reduce((sum, s) => sum + s.estimatedFee, 0);
+  const netRevenue = totalRevenue - totalFees;
+
+  return NextResponse.json({ sales, totalRevenue, totalFees, netRevenue, feePercent, days });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message, sales: [] }, { status: 500 });
   }

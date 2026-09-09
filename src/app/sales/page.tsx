@@ -18,6 +18,9 @@ function salesCacheKey(days: DayRange) {
 interface CachedSales {
   sales: Sale[];
   totalRevenue: number;
+  totalFees: number;
+  netRevenue: number;
+  feePercent: number;
 }
 
 type DayRange = 7 | 30 | 90;
@@ -30,6 +33,11 @@ interface Sale {
   total: number;
   soldAt: string;
   thumbnail: string | null;
+  // Estimated eBay final value fee for this sale -- see the disclaimer on
+  // the summary card. Always present from the API (defaults to 0 there),
+  // optional here only so an old cached page-cache entry (pre-this-feature)
+  // doesn't crash the render.
+  estimatedFee?: number;
 }
 
 const INITIAL_DAYS: DayRange = 30;
@@ -37,6 +45,9 @@ const INITIAL_DAYS: DayRange = 30;
 export default function SalesPage() {
   const [sales, setSales] = useState<Sale[]>(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.sales ?? []);
   const [totalRevenue, setTotalRevenue] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.totalRevenue ?? 0);
+  const [totalFees, setTotalFees] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.totalFees ?? 0);
+  const [netRevenue, setNetRevenue] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.netRevenue ?? 0);
+  const [feePercent, setFeePercent] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.feePercent ?? 0);
   const displayTotalRevenue = useCountUp(totalRevenue);
   const [loading, setLoading] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS)) === undefined);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +75,7 @@ export default function SalesPage() {
     setNeedsConnect(false);
     setNeedsReconnect(false);
     try {
-      const data = await apiFetch<{ sales?: Sale[]; totalRevenue?: number; error?: string; connect?: boolean; reconnect?: boolean }>(`/api/ebay/sales?days=${d}`);
+      const data = await apiFetch<{ sales?: Sale[]; totalRevenue?: number; totalFees?: number; netRevenue?: number; feePercent?: number; error?: string; connect?: boolean; reconnect?: boolean }>(`/api/ebay/sales?days=${d}`);
       if (data.error) {
         setNeedsConnect(!!data.connect);
         setNeedsReconnect(!!data.reconnect);
@@ -72,9 +83,15 @@ export default function SalesPage() {
       }
       const newSales = data.sales ?? [];
       const newTotalRevenue = data.totalRevenue ?? 0;
+      const newTotalFees = data.totalFees ?? 0;
+      const newNetRevenue = data.netRevenue ?? newTotalRevenue;
+      const newFeePercent = data.feePercent ?? 0;
       setSales(newSales);
       setTotalRevenue(newTotalRevenue);
-      setPageCache(salesCacheKey(d), { sales: newSales, totalRevenue: newTotalRevenue });
+      setTotalFees(newTotalFees);
+      setNetRevenue(newNetRevenue);
+      setFeePercent(newFeePercent);
+      setPageCache(salesCacheKey(d), { sales: newSales, totalRevenue: newTotalRevenue, totalFees: newTotalFees, netRevenue: newNetRevenue, feePercent: newFeePercent });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -158,19 +175,36 @@ export default function SalesPage() {
       })()}
 
       {!loading && !error && sales.length > 0 && (
-        <div className="card p-4 mb-3 flex items-center gap-3">
-          <div
-            className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: "color-mix(in srgb, var(--success) 16%, var(--bg-surface))", color: "var(--success)" }}
-          >
-            <TrendingUp className="w-5 h-5" />
+        <div className="card p-4 mb-3">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "color-mix(in srgb, var(--success) 16%, var(--bg-surface))", color: "var(--success)" }}
+            >
+              <TrendingUp className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
+                {sales.length} item{sales.length !== 1 ? "s" : ""} sold
+              </p>
+              <p className="font-display font-extrabold text-xl">${(displayTotalRevenue ?? 0).toFixed(2)}</p>
+            </div>
           </div>
-          <div>
-            <p className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>
-              {sales.length} item{sales.length !== 1 ? "s" : ""} sold
-            </p>
-            <p className="font-display font-extrabold text-xl">${(displayTotalRevenue ?? 0).toFixed(2)}</p>
+
+          <div className="grid grid-cols-2 gap-3 mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+            <div>
+              <p className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>Est. eBay fees</p>
+              <p className="text-sm font-semibold" style={{ color: "var(--danger)" }}>&minus;${totalFees.toFixed(2)}</p>
+            </div>
+            <div>
+              <p className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>Est. net profit</p>
+              <p className="text-sm font-semibold" style={{ color: "var(--success)" }}>${netRevenue.toFixed(2)}</p>
+            </div>
           </div>
+          <p className="text-[10px] mt-2 leading-relaxed" style={{ color: "var(--text-tertiary)" }}>
+            Estimated at {feePercent}% + eBay&apos;s per-order fee — not your exact eBay invoice.{" "}
+            <Link href="/settings" className="underline">Adjust rate</Link>
+          </p>
         </div>
       )}
 
@@ -283,6 +317,9 @@ export default function SalesPage() {
               </div>
               <div className="flex flex-col items-end gap-1 flex-shrink-0">
                 <p className="text-sm font-medium" style={{ color: "var(--success)" }}>${s.total.toFixed(2)}</p>
+                {typeof s.estimatedFee === "number" && s.estimatedFee > 0 && (
+                  <p className="text-[9.5px]" style={{ color: "var(--text-tertiary)" }}>net ${(s.total - s.estimatedFee).toFixed(2)}</p>
+                )}
                 <a
                   href={`https://www.ebay.com/itm/${s.listingId}`}
                   target="_blank"
