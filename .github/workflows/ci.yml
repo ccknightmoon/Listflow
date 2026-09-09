@@ -1,12 +1,13 @@
 name: CI
 
-# Lint + typecheck on every push and PR. Deliberately does NOT run `next
-# build` -- a full production build needs this app's real secrets
+# Lint + typecheck + unit tests on every push and PR. Deliberately does NOT
+# run `next build` -- a full production build needs this app's real secrets
 # (Supabase, OpenAI, eBay OAuth env vars), none of which exist as GitHub
 # Actions secrets, so a build step here would likely fail for reasons
 # unrelated to whether the code is actually correct and give a misleading
-# red CI status. Lint + typecheck catch the same class of bug (bad
-# imports, type errors, unused vars) without needing any of that.
+# red CI status. Lint + typecheck catch bad imports/types/unused vars; the
+# Vitest suite (src/lib/*.test.ts, no network/secrets needed) covers the
+# app's pricing/shipping/fee/store-category logic directly.
 on:
   push:
     branches: [main]
@@ -32,3 +33,6 @@ jobs:
 
       - name: Typecheck
         run: npx tsc --noEmit
+
+      - name: Test
+        run: npm test
