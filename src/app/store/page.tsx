@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag, RotateCcw } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
@@ -32,6 +32,8 @@ interface StoreListing {
   thumbnail: string | null;
   sku: string | null;
   startTime: string | null;
+  endTime: string | null;
+  status: "active" | "ended";
   draftId?: string | null;
 }
 
@@ -42,6 +44,8 @@ export default function StorePage() {
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
+  const [relisting, setRelisting] = useState<Set<string>>(new Set());
+  const [tab, setTab] = useState<"active" | "ended">("active");
   const [sort, setSort] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
   const [editingPrice, setEditingPrice] = useState<Map<string, string>>(new Map());
@@ -64,7 +68,12 @@ export default function StorePage() {
     // paginated, usually slower for a store of any real size). Neither is
     // painted on its own: see the comment above this function for why.
     const supabasePromise = apiFetch<{ listings?: Array<{ listingId: string; title: string; price: string | null; thumbnail: string | null; sku: string | null; startTime: string | null; draftId: string }> }>("/api/ebay/inventory");
-    const ebayPromise = apiFetch<{ listings?: StoreListing[]; total?: number; error?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/store");
+    // /api/ebay/store's real response never had a `total` field (it's
+    // `activeTotal` + `unsoldTotal`, added when the route started
+    // returning ended/unsold listings too) -- the old `data.total` read
+    // below was always undefined, which silently defeated the
+    // "only trust this as complete" safety check it was guarding.
+    const ebayPromise = apiFetch<{ listings?: StoreListing[]; activeTotal?: number; unsoldTotal?: number; error?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/store");
 
     let supabaseItems: StoreListing[] = [];
     let supabaseListingIds = new Set<string>();
@@ -77,6 +86,8 @@ export default function StorePage() {
         thumbnail: l.thumbnail,
         sku: l.sku,
         startTime: l.startTime,
+        endTime: null,
+        status: "active" as const,
         draftId: l.draftId,
       }));
       supabaseListingIds = new Set(supabaseItems.map((i) => i.listingId));
@@ -92,25 +103,34 @@ export default function StorePage() {
         setNeedsReconnect(!!data.reconnect);
         throw new Error(data.error || "Failed to load store");
       }
+      // Already both active AND ended/unsold listings, each carrying a
+      // real `status`/`endTime` (see toListing() in ebay-listings.ts).
       const ebayListings: StoreListing[] = data.listings ?? [];
-      const total: number = data.total ?? ebayListings.length;
-      const allActiveIds = new Set(ebayListings.map((l) => l.listingId));
+      // The route paginates every page of both lists up to its own safety
+      // cap, so ebayListings.length should always reach activeTotal +
+      // unsoldTotal. This check is a defensive fallback for the rare case
+      // that cap was hit -- when the fetch might be incomplete, "missing
+      // from eBay's set" can't safely be read as "sold", so nothing
+      // Supabase already knew about gets dropped.
+      const expectedTotal = (data.activeTotal ?? 0) + (data.unsoldTotal ?? 0);
+      const complete = ebayListings.length >= expectedTotal;
+      const ebayById = new Map(ebayListings.map((l) => [l.listingId, l]));
       const ebayItems: StoreListing[] = ebayListings
-        .filter((l: StoreListing) => !supabaseListingIds.has(l.listingId))
-        .map((l: StoreListing) => ({
-          listingId: l.listingId,
-          title: l.title,
-          price: l.price,
-          thumbnail: l.thumbnail,
-          sku: l.sku,
-          startTime: l.startTime,
-          draftId: null,
-        }));
-      // Only filter out sold items when we have the complete eBay listing set
-      // (skip if paginated response is incomplete to avoid false negatives)
-      const merged = total <= ebayListings.length
-        ? [...supabaseItems.filter((l) => allActiveIds.has(l.listingId)), ...ebayItems]
-        : [...supabaseItems, ...ebayItems];
+        .filter((l) => !supabaseListingIds.has(l.listingId))
+        .map((l) => ({ ...l, draftId: null }));
+      // Supabase-tracked items: eBay is the source of truth for anything
+      // it still knows about (active or ended) -- take its live
+      // price/status/endTime, keeping only the local draftId link. A
+      // Supabase item eBay has no record of at all is presumed sold once
+      // the fetch above is trusted as complete; otherwise it's kept as-is
+      // rather than guessed at.
+      const reconciledSupabaseItems = supabaseItems
+        .map((l) => {
+          const match = ebayById.get(l.listingId);
+          return match ? { ...match, draftId: l.draftId } : l;
+        })
+        .filter((l) => ebayById.has(l.listingId) || !complete);
+      const merged = [...reconciledSupabaseItems, ...ebayItems];
       setListings(merged);
     } catch (err) {
       // eBay failed — fall back to whatever Supabase had rather than an
@@ -150,6 +170,40 @@ export default function StorePage() {
       setError("Network error");
     } finally {
       setDeleting((prev) => { const next = new Set(prev); next.delete(listing.listingId); return next; });
+    }
+  }
+
+  // Trading API's RelistFixedPriceItem (see relistItemByListingId in
+  // ebay-inventory.ts for why the FixedPriceItem variant, not the plain
+  // RelistItem), same one-Item-ID call pattern as EndItem above -- eBay
+  // assigns a new ItemID to the relisted item by default, so the row swaps
+  // to it rather than staying under the old (still-ended) one. Like every
+  // other irreversible eBay action here, confirmed first.
+  async function handleRelist(listing: StoreListing) {
+    if (!confirm(`Relist "${listing.title}" on eBay? This creates a new active listing from the ended one.`)) return;
+    setRelisting((prev) => new Set(prev).add(listing.listingId));
+    try {
+      const data = await apiFetch<{ error?: string; newListingId?: string }>("/api/ebay/relist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId: listing.listingId }),
+      });
+      if (data.error) {
+        setError(data.error);
+        return;
+      }
+      setListings((prev) => prev.map((l) =>
+        l.listingId === listing.listingId
+          ? { ...l, listingId: data.newListingId ?? l.listingId, status: "active" as const, endTime: null, startTime: new Date().toISOString() }
+          : l
+      ));
+      setBulkSuccessMsg("Relisted — now active again");
+      setTimeout(() => setBulkSuccessMsg(""), 3000);
+      window.dispatchEvent(new Event("listflow:counts-changed"));
+    } catch {
+      setError("Network error");
+    } finally {
+      setRelisting((prev) => { const next = new Set(prev); next.delete(listing.listingId); return next; });
     }
   }
 
@@ -212,13 +266,20 @@ export default function StorePage() {
 
   const q = search.trim().toLowerCase();
 
+  const activeCount = useMemo(() => listings.filter((l) => l.status !== "ended").length, [listings]);
+  const endedCount = useMemo(() => listings.filter((l) => l.status === "ended").length, [listings]);
+  const tabListings = useMemo(
+    () => listings.filter((l) => (tab === "active" ? l.status !== "ended" : l.status === "ended")),
+    [listings, tab]
+  );
+
   // Was recomputed from scratch on every render (every keystroke in search,
   // every price edit, every select-mode toggle) even though listings/search/
   // sort are the only things that actually change the result — worth
   // skipping for a store that can hold hundreds of listings.
   const filtered = useMemo(() => {
-    if (!q) return listings;
-    return listings.filter((l) => {
+    if (!q) return tabListings;
+    return tabListings.filter((l) => {
       const sku = (l.sku ?? "").toLowerCase();
       if (q.length === 1) return sku === q;
       if (sku && (sku === q || sku.startsWith(q))) return true;
@@ -226,7 +287,7 @@ export default function StorePage() {
       const titleWords = l.title.toLowerCase().split(/[\s\-\/,.()&]+/);
       return qWords.every((qw) => titleWords.some((tw) => tw.startsWith(qw)));
     });
-  }, [listings, q]);
+  }, [tabListings, q]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -274,10 +335,12 @@ export default function StorePage() {
             {loading ? "Store" : `Store (${Math.round(displayCount ?? 0)})`}
           </h1>
           {!loading && !error && (
-            <p className="text-xs text-[var(--text-secondary)]">All active eBay listings</p>
+            <p className="text-xs text-[var(--text-secondary)]">
+              {tab === "active" ? "All active eBay listings" : "Recently ended, unsold listings"}
+            </p>
           )}
         </div>
-        {!loading && listings.length > 0 && (
+        {!loading && listings.length > 0 && tab === "active" && (
           selectMode ? (
             <button onClick={() => { setSelectMode(false); setSelected(new Set()); setBulkPrice(""); }} className="text-sm text-[var(--text-secondary)]">Cancel</button>
           ) : (
@@ -303,6 +366,25 @@ export default function StorePage() {
           </div>
           <ChevronRight className="w-4 h-4 text-[var(--text-tertiary)] flex-shrink-0" />
         </Link>
+      )}
+
+      {!loading && !error && listings.length > 0 && (
+        <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}>
+          <button
+            onClick={() => { setTab("active"); setSelectMode(false); setSelected(new Set()); }}
+            className="flex-1 text-sm py-1.5 rounded-lg transition-colors"
+            style={tab === "active" ? { background: "var(--bg-surface)", color: "var(--text-primary)", fontWeight: 500 } : { color: "var(--text-secondary)" }}
+          >
+            Active ({activeCount})
+          </button>
+          <button
+            onClick={() => { setTab("ended"); setSelectMode(false); setSelected(new Set()); }}
+            className="flex-1 text-sm py-1.5 rounded-lg transition-colors"
+            style={tab === "ended" ? { background: "var(--bg-surface)", color: "var(--text-primary)", fontWeight: 500 } : { color: "var(--text-secondary)" }}
+          >
+            Ended ({endedCount})
+          </button>
+        </div>
       )}
 
       {!loading && listings.length > 0 && (
@@ -371,11 +453,19 @@ export default function StorePage() {
 
       {!loading && !error && listings.length === 0 && (
         <div className="card p-8 text-center">
-          <p className="text-sm text-[var(--text-secondary)]">No active eBay listings found.</p>
+          <p className="text-sm text-[var(--text-secondary)]">No eBay listings found.</p>
         </div>
       )}
 
-      {!loading && listings.length > 0 && sorted.length === 0 && (
+      {!loading && listings.length > 0 && tabListings.length === 0 && (
+        <div className="card p-8 text-center">
+          <p className="text-sm text-[var(--text-secondary)]">
+            {tab === "active" ? "No active listings." : "No ended listings — anything unsold recently will show up here."}
+          </p>
+        </div>
+      )}
+
+      {!loading && tabListings.length > 0 && sorted.length === 0 && (
         <div className="card p-8 text-center">
           <p className="text-sm text-[var(--text-secondary)]">No listings match &ldquo;{search.trim()}&rdquo;.</p>
         </div>
@@ -467,64 +557,100 @@ export default function StorePage() {
                     </div>
                   ) : (
                     <p
-                      className="text-xs text-[var(--text-secondary)] mt-0.5 cursor-pointer hover:text-[var(--accent)]"
-                      onClick={() => setEditingPrice((prev) => new Map(prev).set(l.listingId, l.price != null ? l.price.toFixed(2) : ""))}
+                      className={`text-xs text-[var(--text-secondary)] mt-0.5 ${l.status === "ended" ? "" : "cursor-pointer hover:text-[var(--accent)]"}`}
+                      onClick={
+                        l.status === "ended"
+                          ? undefined
+                          : () => setEditingPrice((prev) => new Map(prev).set(l.listingId, l.price != null ? l.price.toFixed(2) : ""))
+                      }
                     >
                       {l.price != null ? `$${l.price.toFixed(2)}` : "Tap to set price"}
                       {l.sku ? ` · SKU: ${l.sku}` : ""}
-                      {l.startTime ? ` · Listed ${timeAgo(l.startTime)}` : ""}
-                      {l.price == null && <span className="ml-1 opacity-40 text-[10px]">edit</span>}
+                      {l.status === "ended"
+                        ? (l.endTime ? ` · Ended ${timeAgo(l.endTime)}` : " · Ended")
+                        : (l.startTime ? ` · Listed ${timeAgo(l.startTime)}` : "")}
+                      {l.price == null && l.status !== "ended" && <span className="ml-1 opacity-40 text-[10px]">edit</span>}
                     </p>
                   )}
                 </div>
               </div>
 
               <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--border)]">
-                <a
-                  href={`https://www.ebay.com/sh/edit-item/${l.listingId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                  Edit on eBay
-                </a>
-                <div className="w-px h-4 bg-[var(--border)]" />
-                <a
-                  href={`https://www.ebay.com/itm/${l.listingId}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                  View
-                </a>
-                {l.draftId && (
+                {l.status === "ended" ? (
                   <>
-                    <div className="w-px h-4 bg-[var(--border)]" />
-                    <Link
-                      href={`/drafts/${l.draftId}`}
+                    <a
+                      href={`https://www.ebay.com/itm/${l.listingId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
                     >
-                      <ChevronRight className="w-3.5 h-3.5" />
-                      Edit
-                    </Link>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      View
+                    </a>
+                    <div className="w-px h-4 bg-[var(--border)]" />
+                    <button
+                      onClick={() => handleRelist(l)}
+                      disabled={relisting.has(l.listingId)}
+                      className="tap flex items-center gap-1 text-xs flex-1 justify-center py-1 disabled:opacity-50"
+                      style={{ color: "var(--accent)" }}
+                    >
+                      {relisting.has(l.listingId) ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      )}
+                      {relisting.has(l.listingId) ? "Relisting..." : "Relist"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <a
+                      href={`https://www.ebay.com/sh/edit-item/${l.listingId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                      Edit on eBay
+                    </a>
+                    <div className="w-px h-4 bg-[var(--border)]" />
+                    <a
+                      href={`https://www.ebay.com/itm/${l.listingId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      View
+                    </a>
+                    {l.draftId && (
+                      <>
+                        <div className="w-px h-4 bg-[var(--border)]" />
+                        <Link
+                          href={`/drafts/${l.draftId}`}
+                          className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
+                        >
+                          <ChevronRight className="w-3.5 h-3.5" />
+                          Edit
+                        </Link>
+                      </>
+                    )}
+                    <div className="w-px h-4 bg-[var(--border)]" />
+                    <button
+                      onClick={() => handleDelist(l)}
+                      disabled={deleting.has(l.listingId)}
+                      className="tap flex items-center gap-1 text-xs flex-1 justify-center py-1 disabled:opacity-50"
+                      style={{ color: "var(--danger)" }}
+                    >
+                      {deleting.has(l.listingId) ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-3.5 h-3.5" />
+                      )}
+                      {deleting.has(l.listingId) ? "Ending..." : "Delist"}
+                    </button>
                   </>
                 )}
-                <div className="w-px h-4 bg-[var(--border)]" />
-                <button
-                  onClick={() => handleDelist(l)}
-                  disabled={deleting.has(l.listingId)}
-                  className="tap flex items-center gap-1 text-xs flex-1 justify-center py-1 disabled:opacity-50"
-                  style={{ color: "var(--danger)" }}
-                >
-                  {deleting.has(l.listingId) ? (
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="w-3.5 h-3.5" />
-                  )}
-                  {deleting.has(l.listingId) ? "Ending..." : "Delist"}
-                </button>
               </div>
             </div>
           ))}

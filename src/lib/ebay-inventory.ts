@@ -658,3 +658,32 @@ export async function endItemByListingId(listingId: string): Promise<{ success: 
     return { success: false, error: (e as Error).message };
   }
 }
+
+// Uses Trading API RelistFixedPriceItem (not the plain RelistItem call --
+// eBay's docs are explicit that fixed-price listings, which is all this
+// app ever creates, must use the FixedPriceItem variant) to bring an
+// ended, unsold listing back as a new active one. Per eBay's docs, the
+// original Item.ItemID is the only field required for a same-as-before
+// relist, and eBay assigns a NEW ItemID to the relisted item by default --
+// so the caller needs to swap to whatever ID comes back; the old one stays
+// ended. A relist with no changes is typically free.
+export async function relistItemByListingId(listingId: string): Promise<{ success: boolean; newItemId?: string; error?: string }> {
+  if (!isValidEbayItemId(listingId)) {
+    return { success: false, error: `Invalid eBay item ID: "${listingId}"` };
+  }
+  try {
+    const { body } = await tradingRequest(
+      "RelistFixedPriceItem",
+      `<?xml version="1.0" encoding="utf-8"?><RelistFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><Item><ItemID>${listingId}</ItemID></Item></RelistFixedPriceItemRequest>`
+    );
+    if (body.includes("<Ack>Success</Ack>") || body.includes("<Ack>Warning</Ack>")) {
+      const newItemId = body.match(/<ItemID>(.*?)<\/ItemID>/)?.[1];
+      return { success: true, newItemId };
+    }
+    const match = body.match(/<LongMessage>(.*?)<\/LongMessage>/);
+    const shortMatch = body.match(/<ShortMessage>(.*?)<\/ShortMessage>/);
+    return { success: false, error: match?.[1] ?? shortMatch?.[1] ?? body.slice(0, 300) };
+  } catch (e) {
+    return { success: false, error: (e as Error).message };
+  }
+}
