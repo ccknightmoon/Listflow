@@ -18,19 +18,25 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("app_settings")
-    .select("default_shipping_mode, store_description_footer, accent_color")
+    .select("default_shipping_mode, store_description_footer, accent_color, auto_detect_item_dividers")
     .eq("user_id", user.id)
     .maybeSingle();
 
   if (error || !data) {
     // No row yet for this user (never saved Settings before) — fall back
-    // to "free"/no footer/indigo rather than failing the page.
-    return NextResponse.json({ defaultShippingMode: "free", storeDescriptionFooter: "", accentColor: "indigo" });
+    // to "free"/no footer/indigo/off rather than failing the page.
+    return NextResponse.json({
+      defaultShippingMode: "free",
+      storeDescriptionFooter: "",
+      accentColor: "indigo",
+      autoDetectItemDividers: false,
+    });
   }
   return NextResponse.json({
     defaultShippingMode: data.default_shipping_mode,
     storeDescriptionFooter: data.store_description_footer ?? "",
     accentColor: data.accent_color ?? "indigo",
+    autoDetectItemDividers: data.auto_detect_item_dividers ?? false,
   });
 }
 
@@ -40,7 +46,7 @@ export async function PATCH(req: NextRequest) {
   const { supabase, user } = auth;
 
   const body = await req.json();
-  const { defaultShippingMode, storeDescriptionFooter, accentColor } = body;
+  const { defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers } = body;
 
   if (defaultShippingMode !== undefined && defaultShippingMode !== "free" && defaultShippingMode !== "calculated") {
     return NextResponse.json({ error: "defaultShippingMode must be 'free' or 'calculated'" }, { status: 400 });
@@ -56,16 +62,20 @@ export async function PATCH(req: NextRequest) {
   if (accentColor !== undefined && !ACCENT_COLORS.includes(accentColor)) {
     return NextResponse.json({ error: `accentColor must be one of: ${ACCENT_COLORS.join(", ")}` }, { status: 400 });
   }
+  if (autoDetectItemDividers !== undefined && typeof autoDetectItemDividers !== "boolean") {
+    return NextResponse.json({ error: "autoDetectItemDividers must be a boolean" }, { status: 400 });
+  }
 
   const payload: Record<string, unknown> = { user_id: user.id, updated_at: new Date().toISOString() };
   if (defaultShippingMode !== undefined) payload.default_shipping_mode = defaultShippingMode;
   if (storeDescriptionFooter !== undefined) payload.store_description_footer = storeDescriptionFooter;
   if (accentColor !== undefined) payload.accent_color = accentColor;
+  if (autoDetectItemDividers !== undefined) payload.auto_detect_item_dividers = autoDetectItemDividers;
 
   const { error } = await supabase
     .from("app_settings")
     .upsert(payload, { onConflict: "user_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor });
+  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers });
 }

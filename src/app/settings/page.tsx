@@ -19,6 +19,8 @@ import {
   UserCircle,
   Trash2,
   FileText,
+  ScanLine,
+  Sparkles,
 } from "lucide-react";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
@@ -49,6 +51,15 @@ export default function SettingsPage() {
   const [theme, setTheme] = useState<Theme>("system");
   const [accent, setAccent] = useState<AccentColor>("indigo");
   const [accentSaving, setAccentSaving] = useState(false);
+
+  // Batch-upload item-divider grouping mode (Settings -> "Batch upload:
+  // item dividers"). Off by default -- see supabase-migrations/013 and
+  // src/app/api/detect-item-dividers/route.ts for what turning this on
+  // actually changes in the batch-upload flow.
+  const [autoDetectDividers, setAutoDetectDividers] = useState(false);
+  const [autoDetectSaving, setAutoDetectSaving] = useState(false);
+  const [autoDetectSaved, setAutoDetectSaved] = useState(false);
+  const [autoDetectError, setAutoDetectError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -85,10 +96,35 @@ export default function SettingsPage() {
           : "indigo";
         setAccent(serverAccent);
         setStoredAccent(serverAccent);
+        setAutoDetectDividers(!!data.autoDetectItemDividers);
       })
       .catch(() => setError("Could not load settings"))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handleAutoDetectToggle(next: boolean) {
+    if (next === autoDetectDividers || autoDetectSaving) return;
+    const prev = autoDetectDividers;
+    setAutoDetectDividers(next);
+    setAutoDetectSaving(true);
+    setAutoDetectSaved(false);
+    setAutoDetectError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoDetectItemDividers: next }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setAutoDetectSaved(true);
+      setTimeout(() => setAutoDetectSaved(false), 2000);
+    } catch {
+      setAutoDetectDividers(prev);
+      setAutoDetectError("Could not save — try again.");
+    } finally {
+      setAutoDetectSaving(false);
+    }
+  }
 
   async function handleSaveFooter() {
     if (footerSaving) return;
@@ -413,6 +449,44 @@ export default function SettingsPage() {
 
       <SettingsSection
         delay="d3"
+        title="Batch upload: item dividers"
+        description="While uploading a batch, you can always mark where one item's photos end and the next begin for free, with no AI involved -- that skips the AI grouping step for that batch automatically. Turn this on too if you also shoot a numbered marker (a card, a tag, the outside of a poly bag -- whatever you use) as the last photo of each item: the app reads the number, uses it to mark that item's boundary, auto-fills it as the item's SKU, and leaves the marker photo out of the actual listing photos."
+        icon={ScanLine}
+      >
+        <div className="flex flex-col gap-3">
+          <OptionCard
+            icon={Sparkles}
+            title="Off — group with AI only"
+            description="Default. Upload photos in order and AI groups them by comparing photos. You can still tap manual dividers on the upload screen any time -- that always skips AI grouping for that batch, whether this is on or off."
+            selected={!autoDetectDividers}
+            onClick={() => handleAutoDetectToggle(false)}
+          />
+          <OptionCard
+            icon={ScanLine}
+            title="On — auto-detect from a numbered marker photo"
+            description="End each item's photos with a shot of its number. The app finds it, reads the number, marks the item boundary, fills in the SKU field, and drops the marker photo from the listing -- no AI grouping call needed for that item."
+            selected={autoDetectDividers}
+            onClick={() => handleAutoDetectToggle(true)}
+          />
+        </div>
+
+        {autoDetectError && (
+          <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{autoDetectError}</p>
+        )}
+        {autoDetectSaving && (
+          <p className="text-xs text-[var(--text-secondary)] flex items-center gap-1 mt-2">
+            <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+          </p>
+        )}
+        {autoDetectSaved && (
+          <p className="text-xs flex items-center gap-1 mt-2" style={{ color: "var(--success)" }}>
+            <Check className="w-3 h-3" /> Saved
+          </p>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        delay="d4"
         title="Store description"
         description="Write your shop's boilerplate once — welcome message, policies, a sign-off, whatever you'd normally paste into every listing. It gets added to the end of every item's description automatically when you list it. Each item's own description above this only ever has that item's own details; you never see or edit this text on the listing screens."
         icon={FileText}
@@ -444,7 +518,7 @@ export default function SettingsPage() {
       </SettingsSection>
 
       <SettingsSection
-        delay="d4"
+        delay="d5"
         title="eBay Connection"
         description="Each account connects its own eBay seller account — your listings, categories, and shipping/return policies are yours alone, never shared with anyone else signed in."
         icon={Store}
@@ -533,7 +607,7 @@ export default function SettingsPage() {
         )}
       </SettingsSection>
 
-      <SettingsSection delay="d5" title="Account" icon={UserCircle}>
+      <SettingsSection delay="d6" title="Account" icon={UserCircle}>
         <button
           onClick={handleSignOut}
           disabled={signingOut}

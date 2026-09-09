@@ -144,6 +144,56 @@ function resizeImage(file: File): Promise<{ dataUrl: string; mediaType: string }
   });
 }
 
+// Builds groups from photo indices the seller explicitly tapped as "last
+// photo of this item" on the upload screen. Unlike the AI-detected-marker
+// version below, a manually tapped divider photo IS a real item photo
+// (the seller is marking their own last shot, not a separate throwaway
+// marker), so it stays IN the group it closes.
+function buildGroupsFromManualDividers(dividerIndices: Set<number>, totalPhotos: number): number[][] {
+  const sorted = Array.from(dividerIndices).sort((a, b) => a - b);
+  const groups: number[][] = [];
+  let start = 0;
+  for (const d of sorted) {
+    if (d < start || d >= totalPhotos) continue;
+    groups.push(Array.from({ length: d - start + 1 }, (_, k) => start + k));
+    start = d + 1;
+  }
+  if (start < totalPhotos) {
+    groups.push(Array.from({ length: totalPhotos - start }, (_, k) => start + k));
+  }
+  return groups;
+}
+
+// Builds groups from AI-detected number-marker photos (Settings -> "Batch
+// upload: item dividers" -> On). The marker photo itself is a throwaway
+// (a card/tag/bag shot, not the item), so unlike a manual divider it is
+// EXCLUDED from the group it closes rather than kept as that item's last
+// photo -- see /api/detect-item-dividers. Also returns which group (by
+// index into the returned array) each marker's code belongs to, so the
+// caller can pre-fill that item's SKU field.
+function buildGroupsFromMarkers(
+  markers: { index: number; code: string }[],
+  totalPhotos: number
+): { groups: number[][]; skuByGroupIndex: Record<number, string> } {
+  const sorted = [...markers].sort((a, b) => a.index - b.index);
+  const groups: number[][] = [];
+  const skuByGroupIndex: Record<number, string> = {};
+  let start = 0;
+  for (const marker of sorted) {
+    const d = marker.index;
+    if (d < start || d >= totalPhotos) continue;
+    if (d > start) {
+      groups.push(Array.from({ length: d - start }, (_, k) => start + k));
+      skuByGroupIndex[groups.length - 1] = marker.code;
+    }
+    start = d + 1;
+  }
+  if (start < totalPhotos) {
+    groups.push(Array.from({ length: totalPhotos - start }, (_, k) => start + k));
+  }
+  return { groups, skuByGroupIndex };
+}
+
 export default function BatchUploadPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("upload");
@@ -170,6 +220,15 @@ export default function BatchUploadPage() {
   const [analyzingProgress, setAnalyzingProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [groupingProgress, setGroupingProgress] = useState<string>("");
+  // Photo indices the seller tapped as "last photo of this item" on the
+  // upload screen (Scissors button on each thumbnail). Any non-empty set
+  // here always wins over both AI grouping paths in handleGroupPhotos --
+  // it's the most explicit signal available, costs nothing, and can't be
+  // wrong the way an AI guess can.
+  const [manualDividers, setManualDividers] = useState<Set<number>>(new Set());
+  // Settings -> "Batch upload: item dividers" -> On. Fetched once on
+  // mount; see /api/detect-item-dividers and buildGroupsFromMarkers above.
+  const [autoDetectDividers, setAutoDetectDividers] = useState(false);
   // Bulk-edit selection on the results screen — lets a seller set condition
   // or heavy-item shipping across many items at once instead of one row at
   // a time, the single most-requested gap found in the "list 40 a day"
@@ -211,9 +270,29 @@ export default function BatchUploadPage() {
   const [undoGroups, setUndoGroups] = useState<number[][] | null>(null);
   const [undoLabel, setUndoLabel] = useState("");
 
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => setAutoDetectDividers(!!data.autoDetectItemDividers))
+      .catch(() => {});
+  }, []);
+
+  // Toggles photoIndex as an "end of item" divider on the upload screen.
+  // Any non-empty manualDividers set makes handleGroupPhotos skip AI
+  // grouping entirely -- see buildGroupsFromManualDividers above.
+  function toggleDivider(photoIndex: number) {
+    setManualDividers((prev) => {
+      const next = new Set(prev);
+      if (next.has(photoIndex)) next.delete(photoIndex);
+      else next.add(photoIndex);
+      return next;
+    });
+  }
+
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError(null);
+    setManualDividers(new Set());
 
     const fileArray = Array.from(files).slice(0, MAX_PHOTOS);
 
@@ -309,6 +388,18 @@ export default function BatchUploadPage() {
 
   async function handleGroupPhotos() {
     setError(null);
+
+    // Manual dividers are the most explicit signal available -- if the
+    // seller tapped any, skip AI grouping entirely (free, instant, and
+    // can't be mis-grouped) instead of the two AI-based paths below.
+    if (manualDividers.size > 0) {
+      const finalGroups = buildGroupsFromManualDividers(manualDividers, photos.length);
+      setManualDividers(new Set());
+      setGroups(finalGroups);
+      setStep("review");
+      return;
+    }
+
     setStep("grouping");
 
     try {
@@ -324,6 +415,57 @@ export default function BatchUploadPage() {
       );
 
       const totalPhotos = thumbnails.length;
+
+      if (autoDetectDividers) {
+        // Settings -> "Batch upload: item dividers" -> On. Each chunk is
+        // an independent per-photo classification (unlike the
+        // similarity-grouping chunks below, no group can straddle a
+        // chunk boundary), so chunks are safe to run concurrently instead
+        // of strictly one after another.
+        const chunks: { start: number; images: Thumbnail[] }[] = [];
+        for (let start = 0; start < totalPhotos; start += GROUPING_CHUNK_SIZE) {
+          chunks.push({ start, images: thumbnails.slice(start, start + GROUPING_CHUNK_SIZE) });
+        }
+
+        const DIVIDER_DETECT_CONCURRENCY = 3;
+        const chunkMarkers: { index: number; code: string }[][] = new Array(chunks.length);
+        let detectCursor = 0;
+        async function detectWorker() {
+          while (detectCursor < chunks.length) {
+            const c = detectCursor++;
+            const chunk = chunks[c];
+            const data = await apiFetch<{ markers?: { index: number; code: string }[]; error?: string }>(
+              "/api/detect-item-dividers",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ images: chunk.images }),
+              }
+            );
+            if (!data.markers) throw new Error(data.error || "Divider detection failed");
+            chunkMarkers[c] = data.markers.map((m) => ({ index: m.index + chunk.start, code: m.code }));
+          }
+        }
+        await Promise.all(
+          Array.from({ length: Math.min(DIVIDER_DETECT_CONCURRENCY, chunks.length) }, () => detectWorker())
+        );
+
+        const markers = chunkMarkers.flat();
+
+        if (markers.length > 0) {
+          const { groups: finalMarkerGroups, skuByGroupIndex } = buildGroupsFromMarkers(markers, totalPhotos);
+          setGroups(finalMarkerGroups);
+          if (Object.keys(skuByGroupIndex).length > 0) {
+            setCustomSkus((prev) => ({ ...prev, ...skuByGroupIndex }));
+          }
+          setStep("review");
+          return;
+        }
+        // Setting is on but this batch had no marker photos -- fall
+        // through to AI-similarity grouping below instead of leaving the
+        // seller with nothing.
+      }
+
       const finalGroups: number[][] = [];
       let pending: number[] = [];
       let cursor = 0;
@@ -1174,22 +1316,50 @@ export default function BatchUploadPage() {
               <p className="text-sm text-[var(--text-secondary)] mb-2">
                 {photos.length} photo{photos.length !== 1 ? "s" : ""} selected
               </p>
+              <p className="text-xs text-[var(--text-tertiary)] mb-2">
+                Optional: tap <Scissors className="inline w-3 h-3 -mt-0.5" /> on
+                a photo to mark it as the last photo of that item — this
+                skips AI grouping for this batch and uses your taps exactly
+                as marked.
+              </p>
+              {manualDividers.size > 0 && (
+                <p className="text-xs mb-2" style={{ color: "var(--accent)" }}>
+                  {manualDividers.size + 1} item{manualDividers.size > 0 ? "s" : ""} marked
+                </p>
+              )}
               <div className="grid grid-cols-4 gap-2 mb-4">
-                {photos.map((p, i) => (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    key={i}
-                    src={p.previewUrl}
-                    alt={`Photo ${i + 1}`}
-                    loading="lazy"
-                    decoding="async"
-                    className="aspect-square object-cover rounded-md"
-                  />
-                ))}
+                {photos.map((p, i) => {
+                  const isDivider = manualDividers.has(i);
+                  return (
+                    <div key={i} className="relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={p.previewUrl}
+                        alt={`Photo ${i + 1}`}
+                        loading="lazy"
+                        decoding="async"
+                        className="aspect-square object-cover rounded-md"
+                        style={isDivider ? { outline: "2px solid var(--accent)", outlineOffset: 2 } : undefined}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => toggleDivider(i)}
+                        className="absolute bottom-1 right-1 w-6 h-6 rounded-full flex items-center justify-center"
+                        style={{
+                          background: isDivider ? "var(--accent)" : "color-mix(in srgb, black 55%, transparent)",
+                          color: "white",
+                        }}
+                        aria-label={isDivider ? "Unmark end of item" : "Mark as last photo of this item"}
+                      >
+                        <Scissors className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
               <button onClick={handleGroupPhotos} className="btn btn-primary w-full">
                 <Sparkles className="w-4 h-4" />
-                Group photos into items
+                {manualDividers.size > 0 ? "Split into items" : "Group photos into items"}
               </button>
             </>
           )}
