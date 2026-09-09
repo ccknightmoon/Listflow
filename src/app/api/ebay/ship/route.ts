@@ -3,20 +3,13 @@ import { tradingRequest } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
+import { fetchUnshippedOrders, type UnshippedOrder } from "@/lib/ebay-ship-orders";
 
 export const runtime = "nodejs";
 
 function xmlFind(xml: string, tag: string): string {
   const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
   return m?.[1]?.trim() ?? "";
-}
-
-function xmlFindAll(xml: string, tag: string): string[] {
-  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "g");
-  const results: string[] = [];
-  let m;
-  while ((m = re.exec(xml)) !== null) results.push(m[1].trim());
-  return results;
 }
 
 // Same limitation documented in /api/ebay/sales/route.ts: GetSellerTransactions'
@@ -86,73 +79,19 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const includeThumbnails = searchParams.get("thumbnails") !== "0";
 
-  const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const to = new Date().toISOString();
-
-  const result = await tradingRequest(
-    "GetSellerTransactions",
-    `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailLevel>ReturnAll</DetailLevel><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetSellerTransactionsRequest>`
-  );
-
-  if (!result.body.includes("<Ack>Success</Ack>")) {
-    const errMsg = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
-    // "Not connected" is already checked up front via requireEbayConnection()
-    // before this ever runs.
-    const isAuth = errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission");
+  // Core "fetch transactions, keep only paid-but-unshipped" logic now
+  // lives in src/lib/ebay-ship-orders.ts, shared with the daily-digest
+  // cron -- this route layers thumbnail lookups (below) on top, which the
+  // cron (count-only) has no need for.
+  const fetchResult = await fetchUnshippedOrders();
+  if (fetchResult.error) {
     return NextResponse.json(
-      { error: errMsg, items: [], count: 0, connect: false, reconnect: isAuth },
+      { error: fetchResult.error, items: [], count: 0, connect: fetchResult.connect ?? false, reconnect: fetchResult.reconnect ?? false },
       { status: 200 }
     );
   }
 
-  const txBlocks = xmlFindAll(result.body, "Transaction");
-
-  const items = txBlocks
-    .map((tx) => {
-      const paidTime = xmlFind(tx, "PaidTime");
-      const shippedTime = xmlFind(tx, "ShippedTime");
-
-      // Only items that have been paid but not yet shipped
-      if (!paidTime || shippedTime) return null;
-
-      const itemBlock = xmlFind(tx, "Item");
-      const listingId = xmlFind(itemBlock, "ItemID");
-      const title = xmlFind(itemBlock, "Title") || xmlFind(tx, "Title");
-      const transactionId = xmlFind(tx, "TransactionID");
-      const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
-      const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
-      const pictureDetails = xmlFind(itemBlock, "PictureDetails");
-      const galleryUrl = xmlFind(pictureDetails, "GalleryURL") || xmlFind(itemBlock, "GalleryURL") || null;
-
-      const buyerBlock = xmlFind(tx, "Buyer");
-      const buyerInfoBlock = xmlFind(buyerBlock, "BuyerInfo");
-      const addrBlock = xmlFind(buyerInfoBlock, "ShippingAddress");
-
-      const addrName = xmlFind(addrBlock, "Name");
-      const street1 = xmlFind(addrBlock, "Street1");
-      const street2 = xmlFind(addrBlock, "Street2");
-      const city = xmlFind(addrBlock, "CityName");
-      const state = xmlFind(addrBlock, "StateOrProvince");
-      const zip = xmlFind(addrBlock, "PostalCode");
-
-      const address = (city || state || zip)
-        ? { name: addrName, street1, street2, city, state, zip }
-        : null;
-
-      return {
-        listingId,
-        transactionId,
-        title,
-        price,
-        qty,
-        total: price * qty,
-        paidAt: paidTime,
-        address,
-        thumbnail: null as string | null,
-        galleryUrl,
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => item !== null);
+  const items: (UnshippedOrder & { thumbnail: string | null })[] = fetchResult.items.map((item) => ({ ...item, thumbnail: null }));
 
   // Look up thumbnails from Supabase first (instant, no extra eBay calls -
   // covers every item that was actually listed through this app).

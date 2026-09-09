@@ -18,17 +18,33 @@ import { Redis } from "@upstash/redis";
 //   block below (that check runs before this public-path bypass, on
 //   purpose — see the comment there) and does its own email-shape
 //   validation and service-role-scoped RPC calls internally.
+// - "/api/cron" (both api/cron/purge-deleted-accounts and
+//   api/cron/daily-digest) is added here Sept 9, 2026, fixing a real bug
+//   found while building the digest route: Vercel Cron's actual HTTP
+//   request carries no Supabase session cookie at all (only
+//   `Authorization: Bearer $CRON_SECRET`), so without this carve-out the
+//   "!user -> 401 JSON" check further down fired FIRST, on every single
+//   cron-triggered request, before either route's own CRON_SECRET check
+//   ever ran — meaning the daily account-purge cron has very likely never
+//   actually succeeded on its Vercel-triggered schedule since this
+//   middleware was rewritten to cover every /api path (confirmed locally:
+//   both cron routes returned this middleware's own "Not authenticated"
+//   body even with a Bearer token attached, never reaching their own
+//   "Not authorized" check). Safe to make public the same way
+//   /api/ebay/callback and /api/auth/lockout already are: both cron
+//   routes do their own CRON_SECRET check internally and refuse anything
+//   else, so an anonymous request here still gets nothing but a 401.
 //
 // IMPORTANT: /api routes are NEVER made public as a blanket rule here.
-// Every /api/* route other than the two above must fall through to the
-// same "!user -> 401 JSON" check further down. A version of this file
-// briefly existed (as an unused, never-deployed duplicate at the project
-// root) that treated ALL "/api" paths as public — that would have made
-// every API route reachable with zero authentication, reopening exactly
-// the bypass this middleware was rewritten to close. Do not reintroduce
-// a blanket "/api" public rule.
+// Every /api/* route other than the ones explicitly listed above must
+// fall through to the same "!user -> 401 JSON" check further down. A
+// version of this file briefly existed (as an unused, never-deployed
+// duplicate at the project root) that treated ALL "/api" paths as public
+// — that would have made every API route reachable with zero
+// authentication, reopening exactly the bypass this middleware was
+// rewritten to close. Do not reintroduce a blanket "/api" public rule.
 const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms", "/forgot-password", "/reset-password"];
-const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout"];
+const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout", "/api/cron"];
 
 // Self-service account deletion (src/lib/account-deletion.ts): a signed-in
 // user with a pending deletion request is locked to /account/pending-deletion

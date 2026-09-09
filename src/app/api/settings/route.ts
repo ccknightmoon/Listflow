@@ -19,7 +19,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("app_settings")
-    .select("default_shipping_mode, store_description_footer, accent_color, auto_detect_item_dividers, ai_store_category_suggestions, ebay_fee_percent_override")
+    .select("default_shipping_mode, store_description_footer, accent_color, auto_detect_item_dividers, ai_store_category_suggestions, ebay_fee_percent_override, notification_email_enabled, notification_email_hour_utc")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -33,6 +33,8 @@ export async function GET() {
       autoDetectItemDividers: false,
       aiStoreCategorySuggestions: false,
       ebayFeePercentOverride: null,
+      notificationEmailEnabled: true,
+      notificationEmailHourUtc: 13,
     });
   }
   return NextResponse.json({
@@ -42,6 +44,8 @@ export async function GET() {
     autoDetectItemDividers: data.auto_detect_item_dividers ?? false,
     aiStoreCategorySuggestions: data.ai_store_category_suggestions ?? false,
     ebayFeePercentOverride: data.ebay_fee_percent_override ?? null,
+    notificationEmailEnabled: data.notification_email_enabled ?? true,
+    notificationEmailHourUtc: data.notification_email_hour_utc ?? 13,
   });
 }
 
@@ -51,7 +55,7 @@ export async function PATCH(req: NextRequest) {
   const { supabase, user } = auth;
 
   const body = await req.json();
-  const { defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride } = body;
+  const { defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc } = body;
 
   if (defaultShippingMode !== undefined && defaultShippingMode !== "free" && defaultShippingMode !== "calculated") {
     return NextResponse.json({ error: "defaultShippingMode must be 'free' or 'calculated'" }, { status: 400 });
@@ -78,6 +82,17 @@ export async function PATCH(req: NextRequest) {
   if (ebayFeePercentOverride !== undefined && ebayFeePercentOverride !== null && !isValidFeePercent(ebayFeePercentOverride)) {
     return NextResponse.json({ error: "ebayFeePercentOverride must be a number between 0 and 100, or null" }, { status: 400 });
   }
+  if (notificationEmailEnabled !== undefined && typeof notificationEmailEnabled !== "boolean") {
+    return NextResponse.json({ error: "notificationEmailEnabled must be a boolean" }, { status: 400 });
+  }
+  // 0-23 -- see migration 019's comment on this column for why this is a
+  // plain UTC hour rather than a full local time + timezone.
+  if (
+    notificationEmailHourUtc !== undefined &&
+    (!Number.isInteger(notificationEmailHourUtc) || notificationEmailHourUtc < 0 || notificationEmailHourUtc > 23)
+  ) {
+    return NextResponse.json({ error: "notificationEmailHourUtc must be an integer between 0 and 23" }, { status: 400 });
+  }
 
   const payload: Record<string, unknown> = { user_id: user.id, updated_at: new Date().toISOString() };
   if (defaultShippingMode !== undefined) payload.default_shipping_mode = defaultShippingMode;
@@ -86,11 +101,13 @@ export async function PATCH(req: NextRequest) {
   if (autoDetectItemDividers !== undefined) payload.auto_detect_item_dividers = autoDetectItemDividers;
   if (aiStoreCategorySuggestions !== undefined) payload.ai_store_category_suggestions = aiStoreCategorySuggestions;
   if (ebayFeePercentOverride !== undefined) payload.ebay_fee_percent_override = ebayFeePercentOverride;
+  if (notificationEmailEnabled !== undefined) payload.notification_email_enabled = notificationEmailEnabled;
+  if (notificationEmailHourUtc !== undefined) payload.notification_email_hour_utc = notificationEmailHourUtc;
 
   const { error } = await supabase
     .from("app_settings")
     .upsert(payload, { onConflict: "user_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride });
+  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc });
 }

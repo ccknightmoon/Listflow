@@ -23,12 +23,33 @@ import {
   Sparkles,
   Tags,
   DollarSign,
+  Mail,
 } from "lucide-react";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
 import { EBAY_STANDARD_FEE_PERCENT } from "@/lib/ebay-fees";
 
 type DefaultShippingMode = "free" | "calculated";
+
+// Converts between the server's stored UTC hour (app_settings.
+// notification_email_hour_utc, an integer 0-23) and an <input type="time">
+// value in the browser's own local timezone. Rounds to the nearest UTC
+// hour rather than truncating, since a half/quarter-hour-offset timezone
+// (e.g. India, Nepal) can't be represented exactly by a whole-hour column
+// -- see the state comment above where these are used.
+function utcHourToLocalTimeString(hourUtc: number): string {
+  const d = new Date();
+  d.setUTCHours(hourUtc, 0, 0, 0);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+function localTimeStringToUtcHour(time: string): number {
+  const [h, m] = time.split(":").map(Number);
+  const d = new Date();
+  d.setHours(h, m || 0, 0, 0);
+  const utcMinutes = d.getUTCHours() * 60 + d.getUTCMinutes();
+  return Math.round(utcMinutes / 60) % 24;
+}
 
 interface EbayPolicy {
   id: string;
@@ -85,6 +106,23 @@ export default function SettingsPage() {
   const [feePercentSaved, setFeePercentSaved] = useState(false);
   const [feePercentError, setFeePercentError] = useState<string | null>(null);
 
+  // "Email alerts" -- once-a-day digest, see src/app/api/cron/daily-digest.
+  // The hour is stored server-side as a plain UTC integer (0-23,
+  // app_settings.notification_email_hour_utc); this page only ever
+  // converts to/from the seller's own local clock for display, so an
+  // <input type="time"> here always reads back as "about" the same local
+  // time later, possibly off by up to 30 minutes for a handful of
+  // half/quarter-hour-offset timezones (rounded to the nearest UTC hour),
+  // and by exactly one hour across a DST transition (the stored UTC hour
+  // never drifts, but its local-time meaning does) -- documented rather
+  // than solved with a full IANA-timezone column, which felt like more
+  // machinery than a single-seller app's "roughly this time of day" needs.
+  const [notificationEmailEnabled, setNotificationEmailEnabled] = useState(true);
+  const [notificationEmailHourUtc, setNotificationEmailHourUtc] = useState(13);
+  const [notificationSaving, setNotificationSaving] = useState(false);
+  const [notificationSaved, setNotificationSaved] = useState(false);
+  const [notificationError, setNotificationError] = useState<string | null>(null);
+
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -126,6 +164,8 @@ export default function SettingsPage() {
         const override = typeof data.ebayFeePercentOverride === "number" ? data.ebayFeePercentOverride : null;
         setSavedFeePercentOverride(override);
         setFeePercentInput(override !== null ? String(override) : "");
+        setNotificationEmailEnabled(data.notificationEmailEnabled ?? true);
+        setNotificationEmailHourUtc(typeof data.notificationEmailHourUtc === "number" ? data.notificationEmailHourUtc : 13);
       })
       .catch(() => setError("Could not load settings"))
       .finally(() => setLoading(false));
@@ -176,6 +216,54 @@ export default function SettingsPage() {
       setAiStoreCategoryError("Could not save — try again.");
     } finally {
       setAiStoreCategorySaving(false);
+    }
+  }
+
+  async function handleNotificationToggle(next: boolean) {
+    if (next === notificationEmailEnabled || notificationSaving) return;
+    const prev = notificationEmailEnabled;
+    setNotificationEmailEnabled(next);
+    setNotificationSaving(true);
+    setNotificationSaved(false);
+    setNotificationError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notificationEmailEnabled: next }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setNotificationSaved(true);
+      setTimeout(() => setNotificationSaved(false), 2000);
+    } catch {
+      setNotificationEmailEnabled(prev);
+      setNotificationError("Could not save -- try again.");
+    } finally {
+      setNotificationSaving(false);
+    }
+  }
+
+  async function handleNotificationHourChange(nextHourUtc: number) {
+    if (nextHourUtc === notificationEmailHourUtc || notificationSaving) return;
+    const prev = notificationEmailHourUtc;
+    setNotificationEmailHourUtc(nextHourUtc);
+    setNotificationSaving(true);
+    setNotificationSaved(false);
+    setNotificationError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notificationEmailHourUtc: nextHourUtc }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setNotificationSaved(true);
+      setTimeout(() => setNotificationSaved(false), 2000);
+    } catch {
+      setNotificationEmailHourUtc(prev);
+      setNotificationError("Could not save -- try again.");
+    } finally {
+      setNotificationSaving(false);
     }
   }
 
@@ -775,6 +863,59 @@ export default function SettingsPage() {
           <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{feePercentError}</p>
         )}
         {feePercentSaved && (
+          <p className="text-xs flex items-center gap-1 mt-2" style={{ color: "var(--success)" }}>
+            <Check className="w-3 h-3" /> Saved
+          </p>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        delay="d8"
+        title="Email alerts"
+        description="Once a day, if something needs your attention -- an order to ship, a pending offer, an unanswered buyer question, or a listing sitting 30+ days with no sale -- Listflow sends you one summary email. No email if there's nothing to report."
+        icon={Mail}
+      >
+        <div className="flex flex-col gap-3">
+          <OptionCard
+            icon={Mail}
+            title="Off"
+            description="No email digest."
+            selected={!notificationEmailEnabled}
+            onClick={() => handleNotificationToggle(false)}
+          />
+          <OptionCard
+            icon={Mail}
+            title="On"
+            description="Send me a daily digest when something needs my attention."
+            selected={notificationEmailEnabled}
+            onClick={() => handleNotificationToggle(true)}
+          />
+        </div>
+
+        {notificationEmailEnabled && (
+          <div className="mt-3">
+            <label className="text-xs text-[var(--text-secondary)] block mb-1.5">Send around this time</label>
+            <input
+              type="time"
+              className="input w-auto"
+              value={utcHourToLocalTimeString(notificationEmailHourUtc)}
+              onChange={(e) => {
+                if (!e.target.value) return;
+                handleNotificationHourChange(localTimeStringToUtcHour(e.target.value));
+              }}
+            />
+          </div>
+        )}
+
+        {notificationError && (
+          <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{notificationError}</p>
+        )}
+        {notificationSaving && (
+          <p className="text-xs text-[var(--text-secondary)] flex items-center gap-1 mt-2">
+            <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+          </p>
+        )}
+        {notificationSaved && (
           <p className="text-xs flex items-center gap-1 mt-2" style={{ color: "var(--success)" }}>
             <Check className="w-3 h-3" /> Saved
           </p>
