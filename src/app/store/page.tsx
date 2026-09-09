@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag, RotateCcw } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag, RotateCcw, MessageCircle } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
@@ -23,6 +23,19 @@ function timeAgo(dateStr: string | null): string {
   if (d < 7) return `${d}d ago`;
   if (d < 30) return `${Math.floor(d / 7)}w ago`;
   return `${Math.floor(d / 30)}mo ago`;
+}
+
+// An active listing sitting this long with no sale is a real, actionable
+// signal to a reseller (eBay's own search ranking rewards freshness, and a
+// stale listing is the natural next thing to price-drop or refresh) -- flag
+// it rather than let it silently sit unnoticed among newer listings.
+const STALE_DAYS_THRESHOLD = 30;
+
+function daysSinceDate(dateStr: string | null): number | null {
+  if (!dateStr) return null;
+  const ms = Date.now() - new Date(dateStr).getTime();
+  if (isNaN(ms)) return null;
+  return Math.floor(ms / 86400000);
 }
 
 interface StoreListing {
@@ -46,6 +59,7 @@ export default function StorePage() {
   const [deleting, setDeleting] = useState<Set<string>>(new Set());
   const [relisting, setRelisting] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<"active" | "ended">("active");
+  const [staleOnly, setStaleOnly] = useState(false);
   const [sort, setSort] = useState<SortKey>("newest");
   const [search, setSearch] = useState("");
   const [editingPrice, setEditingPrice] = useState<Map<string, string>>(new Map());
@@ -273,13 +287,27 @@ export default function StorePage() {
     [listings, tab]
   );
 
+  const staleCount = useMemo(
+    () => tabListings.filter((l) => {
+      const d = daysSinceDate(l.startTime);
+      return d !== null && d >= STALE_DAYS_THRESHOLD;
+    }).length,
+    [tabListings]
+  );
+
   // Was recomputed from scratch on every render (every keystroke in search,
   // every price edit, every select-mode toggle) even though listings/search/
   // sort are the only things that actually change the result — worth
   // skipping for a store that can hold hundreds of listings.
   const filtered = useMemo(() => {
-    if (!q) return tabListings;
-    return tabListings.filter((l) => {
+    const base = staleOnly
+      ? tabListings.filter((l) => {
+          const d = daysSinceDate(l.startTime);
+          return d !== null && d >= STALE_DAYS_THRESHOLD;
+        })
+      : tabListings;
+    if (!q) return base;
+    return base.filter((l) => {
       const sku = (l.sku ?? "").toLowerCase();
       if (q.length === 1) return sku === q;
       if (sku && (sku === q || sku.startsWith(q))) return true;
@@ -287,7 +315,7 @@ export default function StorePage() {
       const titleWords = l.title.toLowerCase().split(/[\s\-\/,.()&]+/);
       return qWords.every((qw) => titleWords.some((tw) => tw.startsWith(qw)));
     });
-  }, [tabListings, q]);
+  }, [tabListings, q, staleOnly]);
 
   const sorted = useMemo(() => {
     return [...filtered].sort((a, b) => {
@@ -368,17 +396,36 @@ export default function StorePage() {
         </Link>
       )}
 
+      {!loading && !error && (
+        <Link
+          href="/messages"
+          className="tap card p-3 flex items-center gap-3 mb-4"
+        >
+          <div
+            className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "color-mix(in srgb, var(--accent) 16%, var(--bg-surface))", color: "var(--accent)" }}
+          >
+            <MessageCircle className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Buyer questions</p>
+            <p className="text-xs text-[var(--text-secondary)]">Reply to questions from buyers</p>
+          </div>
+          <ChevronRight className="w-4 h-4 text-[var(--text-tertiary)] flex-shrink-0" />
+        </Link>
+      )}
+
       {!loading && !error && listings.length > 0 && (
         <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}>
           <button
-            onClick={() => { setTab("active"); setSelectMode(false); setSelected(new Set()); }}
+            onClick={() => { setTab("active"); setSelectMode(false); setSelected(new Set()); setStaleOnly(false); }}
             className="flex-1 text-sm py-1.5 rounded-lg transition-colors"
             style={tab === "active" ? { background: "var(--bg-surface)", color: "var(--text-primary)", fontWeight: 500 } : { color: "var(--text-secondary)" }}
           >
             Active ({activeCount})
           </button>
           <button
-            onClick={() => { setTab("ended"); setSelectMode(false); setSelected(new Set()); }}
+            onClick={() => { setTab("ended"); setSelectMode(false); setSelected(new Set()); setStaleOnly(false); }}
             className="flex-1 text-sm py-1.5 rounded-lg transition-colors"
             style={tab === "ended" ? { background: "var(--bg-surface)", color: "var(--text-primary)", fontWeight: 500 } : { color: "var(--text-secondary)" }}
           >
@@ -421,6 +468,19 @@ export default function StorePage() {
               <option value="price-desc">Price: high to low</option>
             </select>
           </div>
+          {tab === "active" && staleCount > 0 && (
+            <button
+              onClick={() => setStaleOnly((v) => !v)}
+              className="self-start text-xs font-medium px-3 py-1.5 rounded-full transition-colors"
+              style={
+                staleOnly
+                  ? { background: "var(--warning-bg)", color: "var(--danger)", border: "1px solid var(--warning-border)" }
+                  : { background: "var(--glass)", color: "var(--text-secondary)", border: "1px solid var(--glass-line)" }
+              }
+            >
+              {staleOnly ? "Showing stale only" : `${staleCount} stale (${STALE_DAYS_THRESHOLD}+ days, no sale)`}
+            </button>
+          )}
           {q && (
             <p className="text-xs text-[var(--text-secondary)]">
               {sorted.length} result{sorted.length !== 1 ? "s" : ""} for &ldquo;{search.trim()}&rdquo;
@@ -570,6 +630,17 @@ export default function StorePage() {
                         ? (l.endTime ? ` · Ended ${timeAgo(l.endTime)}` : " · Ended")
                         : (l.startTime ? ` · Listed ${timeAgo(l.startTime)}` : "")}
                       {l.price == null && l.status !== "ended" && <span className="ml-1 opacity-40 text-[10px]">edit</span>}
+                      {l.status !== "ended" && (() => {
+                        const d = daysSinceDate(l.startTime);
+                        return d !== null && d >= STALE_DAYS_THRESHOLD ? (
+                          <span
+                            className="inline-flex items-center ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold align-middle"
+                            style={{ background: "var(--warning-bg)", color: "var(--danger)", border: "1px solid var(--warning-border)" }}
+                          >
+                            Stale
+                          </span>
+                        ) : null;
+                      })()}
                     </p>
                   )}
                 </div>
