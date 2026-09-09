@@ -13,11 +13,23 @@ export function generateOAuthState(): string {
 // who connected before this scope was added needs to reconnect once to
 // pick it up — expected, since Phase 2 already requires everyone to
 // reconnect (the old shared connection isn't migrated automatically).
+//
+// sell.finances, added Sept 9, 2026 -- lets /api/ebay/sales pull real,
+// eBay-reported selling fees (src/lib/ebay-finances.ts) instead of relying
+// solely on the estimate in ebay-fees.ts. Scope URI verified against eBay's
+// own published OAuth scope list and OpenAPI spec for the Finances API
+// before adding it here -- an unrecognized scope string would break the
+// whole "Connect eBay" consent screen, not just this one feature, so this
+// wasn't guessed. Same "reconnect required to pick up a new scope" story as
+// sell.account.readonly above; until a seller reconnects, calls needing
+// this scope get a 403 that's handled as "not available yet," not an error
+// (see fetchRealFeesForRange).
 export const EBAY_SCOPES = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
   "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
+  "https://api.ebay.com/oauth/api_scope/sell.finances",
 ].join(" ");
 
 function credentials() {

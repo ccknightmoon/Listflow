@@ -5,6 +5,7 @@ import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { EBAY_STANDARD_FEE_PERCENT, estimateEbayFee, isValidFeePercent } from "@/lib/ebay-fees";
 import { summarizeCost } from "@/lib/profit";
+import { fetchRealFeesForRange } from "@/lib/ebay-finances";
 
 export const runtime = "nodejs";
 
@@ -168,6 +169,11 @@ export async function GET(req: Request) {
   // narrow the set -- it can never drop a real in-range sale.
   const cutoffMs = now - days * MS_PER_DAY;
 
+  // Kicked off here (not awaited until the response is built) so it runs
+  // concurrently with the sales processing and thumbnail lookups below
+  // instead of adding a sequential extra round trip to every request.
+  const realFeesPromise = fetchRealFeesForRange(new Date(cutoffMs).toISOString(), new Date(now).toISOString());
+
   const sales = allTxBlocks.map((tx) => {
     const itemBlock = xmlFind(tx, "Item");
     const title = xmlFind(itemBlock, "Title") || xmlFind(tx, "Title");
@@ -282,9 +288,21 @@ export async function GET(req: Request) {
   const { totalCost, itemsWithCost, itemsMissingCost } = summarizeCost(sales);
   const trueProfit = netRevenue - totalCost;
 
+  // Real, eBay-reported fee total for this same window -- purely additive
+  // on top of the estimate above. null when the seller hasn't reconnected
+  // with the sell.finances scope yet, or on any transient failure; never
+  // throws, never blocks the response. Already in flight since cutoffMs
+  // was computed, above.
+  const realFees = await realFeesPromise;
+
   return NextResponse.json({
     sales, totalRevenue, totalFees, netRevenue, feePercent, days,
     trueProfit, itemsWithCost, itemsMissingCost,
+    realFees: realFees && {
+      totalFees: realFees.totalRealFees,
+      saleCount: realFees.saleTransactionCount,
+      truncated: realFees.truncated,
+    },
   });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message, sales: [] }, { status: 500 });
