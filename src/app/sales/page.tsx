@@ -6,6 +6,7 @@ import { ArrowLeft, Download, ExternalLink, Loader2, RefreshCw, Shirt, TrendingU
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { bucketRevenue, formatCompactCurrency } from "@/lib/sales-buckets";
+import { groupSalesByCategory } from "@/lib/insights";
 import { useCountUp } from "@/lib/use-count-up";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
 
@@ -51,6 +52,11 @@ interface Sale {
   // never entered (see src/lib/profit.ts). Optional for the same
   // old-cache-entry reason as estimatedFee above.
   costBasis?: number | null;
+  // Sourcing-insights fields, same drafts join / old-cache-entry optionality
+  // as costBasis above -- see src/lib/insights.ts for how these are used.
+  itemType?: string | null;
+  storeCategoryName?: string | null;
+  draftCreatedAt?: string | null;
 }
 
 // RFC 4180-ish: quote any field containing a comma, quote, or newline, and
@@ -324,6 +330,61 @@ export default function SalesPage() {
           )}
         </div>
       )}
+
+      {!loading && !error && sales.length > 0 && (() => {
+        // Purely client-side from the sales already on hand (itemType/
+        // storeCategoryName/costBasis/draftCreatedAt are already joined in
+        // by the API) -- no separate fetch, and it recomputes automatically
+        // whenever `sales` refreshes, same pattern as the revenue chart
+        // just below reusing bucketRevenue().
+        const categoryInsights = groupSalesByCategory(
+          sales.map((s) => ({
+            category: s.storeCategoryName ?? s.itemType ?? null,
+            total: s.total,
+            costBasis: s.costBasis ?? null,
+            soldAt: s.soldAt,
+            listedAt: s.draftCreatedAt ?? null,
+          }))
+        );
+        if (categoryInsights.length === 0) return null;
+        return (
+          <div className="card p-4 mb-3">
+            <p className="text-sm font-semibold mb-3">By category</p>
+            <div className="overflow-x-auto -mx-1">
+              <table className="w-full text-xs" style={{ borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ color: "var(--text-tertiary)" }}>
+                    <th className="text-left font-medium px-1 pb-2">Category</th>
+                    <th className="text-right font-medium px-1 pb-2">Sold</th>
+                    <th className="text-right font-medium px-1 pb-2">Revenue</th>
+                    <th className="text-right font-medium px-1 pb-2">Margin</th>
+                    <th className="text-right font-medium px-1 pb-2">Avg days</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {categoryInsights.map((c) => (
+                    <tr key={c.category} style={{ borderTop: "1px solid var(--border)" }}>
+                      <td className="px-1 py-1.5 font-medium truncate max-w-[120px]">{c.category}</td>
+                      <td className="text-right px-1 py-1.5">{c.count}</td>
+                      <td className="text-right px-1 py-1.5">{formatCompactCurrency(c.revenue)}</td>
+                      <td className="text-right px-1 py-1.5" style={{ color: c.marginPercent != null ? "var(--success)" : "var(--text-tertiary)" }}>
+                        {c.marginPercent != null ? `${c.marginPercent.toFixed(0)}%` : "—"}
+                      </td>
+                      <td className="text-right px-1 py-1.5" style={{ color: "var(--text-secondary)" }}>
+                        {c.avgDaysToSell != null ? `${c.avgDaysToSell.toFixed(0)}d` : "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] mt-2 leading-relaxed" style={{ color: "var(--text-tertiary)" }}>
+              Margin and avg. days to sell only cover sales with a cost entered and a known list date — see Sales for what each covers.
+              Days to sell is approximate — based on when you added the item, not always exactly when it went live on eBay.
+            </p>
+          </div>
+        );
+      })()}
 
       {!loading && !error && sales.length > 0 && (() => {
         // Purely client-side from the sales already on hand, no separate API
