@@ -31,6 +31,7 @@ import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
 import { apiFetch } from "@/lib/api";
 import { AiResult as BaseAiResult, formatMeasurements } from "@/lib/ai-result";
+import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import { estimateIsHeavy, estimateShipping } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
 import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
@@ -263,6 +264,26 @@ export default function BatchUploadPage() {
   // Settings -> "Batch upload: item dividers" -> On. Fetched once on
   // mount; see /api/detect-item-dividers and buildGroupsFromMarkers above.
   const [autoDetectDividers, setAutoDetectDividers] = useState(false);
+  // Settings -> "Store category suggestions" -> AI suggestions. Fetched
+  // once on mount, same as autoDetectDividers above. The free keyword
+  // match (matchStoreCategoryByKeyword) always runs regardless of this --
+  // it only gates the extra per-item AI call. See
+  // /api/ebay/store-categories/suggest.
+  const [aiStoreCategorySuggestions, setAiStoreCategorySuggestions] = useState(false);
+  // The seller's real eBay Store Category list, fetched once on mount from
+  // /api/ebay/store-categories -- empty if eBay isn't connected yet or the
+  // seller hasn't set up any Store Categories, in which case the picker
+  // simply doesn't render (nothing to suggest or choose from).
+  const [storeCategories, setStoreCategories] = useState<StoreCategoryLite[]>([]);
+  // Per-item store category choice, keyed by item index. undefined = not
+  // suggested/picked yet; null = explicitly "no category". Seeded by the
+  // free keyword match right after analysis, upgraded by the AI pass if
+  // that setting is on and it finds a match, and always overridable by
+  // hand via the chip next to each item's SKU field below.
+  const [storeCategoryChoice, setStoreCategoryChoice] = useState<Record<number, StoreCategoryLite | null>>({});
+  // Which item's store-category dropdown is currently open (at most one at
+  // a time), or null if none.
+  const [storeCategoryPickerOpen, setStoreCategoryPickerOpen] = useState<number | null>(null);
   // Bulk-edit selection on the results screen — lets a seller set condition
   // or heavy-item shipping across many items at once instead of one row at
   // a time, the single most-requested gap found in the "list 40 a day"
@@ -313,7 +334,14 @@ export default function BatchUploadPage() {
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => r.json())
-      .then((data) => setAutoDetectDividers(!!data.autoDetectItemDividers))
+      .then((data) => {
+        setAutoDetectDividers(!!data.autoDetectItemDividers);
+        setAiStoreCategorySuggestions(!!data.aiStoreCategorySuggestions);
+      })
+      .catch(() => {});
+    fetch("/api/ebay/store-categories")
+      .then((r) => r.json())
+      .then((data) => setStoreCategories(Array.isArray(data.categories) ? data.categories : []))
       .catch(() => {});
   }, []);
 
@@ -696,6 +724,89 @@ export default function BatchUploadPage() {
     }));
   }
 
+  // Free, synchronous, no network call -- see matchStoreCategoryByKeyword.
+  // Only fills items that don't already have a choice (undefined), so it
+  // never clobbers a manual pick or an AI suggestion that landed first.
+  function keywordSuggestAll(allResults: AiResult[]) {
+    if (storeCategories.length === 0) return;
+    setStoreCategoryChoice((prev) => {
+      const next = { ...prev };
+      allResults.forEach((r, i) => {
+        if (r.error || r.pending) return;
+        if (next[i] !== undefined) return;
+        next[i] = matchStoreCategoryByKeyword(
+          { title: r.suggestedTitle, itemType: r.itemType, brand: r.brand },
+          storeCategories
+        );
+      });
+      return next;
+    });
+  }
+
+  // One AI store-category call for a single item. Throws on failure
+  // (including an AI-cap 429, whose message equals AI_CAP_MESSAGE) so
+  // callers can decide how to handle that -- a bulk pass wants to notice a
+  // cap hit once for the whole batch, a single retry can just swallow it.
+  async function requestStoreCategoryAi(result: AiResult): Promise<StoreCategoryLite | null> {
+    const data = await apiFetch<{ categoryId: string | null; categoryPath: string | null }>(
+      "/api/ebay/store-categories/suggest",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: result.suggestedTitle,
+          itemType: result.itemType,
+          brand: result.brand,
+          color: result.color,
+          description: result.description,
+        }),
+      }
+    );
+    if (!data.categoryId) return null;
+    return (
+      storeCategories.find((c) => c.id === data.categoryId) ??
+      (data.categoryPath ? { id: data.categoryId, name: data.categoryPath, path: data.categoryPath } : null)
+    );
+  }
+
+  // Bulk AI pass across a freshly-analyzed batch, gated by Settings ->
+  // "Store category suggestions" -> AI suggestions. Runs AFTER
+  // keywordSuggestAll so every item already has at least the free
+  // suggestion (or null) as a fallback if the AI call fails or finds
+  // nothing. Same bounded worker-pool pattern as ANALYSIS_CONCURRENCY /
+  // PRICING_CONCURRENCY above -- this is still an OpenAI call per item, no
+  // reason to fire up to 200 of them at once.
+  const STORE_CATEGORY_AI_CONCURRENCY = 3;
+  async function aiSuggestStoreCategoriesForAll(allResults: AiResult[]) {
+    if (!aiStoreCategorySuggestions || storeCategories.length === 0) return;
+    const queue = allResults
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => !r.error && !r.pending);
+    let cursor = 0;
+    let cappedHit = false;
+    async function worker() {
+      while (cursor < queue.length) {
+        const { r, i } = queue[cursor++];
+        try {
+          const match = await requestStoreCategoryAi(r);
+          if (match) setStoreCategoryChoice((prev) => ({ ...prev, [i]: match }));
+        } catch (err) {
+          if ((err as Error).message === AI_CAP_MESSAGE) cappedHit = true;
+          // Otherwise leave whatever the free keyword match already set.
+        }
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(STORE_CATEGORY_AI_CONCURRENCY, queue.length) }, () => worker())
+    );
+    if (cappedHit) {
+      setError((prev) =>
+        prev ??
+        "You've reached this month's AI usage limit -- some items only got the free keyword-based store category suggestion instead of AI's. You can still pick manually, or retry once it resets."
+      );
+    }
+  }
+
   async function handleAnalyzeBatch() {
     setError(null);
     setAnalyzingProgress({ done: 0, total: groups.length });
@@ -811,7 +922,9 @@ export default function BatchUploadPage() {
         });
         return next;
       });
+      keywordSuggestAll(allResults);
       fetchPricingForAll(allResults);
+      void aiSuggestStoreCategoriesForAll(allResults);
     } catch (err) {
       // Each item already catches and records its own failure inside
       // analyzeOne, so this only fires for something unexpected outside
@@ -937,6 +1050,20 @@ export default function BatchUploadPage() {
         next[index] = retryResult;
         return next;
       });
+      setStoreCategoryChoice((prev) => ({
+        ...prev,
+        [index]: matchStoreCategoryByKeyword(
+          { title: retryResult.suggestedTitle, itemType: retryResult.itemType, brand: retryResult.brand },
+          storeCategories
+        ),
+      }));
+      if (aiStoreCategorySuggestions) {
+        requestStoreCategoryAi(retryResult)
+          .then((match) => {
+            if (match) setStoreCategoryChoice((prev) => ({ ...prev, [index]: match }));
+          })
+          .catch(() => {});
+      }
       const retryPhotoIdx = (groups[index] ?? [])[0];
       const retryImage = retryPhotoIdx !== undefined ? photos[retryPhotoIdx]?.data : undefined;
       apiFetch<PriceSuggestion>("/api/pricing/suggest", {
@@ -1080,6 +1207,8 @@ export default function BatchUploadPage() {
         characterFamily: result.characterFamily ?? null,
         yearManufactured: result.yearManufactured ?? null,
         season: result.season ?? null,
+        storeCategoryId: storeCategoryChoice[index]?.id ?? null,
+        storeCategoryName: storeCategoryChoice[index]?.path ?? null,
       };
 
       let id: string = existingId ?? "";
@@ -2086,6 +2215,62 @@ export default function BatchUploadPage() {
                         }}
                       />
                     </div>
+                    {storeCategories.length > 0 && (
+                      <div className="mt-2 relative">
+                        <p className="text-[10px] text-[var(--text-tertiary)] mb-0.5">Store category</p>
+                        <button
+                          type="button"
+                          disabled={saveStatus[i] === "saved"}
+                          onClick={() => setStoreCategoryPickerOpen((prev) => (prev === i ? null : i))}
+                          className="tap text-xs font-semibold rounded-lg px-3 py-1.5 border w-full text-left truncate"
+                          style={
+                            storeCategoryChoice[i]
+                              ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }
+                              : { background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }
+                          }
+                        >
+                          {storeCategoryChoice[i]?.path ?? "No store category — tap to pick"}
+                        </button>
+                        {storeCategoryPickerOpen === i && (
+                          <>
+                            <div className="fixed inset-0 z-10" onClick={() => setStoreCategoryPickerOpen(null)} />
+                            <div
+                              className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto card p-1"
+                              style={{ background: "var(--bg-surface)" }}
+                            >
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setStoreCategoryChoice((prev) => ({ ...prev, [i]: null }));
+                                  setStoreCategoryPickerOpen(null);
+                                }}
+                                className="tap w-full text-left text-xs px-2 py-1.5 rounded"
+                              >
+                                — None —
+                              </button>
+                              {storeCategories.map((c) => (
+                                <button
+                                  key={c.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setStoreCategoryChoice((prev) => ({ ...prev, [i]: c }));
+                                    setStoreCategoryPickerOpen(null);
+                                  }}
+                                  className="tap w-full text-left text-xs px-2 py-1.5 rounded truncate"
+                                  style={
+                                    storeCategoryChoice[i]?.id === c.id
+                                      ? { background: "var(--accent-tint)", color: "var(--accent)" }
+                                      : undefined
+                                  }
+                                >
+                                  {c.path}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                     <textarea
                       className="input w-full text-xs mt-1"
                       rows={2}

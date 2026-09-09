@@ -18,7 +18,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("app_settings")
-    .select("default_shipping_mode, store_description_footer, accent_color, auto_detect_item_dividers")
+    .select("default_shipping_mode, store_description_footer, accent_color, auto_detect_item_dividers, ai_store_category_suggestions")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -30,6 +30,7 @@ export async function GET() {
       storeDescriptionFooter: "",
       accentColor: "indigo",
       autoDetectItemDividers: false,
+      aiStoreCategorySuggestions: false,
     });
   }
   return NextResponse.json({
@@ -37,6 +38,7 @@ export async function GET() {
     storeDescriptionFooter: data.store_description_footer ?? "",
     accentColor: data.accent_color ?? "indigo",
     autoDetectItemDividers: data.auto_detect_item_dividers ?? false,
+    aiStoreCategorySuggestions: data.ai_store_category_suggestions ?? false,
   });
 }
 
@@ -46,7 +48,7 @@ export async function PATCH(req: NextRequest) {
   const { supabase, user } = auth;
 
   const body = await req.json();
-  const { defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers } = body;
+  const { defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions } = body;
 
   if (defaultShippingMode !== undefined && defaultShippingMode !== "free" && defaultShippingMode !== "calculated") {
     return NextResponse.json({ error: "defaultShippingMode must be 'free' or 'calculated'" }, { status: 400 });
@@ -65,17 +67,21 @@ export async function PATCH(req: NextRequest) {
   if (autoDetectItemDividers !== undefined && typeof autoDetectItemDividers !== "boolean") {
     return NextResponse.json({ error: "autoDetectItemDividers must be a boolean" }, { status: 400 });
   }
+  if (aiStoreCategorySuggestions !== undefined && typeof aiStoreCategorySuggestions !== "boolean") {
+    return NextResponse.json({ error: "aiStoreCategorySuggestions must be a boolean" }, { status: 400 });
+  }
 
   const payload: Record<string, unknown> = { user_id: user.id, updated_at: new Date().toISOString() };
   if (defaultShippingMode !== undefined) payload.default_shipping_mode = defaultShippingMode;
   if (storeDescriptionFooter !== undefined) payload.store_description_footer = storeDescriptionFooter;
   if (accentColor !== undefined) payload.accent_color = accentColor;
   if (autoDetectItemDividers !== undefined) payload.auto_detect_item_dividers = autoDetectItemDividers;
+  if (aiStoreCategorySuggestions !== undefined) payload.ai_store_category_suggestions = aiStoreCategorySuggestions;
 
   const { error } = await supabase
     .from("app_settings")
     .upsert(payload, { onConflict: "user_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers });
+  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions });
 }

@@ -7,6 +7,7 @@ import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkle
 import { estimateShipping } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
 import { AiResult } from "@/lib/ai-result";
+import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import AIDisclaimer from "@/components/AIDisclaimer";
 
 const CONDITIONS = [
@@ -48,6 +49,8 @@ interface Draft {
   year_manufactured: string | null;
   season: string | null;
   ebay_listing_id: string | null;
+  store_category_id: string | null;
+  store_category_name: string | null;
 }
 
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -75,6 +78,22 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null);
   const [refreshingPrice, setRefreshingPrice] = useState(false);
   const [missingAspectsWarning, setMissingAspectsWarning] = useState<string[] | null>(null);
+  // Store category: the seller's real eBay Store Categories, fetched once
+  // on mount (empty if eBay isn't connected or none are set up, in which
+  // case the picker below just doesn't render). storeCategoryId/Name are
+  // this draft's current choice -- seeded once by the free keyword match
+  // (and the AI pass too, if Settings -> "Store category suggestions" has
+  // AI suggestions on) the first time this draft loads with no category
+  // already set, and always overridable by hand via the chip below. See
+  // src/lib/store-category-match.ts and
+  // src/app/api/ebay/store-categories/suggest/route.ts.
+  const [storeCategories, setStoreCategories] = useState<StoreCategoryLite[]>([]);
+  const [storeCategoryId, setStoreCategoryId] = useState<string | null>(null);
+  const [storeCategoryName, setStoreCategoryName] = useState<string | null>(null);
+  const [storeCategoryPickerOpen, setStoreCategoryPickerOpen] = useState(false);
+  const [aiStoreCategorySuggestions, setAiStoreCategorySuggestions] = useState(false);
+  const [suggestingStoreCategory, setSuggestingStoreCategory] = useState(false);
+  const autoSuggestedStoreCategoryRef = useRef(false);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
   const dragIdxRef = useRef<number | null>(null);
   const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
@@ -148,6 +167,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         setCharacterFamily(str(d.character_family));
         setYearManufactured(str(d.year_manufactured));
         setSeason(str(d.season));
+        setStoreCategoryId(d.store_category_id ?? null);
+        setStoreCategoryName(d.store_category_name ?? null);
         if (d.ebay_listing_id) setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
       } catch (err) {
 
@@ -158,6 +179,81 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
     load();
   }, [id]);
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => setAiStoreCategorySuggestions(!!data.aiStoreCategorySuggestions))
+      .catch(() => {});
+    fetch("/api/ebay/store-categories")
+      .then((r) => r.json())
+      .then((data) => setStoreCategories(Array.isArray(data.categories) ? data.categories : []))
+      .catch(() => {});
+  }, []);
+
+  async function requestStoreCategoryAi(d: {
+    title: string | null;
+    item_type: string | null;
+    brand: string | null;
+    color: string | null;
+    description: string | null;
+  }): Promise<StoreCategoryLite | null> {
+    const data = await apiFetch<{ categoryId: string | null; categoryPath: string | null }>(
+      "/api/ebay/store-categories/suggest",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: d.title,
+          itemType: d.item_type,
+          brand: d.brand,
+          color: d.color,
+          description: d.description,
+        }),
+      }
+    );
+    if (!data.categoryId) return null;
+    return (
+      storeCategories.find((c) => c.id === data.categoryId) ??
+      (data.categoryPath ? { id: data.categoryId, name: data.categoryPath, path: data.categoryPath } : null)
+    );
+  }
+
+  // Seeds a store category suggestion the first time this draft loads with
+  // none already set -- once per page visit (autoSuggestedStoreCategoryRef
+  // guards against re-firing if the seller deliberately clears it via the
+  // picker below). Free keyword match runs unconditionally; the AI pass
+  // only runs if Settings -> "Store category suggestions" -> AI
+  // suggestions is on, and only upgrades the choice if it finds a match.
+  useEffect(() => {
+    if (autoSuggestedStoreCategoryRef.current) return;
+    if (!draft || storeCategories.length === 0) return;
+    if (draft.store_category_id) return;
+    autoSuggestedStoreCategoryRef.current = true;
+
+    const keywordMatch = matchStoreCategoryByKeyword(
+      { title: draft.title, itemType: draft.item_type, brand: draft.brand },
+      storeCategories
+    );
+    if (keywordMatch) {
+      setStoreCategoryId(keywordMatch.id);
+      setStoreCategoryName(keywordMatch.path);
+    }
+
+    if (aiStoreCategorySuggestions) {
+      setSuggestingStoreCategory(true);
+      requestStoreCategoryAi(draft)
+        .then((aiMatch) => {
+          if (aiMatch) {
+            setStoreCategoryId(aiMatch.id);
+            setStoreCategoryName(aiMatch.path);
+          }
+        })
+        .catch(() => {})
+        .finally(() => setSuggestingStoreCategory(false));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, storeCategories, aiStoreCategorySuggestions]);
 
   async function handleSuggest() {
     setSuggesting(true);
@@ -203,6 +299,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           customSku, itemType, style, material, theme,
           sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
+          storeCategoryId, storeCategoryName,
         }),
       });
       setSaved(true);
@@ -237,6 +334,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           customSku, itemType, style, material, theme,
           sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
+          storeCategoryId, storeCategoryName,
         }),
       });
 
@@ -257,6 +355,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             suggestedPrice: price ? Number(price) : null,
             customSku, itemType, style, material, theme,
             sleeveLength, neckline, fit, pattern, description,
+            storeCategoryId, storeCategoryName,
             ebayListingId: String(data.listingId),
           }),
         });
@@ -342,6 +441,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             customSku, itemType, style, material, theme,
             sleeveLength, neckline, fit, pattern, description,
             vintage, character, characterFamily, yearManufactured, season,
+            storeCategoryId, storeCategoryName,
             avgSold: data.avgSold ?? null,
             activeRangeLow: data.activeRangeLow ?? null,
             activeRangeHigh: data.activeRangeHigh ?? null,
@@ -667,6 +767,61 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             onChange={(e) => setCustomSku(e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 50))}
           />
         </div>
+        {storeCategories.length > 0 && (
+          <div className="relative">
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">
+              Store category{suggestingStoreCategory ? " (getting AI suggestion...)" : ""}
+            </label>
+            <button
+              type="button"
+              onClick={() => setStoreCategoryPickerOpen((prev) => !prev)}
+              className="tap text-xs font-semibold rounded-lg px-3 py-2 border w-full text-left truncate"
+              style={
+                storeCategoryId
+                  ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }
+                  : { background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }
+              }
+            >
+              {storeCategoryName ?? "No store category — tap to pick"}
+            </button>
+            {storeCategoryPickerOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setStoreCategoryPickerOpen(false)} />
+                <div
+                  className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto card p-1"
+                  style={{ background: "var(--bg-surface)" }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStoreCategoryId(null);
+                      setStoreCategoryName(null);
+                      setStoreCategoryPickerOpen(false);
+                    }}
+                    className="tap w-full text-left text-xs px-2 py-1.5 rounded"
+                  >
+                    — None —
+                  </button>
+                  {storeCategories.map((c) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => {
+                        setStoreCategoryId(c.id);
+                        setStoreCategoryName(c.path);
+                        setStoreCategoryPickerOpen(false);
+                      }}
+                      className="tap w-full text-left text-xs px-2 py-1.5 rounded truncate"
+                      style={storeCategoryId === c.id ? { background: "var(--accent-tint)", color: "var(--accent)" } : undefined}
+                    >
+                      {c.path}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Condition</label>
           <select className="input w-full" value={condition} onChange={(e) => setCondition(e.target.value)}>

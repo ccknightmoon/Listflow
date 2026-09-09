@@ -21,6 +21,7 @@ import {
   FileText,
   ScanLine,
   Sparkles,
+  Tags,
 } from "lucide-react";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
@@ -60,6 +61,16 @@ export default function SettingsPage() {
   const [autoDetectSaving, setAutoDetectSaving] = useState(false);
   const [autoDetectSaved, setAutoDetectSaved] = useState(false);
   const [autoDetectError, setAutoDetectError] = useState<string | null>(null);
+
+  // Settings -> "Store category suggestions" -> AI suggestions. Off by
+  // default -- the free keyword match (src/lib/store-category-match.ts)
+  // always runs regardless of this toggle; this only adds an extra
+  // per-item AI call on top of it. See supabase-migrations/015 and
+  // src/app/api/ebay/store-categories/suggest/route.ts.
+  const [aiStoreCategory, setAiStoreCategory] = useState(false);
+  const [aiStoreCategorySaving, setAiStoreCategorySaving] = useState(false);
+  const [aiStoreCategorySaved, setAiStoreCategorySaved] = useState(false);
+  const [aiStoreCategoryError, setAiStoreCategoryError] = useState<string | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -97,6 +108,7 @@ export default function SettingsPage() {
         setAccent(serverAccent);
         setStoredAccent(serverAccent);
         setAutoDetectDividers(!!data.autoDetectItemDividers);
+        setAiStoreCategory(!!data.aiStoreCategorySuggestions);
       })
       .catch(() => setError("Could not load settings"))
       .finally(() => setLoading(false));
@@ -123,6 +135,30 @@ export default function SettingsPage() {
       setAutoDetectError("Could not save — try again.");
     } finally {
       setAutoDetectSaving(false);
+    }
+  }
+
+  async function handleAiStoreCategoryToggle(next: boolean) {
+    if (next === aiStoreCategory || aiStoreCategorySaving) return;
+    const prev = aiStoreCategory;
+    setAiStoreCategory(next);
+    setAiStoreCategorySaving(true);
+    setAiStoreCategorySaved(false);
+    setAiStoreCategoryError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aiStoreCategorySuggestions: next }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setAiStoreCategorySaved(true);
+      setTimeout(() => setAiStoreCategorySaved(false), 2000);
+    } catch {
+      setAiStoreCategory(prev);
+      setAiStoreCategoryError("Could not save — try again.");
+    } finally {
+      setAiStoreCategorySaving(false);
     }
   }
 
@@ -607,7 +643,45 @@ export default function SettingsPage() {
         )}
       </SettingsSection>
 
-      <SettingsSection delay="d6" title="Account" icon={UserCircle}>
+      <SettingsSection
+        delay="d6"
+        title="Store category suggestions"
+        description="A free keyword match always suggests one of your real eBay Store Categories automatically wherever you review an item -- no setup, no AI cost. Turn AI suggestions on too for a smarter pick (worth it for categories that don't share obvious words with the item itself) -- it costs one extra AI call per item, counted against your monthly AI usage. Either way, tap the category chip next to an item's SKU field any time to change it yourself."
+        icon={Tags}
+      >
+        <div className="flex flex-col gap-3">
+          <OptionCard
+            icon={Tags}
+            title="Off — keyword match only"
+            description="Default. Every item still gets a free suggestion by matching its title against your category names -- no AI usage spent. You can always pick a different category yourself."
+            selected={!aiStoreCategory}
+            onClick={() => handleAiStoreCategoryToggle(false)}
+          />
+          <OptionCard
+            icon={Sparkles}
+            title="On — AI suggestions too"
+            description="Adds one AI call per item that picks from your real category list based on the item's full details, replacing the keyword guess when it finds a better fit."
+            selected={aiStoreCategory}
+            onClick={() => handleAiStoreCategoryToggle(true)}
+          />
+        </div>
+
+        {aiStoreCategoryError && (
+          <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{aiStoreCategoryError}</p>
+        )}
+        {aiStoreCategorySaving && (
+          <p className="text-xs text-[var(--text-secondary)] flex items-center gap-1 mt-2">
+            <Loader2 className="w-3 h-3 animate-spin" /> Saving...
+          </p>
+        )}
+        {aiStoreCategorySaved && (
+          <p className="text-xs flex items-center gap-1 mt-2" style={{ color: "var(--success)" }}>
+            <Check className="w-3 h-3" /> Saved
+          </p>
+        )}
+      </SettingsSection>
+
+      <SettingsSection delay="d7" title="Account" icon={UserCircle}>
         <button
           onClick={handleSignOut}
           disabled={signingOut}
