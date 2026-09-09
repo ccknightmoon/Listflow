@@ -106,6 +106,11 @@ export default function NewListingPage() {
   const [isHeavy, setIsHeavy] = useState(false);
   const [shippingCost, setShippingCost] = useState("");
   const [customPrice, setCustomPrice] = useState("");
+  // Cost basis -- what the seller paid to acquire this item. Purely
+  // manual (nothing in the app can infer it), optional, used only by the
+  // Sales page's "true profit" figure once this item sells. See
+  // supabase-migrations/017 and src/lib/profit.ts.
+  const [cost, setCost] = useState("");
   const [brand, setBrand] = useState("");
   const [size, setSize] = useState("");
   const [color, setColor] = useState("");
@@ -372,6 +377,7 @@ export default function NewListingPage() {
         season: aiResult?.season ?? null,
         storeCategoryId,
         storeCategoryName,
+        costBasis: cost ? Number(cost) : null,
       };
 
       let id = savedDraftId;
@@ -707,6 +713,24 @@ export default function NewListingPage() {
                   </p>
                 </>
               )}
+
+              <div className="mb-3">
+                <label className="text-xs text-[var(--text-secondary)] mb-1 block">
+                  Cost (what you paid) — optional
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0.00"
+                    value={cost}
+                    onChange={(e) => setCost(e.target.value)}
+                    className="input w-full pl-6"
+                  />
+                </div>
+              </div>
 
               {listError && (
                 <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>

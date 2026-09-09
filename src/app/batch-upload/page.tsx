@@ -246,6 +246,8 @@ export default function BatchUploadPage() {
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
   const [customPrices, setCustomPrices] = useState<Record<number, string>>({});
+  // cost_basis per item -- what the seller paid, optional (migration 017, src/lib/profit.ts)
+  const [costs, setCosts] = useState<Record<number, string>>({});
   const [customSkus, setCustomSkus] = useState<Record<number, string>>({});
   const [heavyItems, setHeavyItems] = useState<Record<number, boolean>>({});
   const [shippingCosts, setShippingCosts] = useState<Record<number, string>>({});
@@ -1187,6 +1189,7 @@ export default function BatchUploadPage() {
         flaws: result.flaws,
         customSku: customSkus[index] || undefined,
         suggestedPrice: finalPrice,
+        costBasis: costs[index] ? Number(costs[index]) : null,
         avgSold: hasRealPricing ? suggestion.avgSold : null,
         activeRangeLow: hasRealPricing ? suggestion.activeRangeLow : null,
         activeRangeHigh: hasRealPricing ? suggestion.activeRangeHigh : null,
@@ -2364,6 +2367,24 @@ export default function BatchUploadPage() {
                       />
                     </div>
                   )}
+
+                  <div className="mb-3">
+                    <label className="text-xs text-[var(--text-secondary)] mb-1 block">
+                      Cost (what you paid) — optional
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        value={costs[i] ?? ""}
+                        onChange={(e) => setCosts((prev) => ({ ...prev, [i]: e.target.value }))}
+                        className="input w-full pl-6"
+                      />
+                    </div>
+                  </div>
 
                   <div className="grid grid-cols-3 gap-2 mb-3">
                     <MiniStat label="Active median" value={pricingReady ? `$${suggestion.avgSold}` : "—"} />

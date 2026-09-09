@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { EBAY_STANDARD_FEE_PERCENT, estimateEbayFee, isValidFeePercent } from "@/lib/ebay-fees";
+import { summarizeCost } from "@/lib/profit";
 
 export const runtime = "nodejs";
 
@@ -174,7 +175,15 @@ export async function GET(req: Request) {
     const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
     const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
     const soldAt = xmlFind(tx, "CreatedDate");
-    return { listingId, title, price, qty, total: price * qty, soldAt, thumbnail: null as string | null, estimatedFee: 0 };
+    return {
+      listingId, title, price, qty, total: price * qty, soldAt,
+      thumbnail: null as string | null,
+      estimatedFee: 0,
+      // Filled in below from the drafts lookup that already runs for
+      // thumbnails -- null for anything not listed through this app, or
+      // simply never given a cost by the seller.
+      costBasis: null as number | null,
+    };
   }).filter((s) => {
     if (s.price <= 0) return false;
     const soldMs = Date.parse(s.soldAt);
@@ -202,13 +211,15 @@ export async function GET(req: Request) {
     const listingIds = sales.map((s) => s.listingId).filter(Boolean);
     const { data: drafts } = await supabase
       .from("drafts")
-      .select("ebay_listing_id, thumbnail_url")
+      .select("ebay_listing_id, thumbnail_url, cost_basis")
       .in("ebay_listing_id", listingIds);
 
     if (drafts && drafts.length > 0) {
       const thumbMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.thumbnail_url as string | null]));
+      const costMap = new Map(drafts.map((d) => [d.ebay_listing_id as string, d.cost_basis as number | null]));
       for (const sale of sales) {
         sale.thumbnail = thumbMap.get(sale.listingId) ?? null;
+        sale.costBasis = costMap.get(sale.listingId) ?? null;
       }
     }
 
@@ -260,7 +271,21 @@ export async function GET(req: Request) {
   const totalFees = sales.reduce((sum, s) => sum + s.estimatedFee, 0);
   const netRevenue = totalRevenue - totalFees;
 
-  return NextResponse.json({ sales, totalRevenue, totalFees, netRevenue, feePercent, days });
+  // "True" profit -- net of both eBay's fee AND the seller's own cost
+  // basis, where they've entered one (see supabase-migrations/017 and
+  // src/lib/profit.ts). costBasis above only gets populated when
+  // includeThumbnails ran the drafts lookup (the Dashboard's thumbnails=0
+  // sparkline call never reads any of these profit fields, so skipping it
+  // there is fine, not a bug) -- summarizeCost() still runs unconditionally
+  // since it costs nothing extra and correctly reports "0 items with cost"
+  // rather than silently pretending it checked.
+  const { totalCost, itemsWithCost, itemsMissingCost } = summarizeCost(sales);
+  const trueProfit = netRevenue - totalCost;
+
+  return NextResponse.json({
+    sales, totalRevenue, totalFees, netRevenue, feePercent, days,
+    trueProfit, itemsWithCost, itemsMissingCost,
+  });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message, sales: [] }, { status: 500 });
   }

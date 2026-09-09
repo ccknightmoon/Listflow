@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { isValidCostBasis } from "@/lib/profit";
 
 // Same guard as POST /api/drafts — store category IDs are always numeric
 // and always picked from a live dropdown, never hand-typed.
@@ -43,6 +44,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (!isValidStoreCategoryId(body.storeCategoryId)) {
     return NextResponse.json({ error: "Invalid store category ID." }, { status: 400 });
   }
+  if (body.costBasis !== undefined && body.costBasis !== null && !isValidCostBasis(body.costBasis)) {
+    return NextResponse.json({ error: "costBasis must be a non-negative number, or null." }, { status: 400 });
+  }
 
   const { data, error } = await auth.supabase
     .from("drafts")
@@ -78,6 +82,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.sellOdds !== undefined && { sell_odds: body.sellOdds }),
       ...(body.storeCategoryId !== undefined && { store_category_id: body.storeCategoryId }),
       ...(body.storeCategoryName !== undefined && { store_category_name: body.storeCategoryName }),
+      ...(body.costBasis !== undefined && { cost_basis: body.costBasis }),
     })
     .eq("id", id)
     .eq("user_id", auth.user.id)

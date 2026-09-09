@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { isValidCostBasis } from "@/lib/profit";
 
 // eBay Store Category IDs are always numeric (see ebay-store-categories.ts,
 // which already guards its own XML-interpolation point the same way). This
@@ -78,6 +79,9 @@ export async function POST(req: NextRequest) {
   if (!isValidStoreCategoryId(body.storeCategoryId)) {
     return NextResponse.json({ error: "Invalid store category ID." }, { status: 400 });
   }
+  if (body.costBasis !== undefined && body.costBasis !== null && !isValidCostBasis(body.costBasis)) {
+    return NextResponse.json({ error: "costBasis must be a non-negative number, or null." }, { status: 400 });
+  }
 
   const { data, error } = await auth.supabase
     .from("drafts")
@@ -116,6 +120,7 @@ export async function POST(req: NextRequest) {
         season: body.season ?? null,
         store_category_id: body.storeCategoryId ?? null,
         store_category_name: body.storeCategoryName ?? null,
+        cost_basis: body.costBasis ?? null,
       },
     ])
     .select();

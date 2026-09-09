@@ -21,6 +21,9 @@ interface CachedSales {
   totalFees: number;
   netRevenue: number;
   feePercent: number;
+  trueProfit: number;
+  itemsWithCost: number;
+  itemsMissingCost: number;
 }
 
 type DayRange = 7 | 30 | 90;
@@ -48,6 +51,9 @@ export default function SalesPage() {
   const [totalFees, setTotalFees] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.totalFees ?? 0);
   const [netRevenue, setNetRevenue] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.netRevenue ?? 0);
   const [feePercent, setFeePercent] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.feePercent ?? 0);
+  const [trueProfit, setTrueProfit] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.trueProfit ?? 0);
+  const [itemsWithCost, setItemsWithCost] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.itemsWithCost ?? 0);
+  const [itemsMissingCost, setItemsMissingCost] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS))?.itemsMissingCost ?? 0);
   const displayTotalRevenue = useCountUp(totalRevenue);
   const [loading, setLoading] = useState(() => getPageCache<CachedSales>(salesCacheKey(INITIAL_DAYS)) === undefined);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +81,7 @@ export default function SalesPage() {
     setNeedsConnect(false);
     setNeedsReconnect(false);
     try {
-      const data = await apiFetch<{ sales?: Sale[]; totalRevenue?: number; totalFees?: number; netRevenue?: number; feePercent?: number; error?: string; connect?: boolean; reconnect?: boolean }>(`/api/ebay/sales?days=${d}`);
+      const data = await apiFetch<{ sales?: Sale[]; totalRevenue?: number; totalFees?: number; netRevenue?: number; feePercent?: number; trueProfit?: number; itemsWithCost?: number; itemsMissingCost?: number; error?: string; connect?: boolean; reconnect?: boolean }>(`/api/ebay/sales?days=${d}`);
       if (data.error) {
         setNeedsConnect(!!data.connect);
         setNeedsReconnect(!!data.reconnect);
@@ -86,12 +92,27 @@ export default function SalesPage() {
       const newTotalFees = data.totalFees ?? 0;
       const newNetRevenue = data.netRevenue ?? newTotalRevenue;
       const newFeePercent = data.feePercent ?? 0;
+      const newTrueProfit = data.trueProfit ?? newNetRevenue;
+      const newItemsWithCost = data.itemsWithCost ?? 0;
+      const newItemsMissingCost = data.itemsMissingCost ?? 0;
       setSales(newSales);
       setTotalRevenue(newTotalRevenue);
       setTotalFees(newTotalFees);
       setNetRevenue(newNetRevenue);
       setFeePercent(newFeePercent);
-      setPageCache(salesCacheKey(d), { sales: newSales, totalRevenue: newTotalRevenue, totalFees: newTotalFees, netRevenue: newNetRevenue, feePercent: newFeePercent });
+      setTrueProfit(newTrueProfit);
+      setItemsWithCost(newItemsWithCost);
+      setItemsMissingCost(newItemsMissingCost);
+      setPageCache(salesCacheKey(d), {
+        sales: newSales,
+        totalRevenue: newTotalRevenue,
+        totalFees: newTotalFees,
+        netRevenue: newNetRevenue,
+        feePercent: newFeePercent,
+        trueProfit: newTrueProfit,
+        itemsWithCost: newItemsWithCost,
+        itemsMissingCost: newItemsMissingCost,
+      });
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -205,6 +226,17 @@ export default function SalesPage() {
             Estimated at {feePercent}% + eBay&apos;s per-order fee — not your exact eBay invoice.{" "}
             <Link href="/settings" className="underline">Adjust rate</Link>
           </p>
+          {itemsWithCost > 0 && (
+            <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+              <p className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>True profit (after fees &amp; cost)</p>
+              <p className="text-sm font-semibold" style={{ color: "var(--success)" }}>${trueProfit.toFixed(2)}</p>
+              {itemsMissingCost > 0 && (
+                <p className="text-[10px] mt-1 leading-relaxed" style={{ color: "var(--text-tertiary)" }}>
+                  {itemsMissingCost} of {itemsWithCost + itemsMissingCost} sale{itemsWithCost + itemsMissingCost !== 1 ? "s" : ""} have no cost entered — showing profit for the rest.
+                </p>
+              )}
+            </div>
+          )}
         </div>
       )}
 

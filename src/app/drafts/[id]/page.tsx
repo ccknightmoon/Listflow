@@ -27,6 +27,7 @@ interface Draft {
   condition: string | null;
   flaws: string | null;
   suggested_price: number | null;
+  cost_basis: number | null;
   avg_sold: number | null;
   active_range_low: number | null;
   active_range_high: number | null;
@@ -105,6 +106,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [condition, setCondition] = useState("");
   const [flaws, setFlaws] = useState("");
   const [price, setPrice] = useState("");
+  const [cost, setCost] = useState(""); // cost_basis (migration 017, src/lib/profit.ts)
   const [customSku, setCustomSku] = useState("");
   const [itemType, setItemType] = useState("");
   const [style, setStyle] = useState("");
@@ -152,6 +154,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         setCondition(str(d.condition));
         setFlaws(str(d.flaws));
         setPrice(d.suggested_price != null ? String(d.suggested_price) : "");
+        setCost(d.cost_basis != null ? String(d.cost_basis) : "");
         setCustomSku(str(d.custom_sku));
         setItemType(str(d.item_type));
         setStyle(str(d.style));
@@ -296,6 +299,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         body: JSON.stringify({
           title, brand, color, size, condition, flaws,
           suggestedPrice: price ? Number(price) : null,
+          costBasis: cost ? Number(cost) : null,
           customSku, itemType, style, material, theme,
           sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
@@ -331,6 +335,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         body: JSON.stringify({
           title, brand, color, size, condition, flaws,
           suggestedPrice: price ? Number(price) : null,
+          costBasis: cost ? Number(cost) : null,
           customSku, itemType, style, material, theme,
           sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
@@ -353,6 +358,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           body: JSON.stringify({
             title, brand, color, size, condition, flaws,
             suggestedPrice: price ? Number(price) : null,
+            costBasis: cost ? Number(cost) : null,
             customSku, itemType, style, material, theme,
             sleeveLength, neckline, fit, pattern, description,
             storeCategoryId, storeCategoryName,
@@ -438,6 +444,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           body: JSON.stringify({
             title, brand, color, size, condition, flaws,
             suggestedPrice: data.suggestedPrice ?? (price ? Number(price) : null),
+            costBasis: cost ? Number(cost) : null,
             customSku, itemType, style, material, theme,
             sleeveLength, neckline, fit, pattern, description,
             vintage, character, characterFamily, yearManufactured, season,
@@ -757,6 +764,18 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               onChange={(e) => setPrice(e.target.value)}
             />
           </div>
+        </div>
+        <div>
+          <label className="text-xs text-[var(--text-secondary)] mb-1 block">Cost (what you paid, optional)</label>
+          <input
+            className="input w-full"
+            type="number"
+            min="0"
+            step="0.01"
+            placeholder="0.00"
+            value={cost}
+            onChange={(e) => setCost(e.target.value)}
+          />
         </div>
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">SKU (optional — alphanumeric only)</label>
