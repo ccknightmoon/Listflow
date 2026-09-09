@@ -25,6 +25,7 @@ import {
   ListChecks,
   ArrowUpToLine,
   Scissors,
+  AlertTriangle,
 } from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
@@ -32,6 +33,7 @@ import { apiFetch } from "@/lib/api";
 import { AiResult as BaseAiResult, formatMeasurements } from "@/lib/ai-result";
 import { estimateIsHeavy, estimateShipping } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
+import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
 
 interface SlotImage {
   data: string;
@@ -281,6 +283,12 @@ export default function BatchUploadPage() {
   // holds the most recent removal; a second delete just replaces it.
   const [undoGroups, setUndoGroups] = useState<number[][] | null>(null);
   const [undoLabel, setUndoLabel] = useState("");
+
+  // This page doesn't render <BottomNav />, which is where the same
+  // 75%-of-cap warning normally lives -- show it directly here instead,
+  // since this is exactly where AI calls actually happen. See
+  // src/lib/use-ai-usage-warning.ts.
+  const { showWarning: showUsageWarning, message: usageWarningMessage } = useAiUsageWarning();
 
   useEffect(() => {
     fetch("/api/settings")
@@ -1268,6 +1276,16 @@ export default function BatchUploadPage() {
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "var(--danger)" }}>
           {error}
+        </div>
+      )}
+
+      {showUsageWarning && (
+        <div
+          className="card p-3 mb-4 text-sm flex items-center gap-2"
+          style={{ background: "var(--warning-bg)", borderColor: "var(--warning-border)" }}
+        >
+          <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: "var(--danger)" }} />
+          <span>{usageWarningMessage}</span>
         </div>
       )}
 
