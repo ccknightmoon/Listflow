@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight } from "lucide-react";
+import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight, Tag } from "lucide-react";
 import BottomNav from "@/components/BottomNav";
 import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
@@ -18,6 +18,7 @@ const STATS_CACHE_KEY = "dashboard:stats";
 const SHIP_COUNT_CACHE_KEY = "dashboard:shipCount";
 const DISPLAY_NAME_CACHE_KEY = "dashboard:displayName";
 const TREND_SALES_CACHE_KEY = "dashboard:trendSales";
+const PENDING_OFFERS_CACHE_KEY = "dashboard:pendingOffers";
 
 interface Stats {
   drafts: number;
@@ -47,6 +48,12 @@ export default function DashboardPage() {
   // Backs the hero tile's trend sparkline — null until loaded (or if it
   // fails, which just means the tile shows no sparkline, same as today).
   const [trendSales, setTrendSales] = useState<BucketableSale[] | null>(() => getPageCache<BucketableSale[]>(TREND_SALES_CACHE_KEY) ?? null);
+  // Best Offers pending a response -- see store/page.tsx's "Pending
+  // offers" card for why this isn't a bottom-nav badge (one GetBestOffers
+  // call per active listing makes it too expensive to fire on every
+  // in-app navigation). Firing it once here, when the dashboard itself
+  // loads, is the same cost class as the other independent fetches below.
+  const [pendingOffersCount, setPendingOffersCount] = useState<number | null>(() => getPageCache<number>(PENDING_OFFERS_CACHE_KEY) ?? null);
 
   const supabase = useMemo(
     () =>
@@ -123,6 +130,22 @@ export default function DashboardPage() {
       } catch {
         // Transient failure — leave the sparkline (cached or none) as-is
         // instead of blanking it.
+      }
+    })();
+
+    void (async () => {
+      try {
+        const offersData = await apiFetch<{ offers?: unknown[]; error?: string }>("/api/ebay/offers");
+        if (!offersData.error) {
+          const count = offersData.offers?.length ?? 0;
+          setPendingOffersCount(count);
+          setPageCache(PENDING_OFFERS_CACHE_KEY, count);
+        }
+        // On a reported error (including "not connected"), leave the count
+        // as whatever it already was — same reasoning as every other tile
+        // here.
+      } catch {
+        // Transient failure — leave the cached count (or null) alone.
       }
     })();
   }, [supabase]);
@@ -294,6 +317,38 @@ export default function DashboardPage() {
           )}
           <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--danger)" }} />
         </MorphLink>
+
+        <Link
+          href="/offers"
+          className="card d6 stagger col-span-2 p-3.5 flex items-center gap-3 active:scale-[.98]"
+          style={{ transitionTimingFunction: "var(--spring)" }}
+        >
+          <div
+            className="w-[34px] h-[34px] rounded-xl flex items-center justify-center flex-shrink-0"
+            style={{ background: "color-mix(in srgb, var(--accent) 16%, var(--bg-surface))", color: "var(--accent)" }}
+          >
+            <Tag className="w-4 h-4" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-bold">Pending offers</p>
+            <p className="text-[11.5px]" style={{ color: "var(--text-tertiary)" }}>
+              {pendingOffersCount === null
+                ? "Check for Best Offers"
+                : pendingOffersCount === 0
+                ? "All caught up"
+                : "Waiting on your response · tap to view"}
+            </p>
+          </div>
+          {pendingOffersCount !== null && pendingOffersCount > 0 && (
+            <span
+              className="text-[11px] font-extrabold min-w-[20px] h-5 rounded-full flex items-center justify-center px-1.5 text-white flex-shrink-0"
+              style={{ background: "var(--accent)" }}
+            >
+              {pendingOffersCount}
+            </span>
+          )}
+          <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--accent)" }} />
+        </Link>
       </div>
 
       {!statsLoaded && (
