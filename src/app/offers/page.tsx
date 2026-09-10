@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, RefreshCw, Shirt, Tag, Check, X, PencilLine } from "lucide-react";
 import Toast from "@/components/Toast";
@@ -62,6 +62,15 @@ export default function OffersPage() {
   const [counterOpenKey, setCounterOpenKey] = useState<string | null>(null);
   const [counterPrices, setCounterPrices] = useState<Record<string, string>>({});
 
+  // Guards against out-of-order responses: the silent load fired on mount
+  // and a manual refresh-button click can now overlap (e.g. tapping
+  // refresh right after landing on a cached page). Each load() call stamps
+  // its own id here; if a response comes back after a newer call has
+  // already started, it's discarded instead of overwriting fresher state
+  // or clearing the loading spinner out from under a request that's still
+  // in flight.
+  const loadIdRef = useRef(0);
+
   useEffect(() => {
     load({ silent: getPageCache<PendingOffer[]>(OFFERS_CACHE_KEY) !== undefined });
   }, []);
@@ -71,6 +80,7 @@ export default function OffersPage() {
   useEffect(() => { setPageCache(OFFERS_CACHE_KEY, offers); }, [offers]);
 
   async function load(opts: { silent?: boolean } = {}) {
+    const requestId = ++loadIdRef.current;
     if (!opts.silent) setLoading(true);
     setError(null);
     setNeedsConnect(false);
@@ -84,6 +94,9 @@ export default function OffersPage() {
         connect?: boolean;
         reconnect?: boolean;
       }>("/api/ebay/offers");
+      // A newer load() call started while this one was in flight -- let
+      // that one's result stand instead of this (now stale) response.
+      if (requestId !== loadIdRef.current) return;
       if (data.error) {
         setError(data.error);
         setNeedsConnect(!!data.connect);
@@ -102,9 +115,10 @@ export default function OffersPage() {
       setListingsChecked(data.listingsChecked ?? 0);
       setTruncated(!!data.truncated);
     } catch {
+      if (requestId !== loadIdRef.current) return;
       setError("Failed to load pending offers");
     } finally {
-      setLoading(false);
+      if (requestId === loadIdRef.current) setLoading(false);
     }
   }
 

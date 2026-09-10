@@ -1,5 +1,6 @@
 import { tradingRequest } from "@/lib/ebay-inventory";
 import { getEbayContext } from "@/lib/ebay-request-context";
+import { createTtlDedupeCache } from "@/lib/ttl-cache";
 
 // Shared XML helpers + eBay "My eBay Selling" listing-fetch logic, used by
 // both /api/ebay/store (all active/unsold listings) and /api/ebay/offers
@@ -109,10 +110,10 @@ async function fetchAllOfListTypeUncached(listType: ListType): Promise<{ items: 
 // offers, messages, and store all independently call
 // fetchAllOfListTypeUncached("ActiveList") to get essentially the same
 // "every active listing" snapshot. Without this, one dashboard view could
-// mean 3+ near-duplicate GetMyeBaySelling round trips to eBay at once. Same
-// "thundering herd" shape as getAccessToken() in ebay-oauth.ts, so the same
-// fix: a short-lived cache keyed by userId+listType, with concurrent
-// callers sharing one in-flight fetch instead of each firing their own.
+// mean 3+ near-duplicate GetMyeBaySelling round trips to eBay at once.
+// createTtlDedupeCache (src/lib/ttl-cache.ts) is the same "thundering
+// herd" fix as getAccessToken() in ebay-oauth.ts, pulled out as its own
+// generic, unit-tested module rather than a one-off Map pair here.
 //
 // TTL is deliberately short (15s, not the 2-minute client-side page-cache
 // window in src/lib/page-cache.ts) -- this backs server-side reads that
@@ -121,36 +122,20 @@ async function fetchAllOfListTypeUncached(listType: ListType): Promise<{ items: 
 // real refresh.
 const LISTINGS_CACHE_TTL_MS = 15_000;
 type ListingsResult = { items: string[]; total: number } | ListTypeError;
-const listingsCache = new Map<string, { value: ListingsResult; expires: number }>();
-const inFlightListings = new Map<string, Promise<ListingsResult>>();
+const listingsCache = createTtlDedupeCache<ListingsResult>();
 
 export async function fetchAllOfListType(listType: ListType): Promise<ListingsResult> {
   const { userId } = getEbayContext();
   const cacheKey = `${userId}:${listType}`;
 
-  const cached = listingsCache.get(cacheKey);
-  if (cached && cached.expires > Date.now()) {
-    return cached.value;
-  }
-
-  const existing = inFlightListings.get(cacheKey);
-  if (existing) return existing;
-
-  const promise = fetchAllOfListTypeUncached(listType)
-    .then((result) => {
-      // Don't cache a failure -- a transient eBay error shouldn't be
-      // replayed to every other concurrent caller for the next 15s.
-      if (!isListTypeError(result)) {
-        listingsCache.set(cacheKey, { value: result, expires: Date.now() + LISTINGS_CACHE_TTL_MS });
-      }
-      return result;
-    })
-    .finally(() => {
-      inFlightListings.delete(cacheKey);
-    });
-
-  inFlightListings.set(cacheKey, promise);
-  return promise;
+  return listingsCache.get(
+    cacheKey,
+    LISTINGS_CACHE_TTL_MS,
+    () => fetchAllOfListTypeUncached(listType),
+    // Don't cache a failure -- a transient eBay error shouldn't be
+    // replayed to every other concurrent caller for the next 15s.
+    (result) => !isListTypeError(result)
+  );
 }
 
 export function toListing(item: string, status: "active" | "ended") {

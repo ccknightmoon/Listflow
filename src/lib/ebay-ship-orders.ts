@@ -1,4 +1,5 @@
 import { tradingRequest } from "@/lib/ebay-inventory";
+import { xmlFind, xmlFindAll } from "@/lib/ebay-listings";
 
 // Moved out of api/ebay/ship/route.ts so the daily-digest cron
 // (src/app/api/cron/daily-digest/route.ts) can get an unshipped-orders
@@ -10,19 +11,11 @@ import { tradingRequest } from "@/lib/ebay-inventory";
 // this function cheap to call from the cron for every connected user.
 // ship/route.ts calls this first, then layers its own thumbnail lookups
 // on top of whatever this returns.
-
-function xmlFind(xml: string, tag: string): string {
-  const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
-  return m?.[1]?.trim() ?? "";
-}
-
-function xmlFindAll(xml: string, tag: string): string[] {
-  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`, "g");
-  const results: string[] = [];
-  let m;
-  while ((m = re.exec(xml)) !== null) results.push(m[1].trim());
-  return results;
-}
+//
+// xmlFind/xmlFindAll used to be a third local copy of these regex helpers
+// (ebay-listings.ts's own header comment already exists to stop that
+// pattern -- offers/route.ts and ebay-messages.ts had the same
+// duplication, cleaned up earlier); reusing the shared versions here too.
 
 export interface ShippingAddress {
   name: string;
