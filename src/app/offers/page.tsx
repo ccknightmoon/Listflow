@@ -88,7 +88,14 @@ export default function OffersPage() {
         setError(data.error);
         setNeedsConnect(!!data.connect);
         setNeedsReconnect(!!data.reconnect);
-        setOffers([]);
+        // Don't clear the list on a transient error -- this branch also
+        // fires for routine eBay hiccups (not just a real disconnect), and
+        // load() runs silently on every revisit within the page-cache
+        // window (src/lib/page-cache.ts). Wiping a good cached list the
+        // moment a background refresh hits a blip would make a passing
+        // eBay error look worse than doing nothing at all -- same
+        // "fall back to what we already had" reasoning store/page.tsx
+        // uses for its own eBay failures.
         return;
       }
       setOffers(data.offers ?? []);
