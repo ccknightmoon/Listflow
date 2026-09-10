@@ -51,3 +51,23 @@ Fix later: test the bigger request for speed, then add watch count into the stal
 The buyer-questions feature (view and reply to questions in the app) is built and passes all our checks, but hasn't been tried on a real question from a real buyer yet — there was no way to create one to test with from here.
 
 Fix later: try it next time a real buyer question comes in, and let us know if anything looks off.
+
+---
+
+## Password reset link doesn't actually work yet
+
+The "forgot password" email sends fine, but clicking the link inside it will get rejected instead of taking you to a working reset page.
+
+Why: Supabase needs to be told this app's real web address is allowed to receive that link (a security setting), and that's never been added — it can only be done from Supabase's own dashboard, not from here.
+
+Fix later: in the Supabase dashboard, go to Authentication → URL Configuration → Redirect URLs, and add your app's real address plus `/reset-password` (or a wildcard like `yourapp.com/**`). One-time, a couple minutes, no code change.
+
+---
+
+## Daily email alerts aren't actually sending yet
+
+The "email me when something needs my attention" toggle in Settings is live and saves correctly, but turning it on doesn't send anything — there's nothing wrong with the email-building code itself, it's just never being triggered.
+
+Why: sending needs to be checked once an hour (so it can catch whatever time of day you picked), but Vercel's free plan only allows a scheduled job to run once a day, not once an hour.
+
+Fix later: sign up for a free outside scheduler (like cron-job.org) that pings the app once an hour with the right secret key — I can walk you through the signup, or set one up through my own scheduling instead if you'd rather hand me that secret key from Vercel.
