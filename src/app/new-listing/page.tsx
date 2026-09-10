@@ -102,6 +102,12 @@ export default function NewListingPage() {
   const [listError, setListError] = useState<string | null>(null);
   const [missingAspectsWarning, setMissingAspectsWarning] = useState<string[] | null>(null);
   const [storeCategoryWarning, setStoreCategoryWarning] = useState<string | null>(null);
+  // Public eBay item URL for the listing that was just published — lets the
+  // "eBay wants these fields" warning link straight to the live listing
+  // instead of leaving the seller to go find it themselves. Comes straight
+  // from /api/ebay/list's existing `url` field (already computed there from
+  // the same listingId), not rebuilt here.
+  const [listedUrl, setListedUrl] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [isHeavy, setIsHeavy] = useState(false);
@@ -416,7 +422,7 @@ export default function NewListingPage() {
     try {
       const draftId = await handleSaveDraft();
       if (!draftId) throw new Error("Could not save draft before listing");
-      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string }>("/api/ebay/list", {
+      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string; url?: string | null }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draftId, isHeavy, shippingCost: shippingCost ? parseFloat(shippingCost) : undefined }),
@@ -427,8 +433,13 @@ export default function NewListingPage() {
       const missingRequiredAspects = data.missingRequiredAspects ?? [];
       setMissingAspectsWarning(missingRequiredAspects.length > 0 ? missingRequiredAspects : null);
       setStoreCategoryWarning(data.storeCategoryWarning ?? null);
+      setListedUrl(data.url ?? null);
       window.dispatchEvent(new Event("listflow:counts-changed"));
-      setTimeout(() => router.push("/store"), 1500);
+      // No auto-redirect here anymore — a seller doing several items in a
+      // row in this single-item flow needs a way to stay put and start the
+      // next one instead of being bounced to /store after every listing.
+      // The success panel below offers both "List another item" (reset,
+      // below) and "Go to Store" explicitly.
     } catch (err) {
       setListStatus("error");
       setListError((err as Error).message);
@@ -438,6 +449,45 @@ export default function NewListingPage() {
   async function handleSaveDraftAndRedirect() {
     const id = await handleSaveDraft();
     if (id) setTimeout(() => router.push("/drafts"), 1200);
+  }
+
+  // Clears every per-item field back to a blank form so a seller can go
+  // straight into the next item after a successful listing, without
+  // navigating away and losing the page (see handleListOnEbay above).
+  // Deliberately does NOT touch storeCategories/aiStoreCategorySuggestions —
+  // those are account-level settings fetched once on mount, not per-item.
+  function resetForOtherItem() {
+    setPhotos({});
+    Object.values(fileInputs.current).forEach((el) => {
+      if (el) el.value = "";
+    });
+    setTitle("");
+    setCondition("Excellent used");
+    setFlaws("");
+    setResult(null);
+    setAiResult(null);
+    setError(null);
+    setSaveStatus("idle");
+    setSavedDraftId(null);
+    setPhotoUploadWarning(null);
+    setListStatus("idle");
+    setListError(null);
+    setMissingAspectsWarning(null);
+    setStoreCategoryWarning(null);
+    setListedUrl(null);
+    setNeedsConnect(false);
+    setNeedsReconnect(false);
+    setIsHeavy(false);
+    setShippingCost("");
+    setCustomPrice("");
+    setCost("");
+    setBrand("");
+    setSize("");
+    setColor("");
+    setStoreCategoryId(null);
+    setStoreCategoryName(null);
+    setStoreCategoryPickerOpen(false);
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   return (
@@ -754,41 +804,60 @@ export default function NewListingPage() {
                 <p className="text-xs mb-2" style={{ color: "var(--warning-border)" }}>
                   Listed, but eBay wants these fields for this category and the AI
                   couldn&apos;t tell: <strong>{missingAspectsWarning.join(", ")}</strong>.
+                  {listedUrl && (
+                    <>
+                      {" "}
+                      <a href={listedUrl} target="_blank" rel="noopener noreferrer" className="underline font-medium">
+                        Open the listing on eBay to add them →
+                      </a>
+                    </>
+                  )}
                 </p>
               )}
               {storeCategoryWarning && (
                 <p className="text-xs mb-2" style={{ color: "var(--warning-border)" }}>{storeCategoryWarning}</p>
               )}
-              <div className="flex gap-2">
-                <button
-                  className="btn flex-1"
-                  onClick={handleSaveDraftAndRedirect}
-                  disabled={saveStatus === "saving" || saveStatus === "saved" || listStatus === "listing"}
-                >
-                  {saveStatus === "saving" ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : saveStatus === "saved" ? (
+              {listStatus === "listed" ? (
+                <div className="flex gap-2">
+                  <button className="btn flex-1" onClick={resetForOtherItem}>
+                    <Sparkles className="w-4 h-4" />
+                    List another item
+                  </button>
+                  <button className="btn btn-primary flex-1" onClick={() => router.push("/store")}>
                     <Check className="w-4 h-4" />
-                  ) : (
-                    <FileText className="w-4 h-4" />
-                  )}
-                  {saveStatus === "saved" ? "Saved!" : saveStatus === "saving" ? "Saving..." : "Save draft"}
-                </button>
-                <button
-                  className="btn btn-primary flex-1"
-                  onClick={handleListOnEbay}
-                  disabled={listStatus === "listing" || listStatus === "listed"}
-                >
-                  {listStatus === "listing" ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : listStatus === "listed" ? (
-                    <Check className="w-4 h-4" />
-                  ) : (
-                    <Upload className="w-4 h-4" />
-                  )}
-                  {listStatus === "listed" ? "Listed!" : listStatus === "listing" ? "Listing..." : "List on eBay"}
-                </button>
-              </div>
+                    Done — go to Store
+                  </button>
+                </div>
+              ) : (
+                <div className="flex gap-2">
+                  <button
+                    className="btn flex-1"
+                    onClick={handleSaveDraftAndRedirect}
+                    disabled={saveStatus === "saving" || saveStatus === "saved" || listStatus === "listing"}
+                  >
+                    {saveStatus === "saving" ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : saveStatus === "saved" ? (
+                      <Check className="w-4 h-4" />
+                    ) : (
+                      <FileText className="w-4 h-4" />
+                    )}
+                    {saveStatus === "saved" ? "Saved!" : saveStatus === "saving" ? "Saving..." : "Save draft"}
+                  </button>
+                  <button
+                    className="btn btn-primary flex-1"
+                    onClick={handleListOnEbay}
+                    disabled={listStatus === "listing"}
+                  >
+                    {listStatus === "listing" ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4" />
+                    )}
+                    {listStatus === "listing" ? "Listing..." : "List on eBay"}
+                  </button>
+                </div>
+              )}
             </>
           ) : null}
         </div>
