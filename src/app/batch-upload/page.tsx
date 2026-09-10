@@ -244,6 +244,11 @@ export default function BatchUploadPage() {
   const [listErrors, setListErrors] = useState<Record<number, string>>({});
   const [listMissingAspects, setListMissingAspects] = useState<Record<number, string[]>>({});
   const [listStoreCategoryWarnings, setListStoreCategoryWarnings] = useState<Record<number, string>>({});
+  // Public eBay item URL per listed item, straight from /api/ebay/list's
+  // existing `url` field — lets the "eBay wants these fields" warning below
+  // link directly to that specific listing instead of leaving the seller to
+  // go find it themselves. Same pattern as new-listing/page.tsx.
+  const [listedUrls, setListedUrls] = useState<Record<number, string>>({});
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
   const [customPrices, setCustomPrices] = useState<Record<number, string>>({});
@@ -1311,7 +1316,7 @@ export default function BatchUploadPage() {
 
     setListStatus((prev) => ({ ...prev, [index]: "listing" }));
     try {
-      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string }>("/api/ebay/list", {
+      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string; url?: string | null }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ draftId: id, isHeavy: heavyItems[index] ?? false, shippingCost: shippingCosts[index] ? parseFloat(shippingCosts[index]) : undefined }),
@@ -1325,6 +1330,9 @@ export default function BatchUploadPage() {
           ...prev,
           [index]: [...missingRequiredAspects],
         }));
+      }
+      if (data.url) {
+        setListedUrls((prev) => ({ ...prev, [index]: data.url as string }));
       }
       if (data.storeCategoryWarning) {
         setListStoreCategoryWarnings((prev) => ({ ...prev, [index]: data.storeCategoryWarning as string }));
@@ -2457,6 +2465,14 @@ export default function BatchUploadPage() {
                     <p className="text-xs mb-2" style={{ color: "var(--warning-border)" }}>
                       Listed, but eBay wants these fields for this category and the AI
                       couldn&apos;t tell: <strong>{listMissingAspects[i].join(", ")}</strong>.
+                      {listedUrls[i] && (
+                        <>
+                          {" "}
+                          <a href={listedUrls[i]} target="_blank" rel="noopener noreferrer" className="underline font-medium">
+                            Open the listing on eBay to add them →
+                          </a>
+                        </>
+                      )}
                     </p>
                   )}
                   {listStatus[i] === "listed" && listStoreCategoryWarnings[i] && (
