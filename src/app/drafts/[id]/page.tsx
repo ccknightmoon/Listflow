@@ -3,7 +3,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy } from "lucide-react";
 import { estimateShipping } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
 import { uploadThumbnail } from "@/lib/storage";
@@ -65,6 +65,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
   const [listing, setListing] = useState(false);
   const [listingUrl, setListingUrl] = useState<string | null>(null);
   const [justListed, setJustListed] = useState(false);
@@ -571,6 +572,26 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  // Spins off a fresh draft with this one's details (title, brand,
+  // condition, all the eBay item-specifics fields) but no photos/SKU/
+  // listing ID — see the duplicate route's own comment for why. Useful for
+  // listing near-identical items (same shirt in another size, more of the
+  // same lot) without redoing the whole AI-analysis flow each time.
+  async function handleDuplicate() {
+    setDuplicating(true);
+    setError(null);
+    try {
+      const data = await apiFetch<{ draft?: { id?: string }; error?: string }>(`/api/drafts/${id}/duplicate`, {
+        method: "POST",
+      });
+      if (data.error || !data.draft?.id) throw new Error(data.error ?? "Could not duplicate this draft");
+      router.push(`/drafts/${data.draft.id}`);
+    } catch (err) {
+      setError((err as Error).message);
+      setDuplicating(false);
+    }
+  }
+
   if (loading) {
     return (
       <main className="min-h-screen max-w-md mx-auto px-5 pt-6" style={{ viewTransitionName: "draft-detail" }}>
@@ -604,17 +625,31 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           </Link>
           <h1 className="text-xl font-medium">Edit draft</h1>
         </div>
-        <button
-          onClick={handleDelete}
-          disabled={deleting}
-          className="p-2 rounded-lg hover:bg-[var(--bg-page)]"
-        >
-          {deleting ? (
-            <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--danger)" }} />
-          ) : (
-            <Trash2 className="w-4 h-4" style={{ color: "var(--danger)" }} />
-          )}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={handleDuplicate}
+            disabled={duplicating}
+            title="Duplicate this item — start a new draft with the same details"
+            className="p-2 rounded-lg hover:bg-[var(--bg-page)]"
+          >
+            {duplicating ? (
+              <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--text-secondary)" }} />
+            ) : (
+              <Copy className="w-4 h-4" style={{ color: "var(--text-secondary)" }} />
+            )}
+          </button>
+          <button
+            onClick={handleDelete}
+            disabled={deleting}
+            className="p-2 rounded-lg hover:bg-[var(--bg-page)]"
+          >
+            {deleting ? (
+              <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--danger)" }} />
+            ) : (
+              <Trash2 className="w-4 h-4" style={{ color: "var(--danger)" }} />
+            )}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -632,8 +667,14 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       {missingAspectsWarning && missingAspectsWarning.length > 0 && (
         <div className="card p-3 mb-4 text-sm" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)", color: "var(--warning-border)" }}>
           Listed, but eBay lists these as required for this category and the
-          AI couldn&apos;t determine them: <strong>{missingAspectsWarning.join(", ")}</strong>.
-          Consider editing the listing on eBay to fill them in for better search placement.
+          AI couldn&apos;t determine them: <strong>{missingAspectsWarning.join(", ")}</strong>.{" "}
+          {listingUrl ? (
+            <a href={listingUrl} target="_blank" rel="noopener noreferrer" className="underline font-medium">
+              Open the listing on eBay to add them →
+            </a>
+          ) : (
+            "Consider editing the listing on eBay to fill them in for better search placement."
+          )}
         </div>
       )}
 
