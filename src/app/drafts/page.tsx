@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X, Copy } from "lucide-react";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
@@ -55,6 +55,7 @@ export default function DraftsPage() {
   const [shippingCostMap, setShippingCostMap] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
   useEffect(() => { loadDrafts(); }, []);
   // Keeps the cache in sync with every change to `drafts` — the initial
@@ -101,6 +102,27 @@ export default function DraftsPage() {
       setError((err as Error).message);
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Spins off a fresh draft with this row's details but no photos/SKU/
+  // listing ID (see the duplicate route's own comment), then goes straight
+  // into it for editing — for listing near-identical items (same shirt in
+  // another size, more of the same lot) without redoing the full
+  // AI-analysis flow from scratch each time.
+  async function handleDuplicate(e: React.MouseEvent, id: string) {
+    e.stopPropagation();
+    setDuplicatingId(id);
+    setError(null);
+    try {
+      const data = await apiFetch<{ draft?: { id?: string }; error?: string }>(`/api/drafts/${id}/duplicate`, {
+        method: "POST",
+      });
+      if (data.error || !data.draft?.id) throw new Error(data.error ?? "Could not duplicate this draft");
+      router.push(`/drafts/${data.draft.id}`);
+    } catch (err) {
+      setError((err as Error).message);
+      setDuplicatingId(null);
     }
   }
 
@@ -437,6 +459,19 @@ export default function DraftsPage() {
                       {d.created_at ? ` · ${timeAgo(d.created_at)}` : ""}
                     </p>
                   </div>
+
+                  <button
+                    onClick={(e) => handleDuplicate(e, d.id)}
+                    disabled={duplicatingId === d.id}
+                    title="Duplicate this item"
+                    className="tap p-1.5 rounded-lg flex-shrink-0 hover:bg-[var(--bg-page)]"
+                  >
+                    {duplicatingId === d.id ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--text-tertiary)" }} />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" style={{ color: "var(--text-tertiary)" }} />
+                    )}
+                  </button>
 
                   <svg width="6" height="10" viewBox="0 0 6 10" fill="none" className="flex-shrink-0">
                     <path d="M1 1L5 5L1 9" stroke="var(--text-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
