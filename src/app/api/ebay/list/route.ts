@@ -18,13 +18,19 @@ export async function POST(req: NextRequest) {
   if (!auth.user) return auth.unauthorized;
   const { supabase } = auth;
 
-  let body: { draftId?: string; shippingMode?: unknown; shippingCost?: unknown; customSku?: string; isHeavy?: unknown };
+  let body: { draftId?: string; shippingMode?: unknown; shippingCost?: unknown; customSku?: string; isHeavy?: unknown; allowRelist?: unknown };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
-  const { draftId, shippingMode: rawShippingMode, shippingCost: rawShippingCost, customSku: requestCustomSku, isHeavy: rawIsHeavy } = body;
+  const { draftId, shippingMode: rawShippingMode, shippingCost: rawShippingCost, customSku: requestCustomSku, isHeavy: rawIsHeavy, allowRelist: rawAllowRelist } = body;
+  // Only drafts/[id]'s explicit "Relist on eBay" button (shown once a
+  // draft already has a live listing) sends this as true -- every other
+  // caller (new-listing, batch-upload, the Drafts bulk "List on eBay",
+  // and any lost-response retry of those) never legitimately wants to
+  // blow away an already-successful listing, so it stays false by default.
+  const allowRelist = rawAllowRelist === true;
   const shippingCost = typeof rawShippingCost === "number" && rawShippingCost > 0 ? rawShippingCost : undefined;
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
@@ -74,6 +80,27 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
+
+    // Idempotent-publish guard. Without this, a retry that re-submits an
+    // item whose FIRST call actually already succeeded on eBay's side (the
+    // response just never made it back -- a dropped connection, a batch
+    // "retry failed listings" re-processing something that wasn't really
+    // still failed) would run this whole handler again: purge the just-
+    // created offer/inventory item and publish a brand new one, silently
+    // replacing a live listing (losing its views/watchers) instead of
+    // recognizing it already worked. Short-circuits to the same success
+    // shape a fresh publish returns. The one legitimate case that DOES
+    // want exactly that delete-and-recreate behavior -- editing an
+    // already-listed draft and pushing the changes live -- opts in with
+    // allowRelist: true (see drafts/[id]/page.tsx's handlePublish).
+    if (draft.ebay_listing_id && !allowRelist) {
+      return NextResponse.json({
+        success: true,
+        listingId: draft.ebay_listing_id,
+        url: `https://www.ebay.com/itm/${draft.ebay_listing_id}`,
+        alreadyListed: true,
+      });
+    }
     const draftPhotoCount = Array.isArray(draft.photo_urls) ? draft.photo_urls.length : draft.thumbnail_url ? 1 : 0;
     if (draftPhotoCount < 1) return NextResponse.json({ error: "Add at least one photo before listing." }, { status: 400 });
     if (draftPhotoCount > 24) return NextResponse.json({ error: "eBay allows up to 24 photos per listing." }, { status: 400 });

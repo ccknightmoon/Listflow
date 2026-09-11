@@ -444,7 +444,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; url?: string; listingId?: string; storeCategoryWarning?: string }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId: id, customSku: customSku || undefined, shippingMode, isHeavy: shippingMode === "buyer_pays", shippingCost: shippingMode === "buyer_pays" && shippingCost ? parseFloat(shippingCost) : undefined }),
+        body: JSON.stringify({
+          draftId: id,
+          customSku: customSku || undefined,
+          shippingMode,
+          isHeavy: shippingMode === "buyer_pays",
+          shippingCost: shippingMode === "buyer_pays" && shippingCost ? parseFloat(shippingCost) : undefined,
+          // This is the one call site that should be allowed to overwrite an
+          // already-live listing -- the button already reads "Relist on eBay"
+          // once `listingUrl` is set (see its label below), so the request
+          // makes that same true/false explicit to the server's idempotent-
+          // publish guard instead of leaving it to infer intent.
+          allowRelist: Boolean(listingUrl),
+        }),
       });
       if (data.connect) { setNeedsConnect(true); throw new Error(data.error ?? "Failed to list"); }
       if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error ?? "Failed to list"); }
