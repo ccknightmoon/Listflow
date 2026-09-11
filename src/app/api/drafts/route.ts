@@ -22,6 +22,9 @@ function isValidShippingCost(value: unknown): value is number {
 function isValidStoreCategoryId(value: unknown): value is string | null {
   return value === null || value === undefined || (typeof value === "string" && /^\d+$/.test(value));
 }
+function isValidShippingMode(value: unknown): value is "free" | "calculated" | "buyer_pays" {
+  return value === "free" || value === "calculated" || value === "buyer_pays";
+}
 
 export async function GET() {
   const auth = await requireUser();
@@ -37,7 +40,7 @@ export async function GET() {
   // all of that unused text over the wire on every visit to this page.
   const { data, error } = await auth.supabase
     .from("drafts")
-    .select("id, title, suggested_price, sell_odds, condition, thumbnail_url, created_at, ebay_listing_id, is_heavy, shipping_cost")
+    .select("id, title, suggested_price, sell_odds, condition, thumbnail_url, created_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode")
     .order("created_at", { ascending: false });
 
   if (error) {
@@ -98,6 +101,9 @@ export async function POST(req: NextRequest) {
   if (body.shippingCost !== undefined && body.shippingCost !== null && !isValidShippingCost(body.shippingCost)) {
     return NextResponse.json({ error: "shippingCost must be a non-negative number, or null." }, { status: 400 });
   }
+  if (body.shippingMode !== undefined && !isValidShippingMode(body.shippingMode)) {
+    return NextResponse.json({ error: "shippingMode must be 'free', 'calculated', or 'buyer_pays'." }, { status: 400 });
+  }
 
   const { data, error } = await auth.supabase
     .from("drafts")
@@ -139,6 +145,7 @@ export async function POST(req: NextRequest) {
         cost_basis: body.costBasis ?? null,
         is_heavy: body.isHeavy ?? false,
         shipping_cost: body.shippingCost ?? null,
+        shipping_mode: body.shippingMode ?? (body.isHeavy ? "buyer_pays" : "free"),
       },
     ])
     .select();

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import https from "node:https";
 import type { PriceSuggestion, Condition } from "@/lib/pricing";
 import { computeListAndFloor } from "@/lib/pricing";
-import { estimateShippingCost, estimateShipping } from "@/lib/shipping";
+import { estimateShippingCost, estimateShipping, parseShippingMode } from "@/lib/shipping";
 import { requireUser } from "@/lib/auth";
 
 export const runtime = "nodejs";
@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
 
-  const { title, brand, condition, image, isHeavy, itemType, size } = (await req.json()) as {
+  const { title, brand, condition, image, isHeavy, itemType, size, shippingMode: rawShippingMode } = (await req.json()) as {
     title: string;
     brand?: string;
     condition: Condition;
@@ -192,7 +192,11 @@ export async function POST(req: NextRequest) {
     isHeavy?: boolean;
     itemType?: string;
     size?: string;
+    shippingMode?: unknown;
   };
+  const shippingMode = rawShippingMode === undefined
+    ? (isHeavy ? "buyer_pays" : "free")
+    : parseShippingMode(rawShippingMode);
 
   if (!process.env.EBAY_CLIENT_ID || !process.env.EBAY_CLIENT_SECRET) {
     return NextResponse.json({ error: "eBay credentials not configured" }, { status: 500 });
@@ -253,7 +257,7 @@ export async function POST(req: NextRequest) {
   // here on top of that would charge buyers for shipping twice. Only fold
   // an estimated shipping cost into the price for non-heavy (free
   // shipping) items, where it actually needs to come out of the price.
-  const shippingCostToCover = isHeavy
+  const shippingCostToCover = shippingMode !== "free"
     ? 0
     : itemType
       ? estimateShipping(itemType, size).cost

@@ -64,17 +64,6 @@ export async function POST(req: NextRequest) {
   if (!connection) {
     return NextResponse.json({ error: "eBay not connected. Authorize your account to start listing.", connect: true }, { status: 400 });
   }
-  if (shippingMode === "calculated" && !connection.policies.shippingCalculatedId) {
-    return NextResponse.json({
-      error: "Calculated shipping isn't set up yet — pick your Calculated shipping policy in Settings → eBay Connection (create a \"Calculated: cost varies by buyer location\" shipping policy in eBay Seller Hub first if you haven't).",
-    }, { status: 400 });
-  }
-  if (shippingMode === "buyer_pays" && !connection.policies.shippingHeavyId) {
-    return NextResponse.json({
-      error: "Heavy-item shipping isn't set up yet — pick your flat-rate (heavy item) shipping policy in Settings → eBay Connection (create a flat-rate shipping policy in eBay Seller Hub first if you haven't).",
-    }, { status: 400 });
-  }
-
   return ebayContext.run(connection, async () => {
   try {
     const { data: draft, error: dbError } = await supabase
@@ -85,6 +74,19 @@ export async function POST(req: NextRequest) {
 
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
     if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before listing" }, { status: 400 });
+
+    const draftShippingMode = (draft.shipping_mode === "calculated" || draft.shipping_mode === "buyer_pays") ? draft.shipping_mode : "free";
+    if (rawShippingMode === undefined && draft.shipping_mode) shippingMode = draftShippingMode;
+    if (shippingMode === "calculated" && !connection.policies.shippingCalculatedId) {
+      return NextResponse.json({
+        error: "Calculated shipping isn't set up yet — pick your Calculated shipping policy in Settings → eBay Connection (create a calculated shipping policy in eBay Seller Hub first if you haven't).",
+      }, { status: 400 });
+    }
+    if (shippingMode === "buyer_pays" && !connection.policies.shippingHeavyId) {
+      return NextResponse.json({
+        error: "Flat-rate shipping isn't set up yet — pick a flat-rate shipping policy in Settings → eBay Connection.",
+      }, { status: 400 });
+    }
 
     // Auto-assign next sequential SKU if none set. NOTE: this read-then-write
     // is still not fully race-proof under truly concurrent "list all" clicks —

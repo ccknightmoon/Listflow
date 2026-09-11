@@ -1,4 +1,4 @@
-import { estimateShippingCost, estimateShipping } from "@/lib/shipping";
+import { estimateShippingCost, estimateShipping, type ShippingMode } from "@/lib/shipping";
 
 export type Condition =
   | "New with tags"
@@ -62,7 +62,8 @@ export function getPriceSuggestion(
   hasFlaws: boolean,
   isHeavy = false,
   itemType?: string | null,
-  size?: string | null
+  size?: string | null,
+  shippingMode: ShippingMode = isHeavy ? "buyer_pays" : "free"
 ): PriceSuggestion {
   let base = 35;
 
@@ -99,7 +100,7 @@ export function getPriceSuggestion(
   // shipping into the price for non-heavy items, which list with free
   // shipping — there, the cost genuinely needs to be recovered from the
   // item price itself.
-  const shippingCostToCover = isHeavy
+  const shippingCostToCover = shippingMode !== "free"
     ? 0
     : itemType
       ? estimateShipping(itemType, size).cost

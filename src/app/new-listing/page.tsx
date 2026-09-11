@@ -20,7 +20,7 @@ import { uploadThumbnail } from "@/lib/storage";
 import { apiFetch } from "@/lib/api";
 import { AiResult, formatMeasurements } from "@/lib/ai-result";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
-import { estimateShipping } from "@/lib/shipping";
+import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
 
 const CONDITIONS: Condition[] = [
@@ -112,6 +112,7 @@ export default function NewListingPage() {
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [isHeavy, setIsHeavy] = useState(false);
   const [shippingCost, setShippingCost] = useState("");
+  const [shippingMode, setShippingMode] = useState<ShippingMode>("free");
   const [customPrice, setCustomPrice] = useState("");
   // Cost basis -- what the seller paid to acquire this item. Purely
   // manual (nothing in the app can infer it), optional, used only by the
@@ -136,7 +137,10 @@ export default function NewListingPage() {
   useEffect(() => {
     fetch("/api/settings")
       .then((r) => r.json())
-      .then((data) => setAiStoreCategorySuggestions(!!data.aiStoreCategorySuggestions))
+      .then((data) => {
+        setAiStoreCategorySuggestions(!!data.aiStoreCategorySuggestions);
+        if (data.defaultShippingMode === "calculated") setShippingMode("calculated");
+      })
       .catch(() => {});
     fetch("/api/ebay/store-categories")
       .then((r) => r.json())
@@ -197,7 +201,7 @@ export default function NewListingPage() {
       const data = await apiFetch<PriceSuggestion>("/api/pricing/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: pTitle, brand: pBrand, condition: pCondition, image: pImage, isHeavy: pIsHeavy, itemType: pItemType, size: pSize }),
+        body: JSON.stringify({ title: pTitle, brand: pBrand, condition: pCondition, image: pImage, isHeavy: pIsHeavy, shippingMode, itemType: pItemType, size: pSize }),
       });
       setResult(data as PriceSuggestion);
     } catch {
@@ -254,8 +258,6 @@ export default function NewListingPage() {
       // AI-detected item type/size/material instead of leaving both blank —
       // still fully overridable below.
       const shipEstimate = estimateShipping(data.itemType, data.size, data.material);
-      setIsHeavy(shipEstimate.isHeavy);
-      setShippingCost(shipEstimate.isHeavy ? String(shipEstimate.cost) : "");
 
       // Store category: re-suggest fresh on every analysis, same as
       // brand/color/size above -- re-running Analyze is expected to
@@ -386,7 +388,8 @@ export default function NewListingPage() {
         storeCategoryName,
         costBasis: cost ? Number(cost) : null,
         isHeavy,
-        shippingCost: shippingCost ? Number(shippingCost) : null,
+        shippingMode,
+        shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
       };
 
       let id = savedDraftId;
@@ -425,7 +428,7 @@ export default function NewListingPage() {
       const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string; url?: string | null }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId, isHeavy, shippingCost: shippingCost ? parseFloat(shippingCost) : undefined }),
+        body: JSON.stringify({ draftId, shippingMode, isHeavy, shippingCost: shippingMode === "buyer_pays" && shippingCost ? parseFloat(shippingCost) : undefined }),
       });
       if (data.connect) { setNeedsConnect(true); throw new Error(data.error ?? "Failed to list on eBay"); }
       if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error ?? "Failed to list on eBay"); }
@@ -479,6 +482,7 @@ export default function NewListingPage() {
     setNeedsReconnect(false);
     setIsHeavy(false);
     setShippingCost("");
+    setShippingMode("free");
     setCustomPrice("");
     setCost("");
     setBrand("");
@@ -539,37 +543,22 @@ export default function NewListingPage() {
           ))}
         </select>
 
-        <div className="flex items-center gap-1.5 py-1 flex-wrap">
-          <button
-            type="button"
-            onClick={() => {
-              const next = !isHeavy;
-              setIsHeavy(next);
-              if (!next) setShippingCost("");
+        <div>
+          <label className="text-xs text-[var(--text-secondary)] mb-1 block">Shipping</label>
+          <select
+            className="input w-full"
+            value={shippingMode}
+            onChange={(e) => {
+              const mode = e.target.value as ShippingMode;
+              setShippingMode(mode);
+              setIsHeavy(mode === "buyer_pays");
+              if (mode !== "buyer_pays") setShippingCost("");
             }}
-            className="tap text-xs font-semibold rounded-full px-3 py-1.5 border"
-            style={
-              isHeavy
-                ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }
-                : { background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }
-            }
           >
-            {isHeavy ? "Heavy item" : "Not heavy"}
-          </button>
-          {isHeavy && (
-            <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-tertiary)" }}>$</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="Shipping"
-                value={shippingCost}
-                onChange={(e) => setShippingCost(e.target.value)}
-                className="input w-24 text-xs py-1.5 pl-5 pr-2 rounded-full"
-              />
-            </div>
-          )}
+            <option value="free">Free shipping (you pay)</option>
+            <option value="calculated">Calculated shipping (buyer pays based on location)</option>
+            <option value="buyer_pays">Flat-rate shipping (legacy heavy-item option)</option>
+          </select>
         </div>
 
         <textarea

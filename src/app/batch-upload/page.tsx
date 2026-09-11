@@ -32,7 +32,7 @@ import { uploadThumbnail } from "@/lib/storage";
 import { apiFetch } from "@/lib/api";
 import { AiResult as BaseAiResult, formatMeasurements } from "@/lib/ai-result";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
-import { estimateIsHeavy, estimateShipping } from "@/lib/shipping";
+import { estimateIsHeavy, estimateShipping, type ShippingMode } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
 import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
 
@@ -257,6 +257,8 @@ export default function BatchUploadPage() {
   const [customSkus, setCustomSkus] = useState<Record<number, string>>({});
   const [heavyItems, setHeavyItems] = useState<Record<number, boolean>>({});
   const [shippingCosts, setShippingCosts] = useState<Record<number, string>>({});
+  const [shippingModes, setShippingModes] = useState<Record<number, ShippingMode>>({});
+  const [defaultShippingMode, setDefaultShippingMode] = useState<ShippingMode>("free");
   const [listingAll, setListingAll] = useState(false);
   const [listingAllProgress, setListingAllProgress] = useState<{ done: number; total: number } | null>(null);
   const [analyzingProgress, setAnalyzingProgress] = useState<{ done: number; total: number } | null>(null);
@@ -358,6 +360,7 @@ export default function BatchUploadPage() {
       .then((data) => {
         setAutoDetectDividers(!!data.autoDetectItemDividers);
         setAiStoreCategorySuggestions(!!data.aiStoreCategorySuggestions);
+        if (data.defaultShippingMode === "calculated") setDefaultShippingMode("calculated");
       })
       .catch(() => {});
     fetch("/api/ebay/store-categories")
@@ -984,6 +987,7 @@ export default function BatchUploadPage() {
           isHeavy: heavyItems[i] ?? estimateIsHeavy(result.itemType, result.material),
           itemType: result.itemType,
           size: result.size,
+          shippingMode: shippingModes[i] ?? defaultShippingMode,
         }),
       }).catch(() => null);
       if (!pricing) return;
@@ -1027,7 +1031,7 @@ export default function BatchUploadPage() {
     apiFetch<PriceSuggestion>("/api/pricing/suggest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: result.suggestedTitle, brand: result.brand, condition: result.condition, image, itemType: result.itemType, size: result.size }),
+      body: JSON.stringify({ title: result.suggestedTitle, brand: result.brand, condition: result.condition, image, itemType: result.itemType, size: result.size, shippingMode: shippingModes[index] ?? defaultShippingMode }),
     })
       .then((pricing: PriceSuggestion | null) => {
         setResults((prev) => {
@@ -1101,6 +1105,7 @@ export default function BatchUploadPage() {
           image: retryImage,
           itemType: retryResult.itemType,
           size: retryResult.size,
+          shippingMode: shippingModes[index] ?? defaultShippingMode,
         }),
       })
         .then((pricing: PriceSuggestion | null) => {
@@ -1154,7 +1159,7 @@ export default function BatchUploadPage() {
       const hasRealPricing = result.pricing && !result.pricing.noData;
       const suggestion: PriceSuggestion =
         (hasRealPricing ? result.pricing : null) ??
-        getPriceSuggestion(result.condition, Boolean(result.flaws && result.flaws.trim().length > 0), heavyItems[index] ?? estimateIsHeavy(result.itemType, result.material), result.itemType, result.size);
+        getPriceSuggestion(result.condition, Boolean(result.flaws && result.flaws.trim().length > 0), heavyItems[index] ?? estimateIsHeavy(result.itemType, result.material), result.itemType, result.size, shippingModes[index] ?? defaultShippingMode);
       const finalPrice = hasRealPricing
         ? suggestion.suggestedPrice
         : customPrices[index] ? Number(customPrices[index]) : suggestion.suggestedPrice;
@@ -1235,8 +1240,9 @@ export default function BatchUploadPage() {
         season: result.season ?? null,
         storeCategoryId: storeCategoryChoice[index]?.id ?? null,
         storeCategoryName: storeCategoryChoice[index]?.path ?? null,
-        isHeavy: heavyItems[index] ?? estimateIsHeavy(result.itemType, result.material),
-        shippingCost: shippingCosts[index] ? Number(shippingCosts[index]) : null,
+        isHeavy: shippingModes[index] === "buyer_pays",
+        shippingMode: shippingModes[index] ?? defaultShippingMode,
+        shippingCost: (shippingModes[index] ?? defaultShippingMode) === "buyer_pays" && shippingCosts[index] ? Number(shippingCosts[index]) : null,
       };
 
       let id: string = existingId ?? "";
@@ -1319,7 +1325,7 @@ export default function BatchUploadPage() {
       const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string; url?: string | null }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId: id, isHeavy: heavyItems[index] ?? false, shippingCost: shippingCosts[index] ? parseFloat(shippingCosts[index]) : undefined }),
+        body: JSON.stringify({ draftId: id, shippingMode: shippingModes[index] ?? defaultShippingMode, isHeavy: (shippingModes[index] ?? defaultShippingMode) === "buyer_pays", shippingCost: (shippingModes[index] ?? defaultShippingMode) === "buyer_pays" && shippingCosts[index] ? parseFloat(shippingCosts[index]) : undefined }),
       });
       if (data.connect) { setNeedsEbayConnect(true); throw new Error(data.error ?? "Listing failed"); }
       if (data.reconnect) { setNeedsEbayReconnect(true); throw new Error(data.error ?? "Listing failed"); }
@@ -2128,7 +2134,8 @@ export default function BatchUploadPage() {
                 Boolean(result.flaws && result.flaws.trim().length > 0),
                 heavyItems[i] ?? estimateIsHeavy(result.itemType, result.material),
                 result.itemType,
-                result.size
+                result.size,
+                shippingModes[i] ?? defaultShippingMode
               );
             const pricingAttempted = Boolean(result.pricing);
             const pricingReady = Boolean(livePricing);
@@ -2206,24 +2213,23 @@ export default function BatchUploadPage() {
                       >
                         {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const next = !(heavyItems[i] ?? false);
-                          setHeavyItems((prev) => ({ ...prev, [i]: next }));
-                          if (!next) setShippingCosts((prev) => { const n = { ...prev }; delete n[i]; return n; });
-                        }}
-                        disabled={saveStatus[i] === "saved"}
+                      <select
                         className="tap text-xs font-semibold rounded-full px-3 py-1.5 border"
-                        style={
-                          heavyItems[i]
-                            ? { background: "var(--accent-tint)", borderColor: "var(--accent)", color: "var(--accent)" }
-                            : { background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }
-                        }
+                        style={{ background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }}
+                        value={shippingModes[i] ?? defaultShippingMode}
+                        disabled={saveStatus[i] === "saved"}
+                        onChange={(e) => {
+                          const mode = e.target.value as ShippingMode;
+                          setShippingModes((prev) => ({ ...prev, [i]: mode }));
+                          setHeavyItems((prev) => ({ ...prev, [i]: mode === "buyer_pays" }));
+                          if (mode !== "buyer_pays") setShippingCosts((prev) => { const n = { ...prev }; delete n[i]; return n; });
+                        }}
                       >
-                        {heavyItems[i] ? "Heavy item" : "Not heavy"}
-                      </button>
-                      {(heavyItems[i] ?? false) && (
+                        <option value="free">Free shipping</option>
+                        <option value="calculated">Calculated shipping</option>
+                        <option value="buyer_pays">Flat-rate shipping</option>
+                      </select>
+                      {(shippingModes[i] ?? defaultShippingMode) === "buyer_pays" && (
                         <div className="relative">
                           <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-tertiary)" }}>$</span>
                           <input
@@ -2548,4 +2554,3 @@ function MiniStat({
     </div>
   );
 }
-

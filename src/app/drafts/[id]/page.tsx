@@ -4,7 +4,7 @@ import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy } from "lucide-react";
-import { estimateShipping } from "@/lib/shipping";
+import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
 import { uploadThumbnail } from "@/lib/storage";
 import { AiResult } from "@/lib/ai-result";
@@ -55,6 +55,7 @@ interface Draft {
   store_category_name: string | null;
   is_heavy: boolean | null;
   shipping_cost: number | null;
+  shipping_mode: ShippingMode | null;
 }
 
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -77,6 +78,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [reanalyzing, setReanalyzing] = useState(false);
   const [isHeavy, setIsHeavy] = useState(false);
   const [shippingCost, setShippingCost] = useState("");
+  const [shippingMode, setShippingMode] = useState<ShippingMode>("free");
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -146,6 +148,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         // ever needed for a draft not yet touched under the new behavior.
         const savedHeavy = localStorage.getItem(`heavy-${id}`);
         const savedShippingCost = localStorage.getItem(`shippingCost-${id}`);
+        const savedShippingMode = localStorage.getItem(`shippingMode-${id}`);
         if (savedHeavy) {
           setIsHeavy(JSON.parse(savedHeavy));
         } else if (d.is_heavy != null) {
@@ -165,6 +168,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         } else if (d.shipping_cost != null) {
           setShippingCost(String(d.shipping_cost));
         }
+        setShippingMode(savedShippingMode === "calculated" || savedShippingMode === "buyer_pays" || savedShippingMode === "free"
+          ? savedShippingMode
+          : d.shipping_mode === "calculated" || d.shipping_mode === "buyer_pays" ? d.shipping_mode : (d.is_heavy ? "buyer_pays" : "free"));
         setTitle(str(d.title));
         setBrand(str(d.brand));
         setColor(str(d.color));
@@ -322,7 +328,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
           storeCategoryId, storeCategoryName,
-          isHeavy, shippingCost: shippingCost ? Number(shippingCost) : null,
+          shippingMode, isHeavy: shippingMode === "buyer_pays", shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
         }),
       });
       setSaved(true);
@@ -359,14 +365,14 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           sleeveLength, neckline, fit, pattern, description,
           vintage, character, characterFamily, yearManufactured, season,
           storeCategoryId, storeCategoryName,
-          isHeavy, shippingCost: shippingCost ? Number(shippingCost) : null,
+          shippingMode, isHeavy: shippingMode === "buyer_pays", shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
         }),
       });
 
       const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; url?: string; listingId?: string; storeCategoryWarning?: string }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ draftId: id, customSku: customSku || undefined, isHeavy, shippingCost: shippingCost ? parseFloat(shippingCost) : undefined }),
+        body: JSON.stringify({ draftId: id, customSku: customSku || undefined, shippingMode, isHeavy: shippingMode === "buyer_pays", shippingCost: shippingMode === "buyer_pays" && shippingCost ? parseFloat(shippingCost) : undefined }),
       });
       if (data.connect) { setNeedsConnect(true); throw new Error(data.error ?? "Failed to list"); }
       if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error ?? "Failed to list"); }
@@ -392,6 +398,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       setStoreCategoryWarning(data.storeCategoryWarning ?? null);
       localStorage.removeItem(`heavy-${id}`);
       localStorage.removeItem(`shippingCost-${id}`);
+      localStorage.removeItem(`shippingMode-${id}`);
       window.dispatchEvent(new Event("listflow:counts-changed"));
       setTimeout(() => router.push("/store"), 1500);
     } catch (err) {
@@ -944,22 +951,27 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <div className="flex items-center gap-2 py-1">
-          <input
-            type="checkbox"
-            id="heavy"
-            checked={isHeavy}
+        <div className="py-1">
+          <label className="text-xs text-[var(--text-secondary)] mb-1 block">Shipping</label>
+          <select
+            className="input w-full"
+            value={shippingMode}
             onChange={(e) => {
-              setIsHeavy(e.target.checked);
-              localStorage.setItem(`heavy-${id}`, JSON.stringify(e.target.checked));
-              if (!e.target.checked) { setShippingCost(""); localStorage.removeItem(`shippingCost-${id}`); }
+              const mode = e.target.value as ShippingMode;
+              setShippingMode(mode);
+              setIsHeavy(mode === "buyer_pays");
+              localStorage.setItem(`shippingMode-${id}`, mode);
+              if (mode !== "buyer_pays") {
+                setShippingCost("");
+                localStorage.removeItem(`shippingCost-${id}`);
+              }
             }}
-            className="w-4 h-4 rounded accent-[var(--accent)]"
-          />
-          <label htmlFor="heavy" className="text-sm text-[var(--text-primary)] cursor-pointer">
-            Heavy item
-          </label>
-          {isHeavy && (
+          >
+            <option value="free">Free shipping (you pay)</option>
+            <option value="calculated">Calculated shipping (buyer pays based on location)</option>
+            <option value="buyer_pays">Flat-rate shipping (legacy heavy-item option)</option>
+          </select>
+          {shippingMode === "buyer_pays" && (
             <div className="flex items-center gap-1 ml-1">
               <span className="text-sm text-[var(--text-secondary)]">— shipping $</span>
               <input

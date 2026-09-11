@@ -14,6 +14,9 @@ function isValidShippingCost(value: unknown): value is number {
 function isValidStoreCategoryId(value: unknown): value is string | null {
   return value === null || value === undefined || (typeof value === "string" && /^\d+$/.test(value));
 }
+function isValidShippingMode(value: unknown): value is "free" | "calculated" | "buyer_pays" {
+  return value === "free" || value === "calculated" || value === "buyer_pays";
+}
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser();
@@ -60,6 +63,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.shippingCost !== undefined && body.shippingCost !== null && !isValidShippingCost(body.shippingCost)) {
     return NextResponse.json({ error: "shippingCost must be a non-negative number, or null." }, { status: 400 });
   }
+  if (body.shippingMode !== undefined && !isValidShippingMode(body.shippingMode)) {
+    return NextResponse.json({ error: "shippingMode must be 'free', 'calculated', or 'buyer_pays'." }, { status: 400 });
+  }
 
   const { data, error } = await auth.supabase
     .from("drafts")
@@ -98,6 +104,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.costBasis !== undefined && { cost_basis: body.costBasis }),
       ...(body.isHeavy !== undefined && { is_heavy: body.isHeavy }),
       ...(body.shippingCost !== undefined && { shipping_cost: body.shippingCost }),
+      ...(body.shippingMode !== undefined && { shipping_mode: body.shippingMode }),
     })
     .eq("id", id)
     .eq("user_id", auth.user.id)

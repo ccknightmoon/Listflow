@@ -72,6 +72,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
         cost_basis: source.cost_basis,
         is_heavy: source.is_heavy ?? false,
         shipping_cost: source.shipping_cost,
+        shipping_mode: source.shipping_mode ?? (source.is_heavy ? "buyer_pays" : "free"),
         // Deliberately NOT carried over — see comment above.
         photo_urls: null,
         thumbnail_url: null,

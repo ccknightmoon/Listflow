@@ -8,6 +8,7 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import type { ShippingMode } from "@/lib/shipping";
 
 // Drafts rarely changes shape between visits within one tab (add/remove a
 // few items at most) — showing the last list instantly while a fresh fetch
@@ -25,6 +26,7 @@ interface Draft {
   created_at: string | null;
   is_heavy: boolean | null;
   shipping_cost: number | null;
+  shipping_mode: ShippingMode | null;
 }
 
 type ListStatus = "idle" | "listing" | "done";
@@ -209,7 +211,12 @@ export default function DraftsPage() {
           const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string }>("/api/ebay/list", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ draftId: ids[i], isHeavy: heavyIds.has(ids[i]), shippingCost: shippingCostMap[ids[i]] }),
+            body: JSON.stringify({
+              draftId: ids[i],
+              shippingMode: drafts.find((d) => d.id === ids[i])?.shipping_mode ?? (heavyIds.has(ids[i]) ? "buyer_pays" : "free"),
+              isHeavy: heavyIds.has(ids[i]),
+              shippingCost: shippingCostMap[ids[i]],
+            }),
           });
           if (data.error) {
             if (data.connect) setNeedsEbayConnect(true);
