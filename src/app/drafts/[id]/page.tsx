@@ -107,9 +107,12 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [suggestingStoreCategory, setSuggestingStoreCategory] = useState(false);
   const autoSuggestedStoreCategoryRef = useRef(false);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
-  const photoDragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const photoDragTimer = useRef<number | null>(null);
   const photoDragIdx = useRef<number | null>(null);
   const photoDropIdx = useRef<number | null>(null);
+  const photoDragTarget = useRef<HTMLElement | null>(null);
+  const photoPointerId = useRef<number | null>(null);
+  const activePhotoDrag = useRef(false);
   const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const [title, setTitle] = useState("");
@@ -585,12 +588,18 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   function onPhotoPDown(e: React.PointerEvent, idx: number) {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     pointerStart.current = { x: e.clientX, y: e.clientY };
     photoDragIdx.current = idx;
-    photoDragTimer.current = setTimeout(() => {
+    photoDropIdx.current = null;
+    photoDragTarget.current = e.currentTarget as HTMLElement;
+    photoPointerId.current = e.pointerId;
+    activePhotoDrag.current = false;
+    photoDragTimer.current = window.setTimeout(() => {
       photoDragTimer.current = null;
+      activePhotoDrag.current = true;
       setDragIdx(idx);
-      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+      photoDragTarget.current?.setPointerCapture(photoPointerId.current as number);
     }, 350);
   }
 
@@ -602,7 +611,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         photoDragTimer.current = null;
       }
     }
-    if (photoDragIdx.current === null || dragIdx === null) return;
+    if (photoDragIdx.current === null || !activePhotoDrag.current) return;
     e.preventDefault();
     for (let i = 0; i < photoRefs.current.length; i++) {
       const el = photoRefs.current[i];
@@ -625,7 +634,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     const moved = start && (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8);
     const from = photoDragIdx.current;
     const to = photoDropIdx.current;
-    const wasDragging = dragIdx !== null;
+    const wasDragging = activePhotoDrag.current;
     photoDragIdx.current = null;
     photoDropIdx.current = null;
 
@@ -633,18 +642,27 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       const next = [...photoUrls];
       const [item] = next.splice(from, 1);
       next.splice(to, 0, item);
-      void savePhotoUrls(next, photoUrls);
+      void savePhotoUrls(next, photoUrls).catch((err) => {
+        setError((err as Error).message);
+      });
     } else if (!moved && !wasDragging) {
       setZoomedPhoto(url);
     }
 
+    if (photoPointerId.current !== null && photoDragTarget.current?.hasPointerCapture(photoPointerId.current)) {
+      photoDragTarget.current.releasePointerCapture(photoPointerId.current);
+    }
     setDragIdx(null);
     setDropIdx(null);
     pointerStart.current = null;
+    photoDragTarget.current = null;
+    photoPointerId.current = null;
+    activePhotoDrag.current = false;
   }
 
   function onPhotoDragStart(e: React.DragEvent, index: number) {
     photoDragIdx.current = index;
+    activePhotoDrag.current = true;
     setDragIdx(index);
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", String(index));
@@ -665,12 +683,15 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       const next = [...photoUrls];
       const [item] = next.splice(from, 1);
       next.splice(to, 0, item);
-      void savePhotoUrls(next, photoUrls);
+      void savePhotoUrls(next, photoUrls).catch((err) => {
+        setError((err as Error).message);
+      });
     }
     photoDragIdx.current = null;
     photoDropIdx.current = null;
     setDragIdx(null);
     setDropIdx(null);
+    activePhotoDrag.current = false;
   }
 
   function onPhotoDragEnd() {
@@ -678,6 +699,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     photoDropIdx.current = null;
     setDragIdx(null);
     setDropIdx(null);
+    activePhotoDrag.current = false;
   }
 
   async function handleDelete() {

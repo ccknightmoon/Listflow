@@ -601,6 +601,7 @@ export default function NewListingPage() {
                 count={photos.length}
                 onRemove={() => removePhoto(index)}
                 onMove={(to) => movePhoto(index, to)}
+                onReorder={(from, to) => movePhoto(from, to)}
                 onLabelChange={(label) => setPhotoLabel(index, label)}
                 onDragStart={() => { draggedPhoto.current = index; }}
                 onDrop={() => {
@@ -995,6 +996,7 @@ function PhotoCard({
   count,
   onRemove,
   onMove,
+  onReorder,
   onLabelChange,
   onDragStart,
   onDrop,
@@ -1004,17 +1006,69 @@ function PhotoCard({
   count: number;
   onRemove: () => void;
   onMove: (to: number) => void;
+  onReorder: (from: number, to: number) => void;
   onLabelChange: (label: PhotoItem["label"]) => void;
   onDragStart: () => void;
   onDrop: () => void;
 }) {
+  const dragTimer = useRef<number | null>(null);
+  const dragTarget = useRef<HTMLDivElement | null>(null);
+  const startPoint = useRef<{ x: number; y: number } | null>(null);
+  const dropIndex = useRef<number | null>(null);
+  const [touchDragging, setTouchDragging] = useState(false);
+
+  function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType === "mouse") return;
+    startPoint.current = { x: e.clientX, y: e.clientY };
+    dragTarget.current = e.currentTarget;
+    dropIndex.current = index;
+    dragTimer.current = window.setTimeout(() => {
+      setTouchDragging(true);
+      dragTarget.current?.setPointerCapture(e.pointerId);
+    }, 350);
+  }
+
+  function onPointerMove(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragTimer.current !== null && startPoint.current) {
+      const moved = Math.abs(e.clientX - startPoint.current.x) > 8 || Math.abs(e.clientY - startPoint.current.y) > 8;
+      if (moved) {
+        window.clearTimeout(dragTimer.current);
+        dragTimer.current = null;
+      }
+    }
+    if (!touchDragging) return;
+    e.preventDefault();
+    const target = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-photo-index]");
+    const targetIndex = target ? Number(target.dataset.photoIndex) : null;
+    if (targetIndex !== null && Number.isInteger(targetIndex)) dropIndex.current = targetIndex;
+  }
+
+  function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
+    if (dragTimer.current !== null) window.clearTimeout(dragTimer.current);
+    if (touchDragging && dropIndex.current !== null && dropIndex.current !== index) {
+      onReorder(index, dropIndex.current);
+    }
+    if (dragTarget.current?.hasPointerCapture(e.pointerId)) dragTarget.current.releasePointerCapture(e.pointerId);
+    dragTimer.current = null;
+    dragTarget.current = null;
+    startPoint.current = null;
+    dropIndex.current = null;
+    setTouchDragging(false);
+  }
+
   return (
     <div
+      data-photo-index={index}
       draggable
       onDragStart={onDragStart}
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
-      className="card flex-none w-44 snap-start overflow-hidden relative"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      className={`card flex-none w-44 snap-start overflow-hidden relative${touchDragging ? " opacity-60 scale-95" : ""}`}
+      style={{ touchAction: touchDragging ? "none" : "pan-x" }}
     >
       <div className="aspect-square relative">
         {/* eslint-disable-next-line @next/next/no-img-element */}
