@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
     }
     if (!draft.condition || !CONDITION_MAP[draft.condition]) {
       return NextResponse.json({ error: "Choose a valid item condition before listing." }, { status: 400 });
+    }
 
     const draftShippingMode = (draft.shipping_mode === "calculated" || draft.shipping_mode === "buyer_pays") ? draft.shipping_mode : "free";
     if (rawShippingMode === undefined && draft.shipping_mode) shippingMode = draftShippingMode;

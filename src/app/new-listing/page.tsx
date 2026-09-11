@@ -495,6 +495,8 @@ export default function NewListingPage() {
         setPhotoUploadWarning(
           `Saved, but ${failedKeys.length} photo${failedKeys.length > 1 ? "s" : ""} (${failedKeys.join(", ")}) failed to upload. Re-add ${failedKeys.length > 1 ? "them" : "it"} before listing.`
         );
+      } else {
+        setPhotoUploadWarning(null);
       }
 
       const { suggestedPrice, avgSold, activeRangeLow, activeRangeHigh, sellOdds } = result ?? {};
@@ -564,6 +566,11 @@ export default function NewListingPage() {
   }
 
   async function handleListOnEbay() {
+    if (photoUploadWarning) {
+      setListError("Some photos have not uploaded yet. Retry saving until all photos finish uploading before listing.");
+      setListStatus("error");
+      return;
+    }
     const readiness = getListingReadiness({
       photoCount: photos.length,
       title,

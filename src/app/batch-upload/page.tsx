@@ -1240,6 +1240,12 @@ export default function BatchUploadPage() {
           ...prev,
           [index]: `Saved, but ${failedCount} photo${failedCount > 1 ? "s" : ""} failed to upload.`,
         }));
+      } else {
+        setPhotoUploadWarnings((prev) => {
+          const next = { ...prev };
+          delete next[index];
+          return next;
+        });
       }
       const thumbnailUrl = photoUrls[0] ?? null;
 
@@ -1368,6 +1374,14 @@ export default function BatchUploadPage() {
   }, [results]);
 
   async function handleListOnEbay(index: number): Promise<boolean> {
+    if (photoUploadWarnings[index]) {
+      setListStatus((prev) => ({ ...prev, [index]: "error" }));
+      setListErrors((prev) => ({
+        ...prev,
+        [index]: "Some photos have not uploaded yet. Retry saving until all photos finish uploading before listing.",
+      }));
+      return false;
+    }
     const result = results[index];
     const group = groups[index] ?? [];
     const suggestedPrice = result.pricing && !result.pricing.noData
