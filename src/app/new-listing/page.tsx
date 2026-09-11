@@ -138,6 +138,7 @@ export default function NewListingPage() {
   const [storeCategoryName, setStoreCategoryName] = useState<string | null>(null);
   const [storeCategoryPickerOpen, setStoreCategoryPickerOpen] = useState(false);
   const [aiStoreCategorySuggestions, setAiStoreCategorySuggestions] = useState(false);
+  const [photoEditorLayout, setPhotoEditorLayout] = useState<"carousel" | "grid">("carousel");
   const [suggestingStoreCategory, setSuggestingStoreCategory] = useState(false);
 
   useEffect(() => {
@@ -145,6 +146,7 @@ export default function NewListingPage() {
       .then((r) => r.json())
       .then((data) => {
         setAiStoreCategorySuggestions(!!data.aiStoreCategorySuggestions);
+        setPhotoEditorLayout(data.photoEditorLayout === "grid" ? "grid" : "carousel");
         if (data.defaultShippingMode === "calculated") setShippingMode("calculated");
       })
       .catch(() => {});
@@ -619,7 +621,7 @@ export default function NewListingPage() {
             <span className="text-sm text-[var(--text-secondary)]">Add your first photo</span>
           </button>
         ) : (
-          <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
+          <div className={photoEditorLayout === "grid" ? "grid grid-cols-3 gap-3" : "flex gap-3 overflow-x-auto pb-2 snap-x"}>
             {photos.map((photo, index) => (
               <PhotoCard
                 key={photo.id}

@@ -24,6 +24,7 @@ import {
   Tags,
   DollarSign,
   Mail,
+  Images,
 } from "lucide-react";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
@@ -122,6 +123,9 @@ export default function SettingsPage() {
   const [notificationSaving, setNotificationSaving] = useState(false);
   const [notificationSaved, setNotificationSaved] = useState(false);
   const [notificationError, setNotificationError] = useState<string | null>(null);
+  const [photoEditorLayout, setPhotoEditorLayout] = useState<"carousel" | "grid">("carousel");
+  const [photoLayoutSaving, setPhotoLayoutSaving] = useState(false);
+  const [photoLayoutSaved, setPhotoLayoutSaved] = useState(false);
 
   const [signingOut, setSigningOut] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
@@ -166,10 +170,32 @@ export default function SettingsPage() {
         setFeePercentInput(override !== null ? String(override) : "");
         setNotificationEmailEnabled(data.notificationEmailEnabled ?? true);
         setNotificationEmailHourUtc(typeof data.notificationEmailHourUtc === "number" ? data.notificationEmailHourUtc : 13);
+        setPhotoEditorLayout(data.photoEditorLayout === "grid" ? "grid" : "carousel");
       })
       .catch(() => setError("Could not load settings"))
       .finally(() => setLoading(false));
   }, []);
+
+  async function handlePhotoLayoutSelect(next: "carousel" | "grid") {
+    if (next === photoEditorLayout || photoLayoutSaving) return;
+    const previous = photoEditorLayout;
+    setPhotoEditorLayout(next);
+    setPhotoLayoutSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoEditorLayout: next }),
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setPhotoLayoutSaved(true);
+      setTimeout(() => setPhotoLayoutSaved(false), 2000);
+    } catch {
+      setPhotoEditorLayout(previous);
+    } finally {
+      setPhotoLayoutSaving(false);
+    }
+  }
 
   async function handleAutoDetectToggle(next: boolean) {
     if (next === autoDetectDividers || autoDetectSaving) return;
@@ -556,6 +582,32 @@ export default function SettingsPage() {
             onClick={() => handleThemeSelect("system")}
           />
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        delay="d2b"
+        title="Photo editing layout"
+        description="Choose how photos appear when you edit a draft. Carousel keeps the eBay-style swipe view; Overview shows every photo at once in a compact grid so you can organize a larger set quickly."
+        icon={Images}
+      >
+        <div className="flex flex-col gap-3">
+          <OptionCard
+            icon={Images}
+            title="Carousel — swipe one row"
+            description="Best for focused editing on a phone."
+            selected={photoEditorLayout === "carousel"}
+            onClick={() => void handlePhotoLayoutSelect("carousel")}
+          />
+          <OptionCard
+            icon={Images}
+            title="Overview — show all photos"
+            description="See 2–3 rows at once and reorder, delete, or undo."
+            selected={photoEditorLayout === "grid"}
+            onClick={() => void handlePhotoLayoutSelect("grid")}
+          />
+        </div>
+        {photoLayoutSaving && <p className="text-xs mt-2 text-[var(--text-secondary)]"><Loader2 className="inline w-3 h-3 animate-spin" /> Saving...</p>}
+        {photoLayoutSaved && <p className="text-xs mt-2" style={{ color: "var(--success)" }}><Check className="inline w-3 h-3" /> Saved</p>}
       </SettingsSection>
 
       <SettingsSection

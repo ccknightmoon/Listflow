@@ -19,7 +19,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("app_settings")
-    .select("default_shipping_mode, store_description_footer, accent_color, auto_detect_item_dividers, ai_store_category_suggestions, ebay_fee_percent_override, notification_email_enabled, notification_email_hour_utc")
+    .select("default_shipping_mode, store_description_footer, accent_color, auto_detect_item_dividers, ai_store_category_suggestions, ebay_fee_percent_override, notification_email_enabled, notification_email_hour_utc, photo_editor_layout")
     .eq("user_id", user.id)
     .maybeSingle();
 
@@ -35,6 +35,7 @@ export async function GET() {
       ebayFeePercentOverride: null,
       notificationEmailEnabled: true,
       notificationEmailHourUtc: 13,
+      photoEditorLayout: "carousel",
     });
   }
   return NextResponse.json({
@@ -46,6 +47,7 @@ export async function GET() {
     ebayFeePercentOverride: data.ebay_fee_percent_override ?? null,
     notificationEmailEnabled: data.notification_email_enabled ?? true,
     notificationEmailHourUtc: data.notification_email_hour_utc ?? 13,
+    photoEditorLayout: data.photo_editor_layout === "grid" ? "grid" : "carousel",
   });
 }
 
@@ -55,7 +57,7 @@ export async function PATCH(req: NextRequest) {
   const { supabase, user } = auth;
 
   const body = await req.json();
-  const { defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc } = body;
+  const { defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc, photoEditorLayout } = body;
 
   if (defaultShippingMode !== undefined && defaultShippingMode !== "free" && defaultShippingMode !== "calculated") {
     return NextResponse.json({ error: "defaultShippingMode must be 'free' or 'calculated'" }, { status: 400 });
@@ -85,6 +87,9 @@ export async function PATCH(req: NextRequest) {
   if (notificationEmailEnabled !== undefined && typeof notificationEmailEnabled !== "boolean") {
     return NextResponse.json({ error: "notificationEmailEnabled must be a boolean" }, { status: 400 });
   }
+  if (photoEditorLayout !== undefined && photoEditorLayout !== "carousel" && photoEditorLayout !== "grid") {
+    return NextResponse.json({ error: "photoEditorLayout must be 'carousel' or 'grid'" }, { status: 400 });
+  }
   // 0-23 -- see migration 019's comment on this column for why this is a
   // plain UTC hour rather than a full local time + timezone.
   if (
@@ -103,11 +108,12 @@ export async function PATCH(req: NextRequest) {
   if (ebayFeePercentOverride !== undefined) payload.ebay_fee_percent_override = ebayFeePercentOverride;
   if (notificationEmailEnabled !== undefined) payload.notification_email_enabled = notificationEmailEnabled;
   if (notificationEmailHourUtc !== undefined) payload.notification_email_hour_utc = notificationEmailHourUtc;
+  if (photoEditorLayout !== undefined) payload.photo_editor_layout = photoEditorLayout;
 
   const { error } = await supabase
     .from("app_settings")
     .upsert(payload, { onConflict: "user_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc });
+  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc, photoEditorLayout });
 }
