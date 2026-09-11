@@ -9,6 +9,7 @@ import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
 import type { ShippingMode } from "@/lib/shipping";
+import { getListingReadiness } from "@/lib/listing-readiness";
 
 // Drafts rarely changes shape between visits within one tab (add/remove a
 // few items at most) — showing the last list instantly while a fresh fetch
@@ -27,6 +28,7 @@ interface Draft {
   is_heavy: boolean | null;
   shipping_cost: number | null;
   shipping_mode: ShippingMode | null;
+  photo_urls: string[] | null;
 }
 
 type ListStatus = "idle" | "listing" | "done";
@@ -41,6 +43,7 @@ function timeAgo(dateStr: string | null): string {
   return `${Math.floor(d / 30)}mo ago`;
 }
 type SortKey = "newest" | "oldest" | "price-desc" | "price-asc";
+type DraftFilter = "all" | "ready" | "needs-photo" | "needs-price";
 
 export default function DraftsPage() {
   const router = useRouter();
@@ -57,6 +60,7 @@ export default function DraftsPage() {
   const [shippingCostMap, setShippingCostMap] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
+  const [filter, setFilter] = useState<DraftFilter>("all");
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
   useEffect(() => { loadDrafts(); }, []);
@@ -272,7 +276,21 @@ export default function DraftsPage() {
   // toggle, every save, every keystroke in search) — memoized since drafts
   // can run into the hundreds for an active reseller.
   const filtered = useMemo(() => {
-    const base = !q ? drafts : drafts.filter((d) => (d.title ?? "").toLowerCase().includes(q));
+    const base = drafts.filter((d) => {
+      if (q && !(d.title ?? "").toLowerCase().includes(q)) return false;
+      if (filter === "needs-photo") return (d.photo_urls?.length ?? 0) === 0;
+      if (filter === "needs-price") return !d.suggested_price;
+      if (filter === "ready") {
+        return getListingReadiness({
+          photoCount: d.photo_urls?.length ?? (d.thumbnail_url ? 1 : 0),
+          title: d.title,
+          price: d.suggested_price,
+          condition: d.condition,
+          shippingMode: d.shipping_mode ?? "free",
+        }).ready;
+      }
+      return true;
+    });
     return [...base].sort((a, b) => {
       if (sort === "newest" || sort === "oldest") {
         const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -283,7 +301,7 @@ export default function DraftsPage() {
       const pb = b.suggested_price ?? 0;
       return sort === "price-desc" ? pb - pa : pa - pb;
     });
-  }, [drafts, q, sort]);
+  }, [drafts, q, sort, filter]);
 
   const noPriceDrafts = useMemo(() => drafts.filter((d) => !d.suggested_price), [drafts]);
   const allSelected = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
@@ -340,6 +358,17 @@ export default function DraftsPage() {
             <option value="oldest">Oldest first</option>
             <option value="price-desc">Price: high to low</option>
             <option value="price-asc">Price: low to high</option>
+          </select>
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value as DraftFilter)}
+            className="shrink-0 w-[112px] text-sm rounded-xl border px-2 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
+          >
+            <option value="all">All drafts</option>
+            <option value="ready">Ready to list</option>
+            <option value="needs-photo">Needs photos</option>
+            <option value="needs-price">Needs price</option>
           </select>
         </div>
       )}
