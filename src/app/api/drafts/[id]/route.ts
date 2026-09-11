@@ -72,8 +72,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.shippingMode !== undefined && !isValidShippingMode(body.shippingMode)) {
     return NextResponse.json({ error: "shippingMode must be 'free', 'calculated', or 'buyer_pays'." }, { status: 400 });
   }
+  const expectedUpdatedAt = body.expectedUpdatedAt;
+  if (expectedUpdatedAt !== undefined && (typeof expectedUpdatedAt !== "string" || !expectedUpdatedAt)) {
+    return NextResponse.json({ error: "Invalid draft version." }, { status: 400 });
+  }
 
-  const { data, error } = await auth.supabase
+  let updateQuery = auth.supabase
     .from("drafts")
     .update({
       ...(body.title !== undefined && { title: body.title }),
@@ -113,15 +117,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.shippingMode !== undefined && { shipping_mode: body.shippingMode }),
     })
     .eq("id", id)
-    .eq("user_id", auth.user.id)
-    .select()
-    .single();
+    .eq("user_id", auth.user.id);
+  if (expectedUpdatedAt) updateQuery = updateQuery.eq("updated_at", expectedUpdatedAt);
+  const { data, error } = await updateQuery.select().maybeSingle();
 
   if (error) {
     if (error.code === "23505" && error.message.toLowerCase().includes("custom_sku")) {
       return NextResponse.json({ error: "That SKU is already used by another draft. Choose a different SKU." }, { status: 409 });
     }
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+  if (!data) {
+    return NextResponse.json(
+      { error: "This draft changed in another tab. Reload it before saving your changes.", stale: true },
+      { status: 409 }
+    );
   }
   return NextResponse.json({ draft: data });
 }

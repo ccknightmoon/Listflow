@@ -262,6 +262,10 @@ export default function BatchUploadPage() {
   const [shippingModes, setShippingModes] = useState<Record<number, ShippingMode>>({});
   const [defaultShippingMode, setDefaultShippingMode] = useState<ShippingMode>("free");
   const [listingAll, setListingAll] = useState(false);
+  const [batchPaused, setBatchPaused] = useState(false);
+  const [batchCancelled, setBatchCancelled] = useState(false);
+  const [recoveredBatch, setRecoveredBatch] = useState(false);
+  const recoveryHydrated = useRef(false);
   const [listingAllProgress, setListingAllProgress] = useState<{ done: number; total: number } | null>(null);
   const [analyzingProgress, setAnalyzingProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -318,6 +322,7 @@ export default function BatchUploadPage() {
   // changed again for an unrelated reason (a pricing lookup landing).
   const autoSavedForIndex = useRef<Set<number>>(new Set());
   const autoSavingForIndex = useRef<Set<number>>(new Set());
+  const draftUpdatedAt = useRef<Record<number, string>>({});
   // Supabase Storage URL each photo slot has already uploaded to, keyed by
   // photo index (not group/item index -- a photo's own data never changes
   // once picked, only which item it belongs to). handleSaveDraft now runs
@@ -327,6 +332,79 @@ export default function BatchUploadPage() {
   // full photo upload for the whole group. Across a real batch that meant
   // the same unchanged photos crossing the network 2-3x each for nothing.
   const uploadedPhotoUrls = useRef<Record<number, string>>({});
+  const pauseRef = useRef(false);
+  const cancelRef = useRef(false);
+
+  useEffect(() => {
+    pauseRef.current = batchPaused;
+  }, [batchPaused]);
+
+  async function waitForBatchResume() {
+    while (pauseRef.current && !cancelRef.current) {
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+  }
+
+  useEffect(() => {
+      try {
+        const saved = localStorage.getItem("listflow-batch-recovery");
+        if (!saved) {
+          recoveryHydrated.current = true;
+          return;
+        }
+        const snapshot = JSON.parse(saved) as {
+          step?: Step;
+          photos?: SlotImage[];
+          groups?: number[][];
+          results?: AiResult[];
+          customPrices?: Record<number, string>;
+          customSkus?: Record<number, string>;
+          draftIds?: Record<number, string>;
+        };
+        if (snapshot.photos?.length && snapshot.groups?.length) {
+          setStep(snapshot.step === "results" || snapshot.step === "review" ? snapshot.step : "upload");
+          setPhotos(snapshot.photos);
+          setGroups(snapshot.groups);
+          setResults(snapshot.results ?? []);
+          setCustomPrices(snapshot.customPrices ?? {});
+          setCustomSkus(snapshot.customSkus ?? {});
+          setDraftIds(snapshot.draftIds ?? {});
+          setRecoveredBatch(true);
+        }
+      } catch {
+        localStorage.removeItem("listflow-batch-recovery");
+      } finally {
+        recoveryHydrated.current = true;
+      }
+  }, []);
+
+  useEffect(() => {
+      if (!recoveryHydrated.current || photos.length === 0) return;
+      try {
+        localStorage.setItem("listflow-batch-recovery", JSON.stringify({
+          step,
+          photos,
+          groups,
+          results,
+          customPrices,
+          customSkus,
+          draftIds,
+        }));
+      } catch {
+        // Large photo batches may exceed localStorage; the existing drafts remain
+        // the durable fallback and the page's beforeunload warning still applies.
+      }
+  }, [step, photos, groups, results, customPrices, customSkus, draftIds]);
+
+  function discardRecoveredBatch() {
+      localStorage.removeItem("listflow-batch-recovery");
+      setRecoveredBatch(false);
+      setStep("upload");
+      setPhotos([]);
+      setGroups([]);
+      setResults([]);
+      setDraftIds({});
+  }
 
   useEffect(() => {
     const hasRecoverableWork = results.some((result, index) =>
@@ -889,6 +967,10 @@ export default function BatchUploadPage() {
 
   async function handleAnalyzeBatch() {
     setError(null);
+    setBatchCancelled(false);
+    setBatchPaused(false);
+    cancelRef.current = false;
+    pauseRef.current = false;
     setAnalyzingProgress({ done: 0, total: groups.length });
 
     const allResults: AiResult[] = new Array(groups.length);
@@ -962,6 +1044,8 @@ export default function BatchUploadPage() {
       let cursor = 0;
       async function worker() {
         while (cursor < groups.length) {
+          await waitForBatchResume();
+          if (cancelRef.current) return;
           const i = cursor++;
           await analyzeOne(i);
         }
@@ -1305,18 +1389,20 @@ export default function BatchUploadPage() {
 
       let id: string = existingId ?? "";
       if (id) {
-        await apiFetch(`/api/drafts/${id}`, {
+        const data = await apiFetch<{ draft?: { updated_at?: string } }>(`/api/drafts/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload, expectedUpdatedAt: draftUpdatedAt.current[index] }),
         });
+        if (data.draft?.updated_at) draftUpdatedAt.current[index] = data.draft.updated_at;
       } else {
-        const data = await apiFetch<{ draft?: { id?: string } }>("/api/drafts", {
+        const data = await apiFetch<{ draft?: { id?: string; updated_at?: string } }>("/api/drafts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
         id = data.draft?.id ?? "";
+        if (data.draft?.updated_at) draftUpdatedAt.current[index] = data.draft.updated_at;
       }
 
       if (!id) throw new Error("Failed to save draft");
@@ -1468,6 +1554,8 @@ export default function BatchUploadPage() {
     if (!window.confirm(`List ${indices.length} item${indices.length === 1 ? "" : "s"} on eBay now?`)) return;
 
     setListingAll(true);
+    setBatchCancelled(false);
+    cancelRef.current = false;
     setListingAllProgress({ done: 0, total: indices.length });
 
     // A couple of listings at a time instead of strictly one at a time.
@@ -1483,6 +1571,8 @@ export default function BatchUploadPage() {
 
     async function worker() {
       while (cursor < indices.length) {
+        await waitForBatchResume();
+        if (cancelRef.current) return;
         const n = cursor++;
         const ok = await handleListOnEbay(indices[n]);
         if (ok) successCount++;
@@ -1496,6 +1586,7 @@ export default function BatchUploadPage() {
     );
 
     setListingAll(false);
+    setBatchPaused(false);
     setListingAllProgress(null);
     const failedCount = indices.length - successCount;
     if (failedCount > 0) {
@@ -1505,8 +1596,21 @@ export default function BatchUploadPage() {
           : `None of the ${failedCount} selected items listed. Review the errors and retry below.`
       );
     } else if (successCount > 0) {
+      if (failedCount === 0) localStorage.removeItem("listflow-batch-recovery");
       setTimeout(() => router.push("/store"), 1500);
     }
+
+  }
+
+  function pauseBatch() {
+    setBatchPaused((current) => !current);
+  }
+
+  function cancelBatch() {
+    cancelRef.current = true;
+    pauseRef.current = false;
+    setBatchPaused(false);
+    setBatchCancelled(true);
   }
 
   // Items still open for bulk editing -- once a draft is saved (draftIds[i]
@@ -1597,6 +1701,15 @@ export default function BatchUploadPage() {
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "var(--danger)" }}>
           {error}
+        </div>
+      )}
+
+      {recoveredBatch && (
+        <div className="card p-3 mb-4 text-sm flex items-center justify-between gap-3" style={{ background: "var(--warning-bg)", borderColor: "var(--warning-border)" }}>
+          <span>Recovered an unfinished batch from this browser.</span>
+          <button type="button" onClick={discardRecoveredBatch} className="underline font-medium whitespace-nowrap">
+            Start fresh
+          </button>
         </div>
       )}
 
@@ -1972,11 +2085,23 @@ export default function BatchUploadPage() {
           <AIDisclaimer />
           {results.length > 1 && (
             <>
-              <p className="text-xs font-semibold stagger d1" style={{ color: "var(--text-tertiary)" }}>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold stagger d1" style={{ color: "var(--text-tertiary)" }}>
                 {analyzingProgress && analyzingProgress.done < analyzingProgress.total
                   ? `Analyzing — ${analyzingProgress.done}/${analyzingProgress.total} ready so far`
                   : `${results.length} items ready · tap one to jump to it`}
-              </p>
+                </p>
+                {analyzingProgress && analyzingProgress.done < analyzingProgress.total && (
+                  <div className="flex gap-2">
+                    <button type="button" onClick={pauseBatch} className="text-xs underline">
+                      {batchPaused ? "Resume" : "Pause"}
+                    </button>
+                    <button type="button" onClick={cancelBatch} className="text-xs underline">
+                      Stop
+                    </button>
+                  </div>
+                )}
+              </div>
               <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1 stagger d1">
                 {results.map((r, i) => {
                   const group = groups[i] ?? [];
@@ -2058,6 +2183,21 @@ export default function BatchUploadPage() {
                     ? "All listed on eBay!"
                     : `List all on eBay (${unlistedCount})`}
                 </button>
+                {listingAll && (
+                  <div className="flex gap-2">
+                    <button type="button" onClick={pauseBatch} className="btn flex-1">
+                      {batchPaused ? "Resume listing" : "Pause listing"}
+                    </button>
+                    <button type="button" onClick={cancelBatch} className="btn flex-1">
+                      Cancel remaining
+                    </button>
+                  </div>
+                )}
+                {batchCancelled && !listingAll && (
+                  <p className="text-xs" style={{ color: "var(--warning-border)" }}>
+                    Batch listing stopped. Completed items remain listed; the remaining items can be retried.
+                  </p>
+                )}
                 <button
                   onClick={handleSaveAllDrafts}
                   disabled={savingAll || listingAll || allSaved || unsaved === 0}

@@ -102,6 +102,7 @@ export default function NewListingPage() {
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [savedDraftId, setSavedDraftId] = useState<string | null>(null);
+  const draftUpdatedAt = useRef<string | null>(null);
   const [photoUploadWarning, setPhotoUploadWarning] = useState<string | null>(null);
   const [listStatus, setListStatus] = useState<"idle" | "listing" | "listed" | "error">("idle");
   const [showPublishReview, setShowPublishReview] = useState(false);
@@ -542,18 +543,20 @@ export default function NewListingPage() {
 
       let id = savedDraftId;
       if (id) {
-        await apiFetch(`/api/drafts/${id}`, {
+        const data = await apiFetch<{ draft?: { updated_at?: string } }>(`/api/drafts/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify({ ...payload, expectedUpdatedAt: draftUpdatedAt.current }),
         });
+        draftUpdatedAt.current = data.draft?.updated_at ?? draftUpdatedAt.current;
       } else {
-        const data = await apiFetch<{ draft?: { id?: string | null } }>("/api/drafts", {
+        const data = await apiFetch<{ draft?: { id?: string | null; updated_at?: string } }>("/api/drafts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
         });
         id = data.draft?.id ?? null;
+        draftUpdatedAt.current = data.draft?.updated_at ?? null;
       }
 
       setSavedDraftId(id);

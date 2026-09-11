@@ -57,12 +57,14 @@ interface Draft {
   is_heavy: boolean | null;
   shipping_cost: number | null;
   shipping_mode: ShippingMode | null;
+  updated_at: string;
 }
 
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
+  const draftUpdatedAt = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -157,6 +159,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         const data = await apiFetch<{ draft: Draft; error?: string }>(`/api/drafts/${id}`);
         const d: Draft = data.draft;
         setDraft(d);
+        draftUpdatedAt.current = d.updated_at;
         setPhotoUrls(d.photo_urls ?? []);
         // Priority: an unsynced local choice (localStorage, pre-dates the
         // is_heavy/shipping_cost columns and could still hold an edit that
@@ -382,11 +385,15 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   async function saveDraft(extra: Record<string, unknown> = {}) {
     const payload = getDraftPayload();
     const save = draftSaveQueue.current.catch(() => undefined).then(async () => {
-      await apiFetch(`/api/drafts/${id}`, {
+      const response = await apiFetch<{ draft?: Draft }>(`/api/drafts/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...payload, ...extra }),
+        body: JSON.stringify({ ...payload, ...extra, expectedUpdatedAt: draftUpdatedAt.current }),
       });
+      if (response.draft?.updated_at) {
+        draftUpdatedAt.current = response.draft.updated_at;
+        setDraft((current) => current ? { ...current, updated_at: response.draft!.updated_at } : current);
+      }
       initialCustomSku.current = customSku.trim() || null;
     });
     draftSaveQueue.current = save.then(() => undefined, () => undefined);
@@ -968,7 +975,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-4 sm:items-center">
           <div className="card w-full max-w-md p-4" role="dialog" aria-modal="true" aria-labelledby="publish-review-title">
             <div className="flex items-center justify-between mb-3">
-              <h2 id="publish-review-title" className="text-lg font-medium">Review before publishing</h2>
+              <h2 id="publish-review-title" className="text-lg font-medium">
+                {listingUrl ? "Review relist/update" : "Review before publishing"}
+              </h2>
               <button type="button" onClick={() => setShowPublishReview(false)} aria-label="Close publish review" className="p-1">
                 <X className="w-5 h-5" />
               </button>
@@ -994,7 +1003,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               <button type="button" onClick={() => setShowPublishReview(false)} className="btn flex-1">Back to edit</button>
               <button type="button" onClick={() => void handlePublish()} disabled={listing} className="btn btn-primary flex-1">
                 {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {listing ? "Publishing..." : "Publish on eBay"}
+                {listing ? "Saving..." : listingUrl ? "Save and relist on eBay" : "Publish on eBay"}
               </button>
             </div>
           </div>
