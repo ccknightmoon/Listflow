@@ -676,6 +676,15 @@ export default function BatchUploadPage() {
       Array.from({ length: Math.min(SAVE_CONCURRENCY, indices.length) }, () => worker())
     );
     setSavingAll(false);
+    // Same "only clear once everything actually landed" rule
+    // handleListAllOnEbay already uses -- without this, "Save all as
+    // drafts" (one of the two headline bulk actions on this screen) never
+    // cleared the recovery snapshot, so the seller's next new batch
+    // opened to a stale "Recovered an unfinished batch" banner for a
+    // batch that had actually already been fully saved.
+    if (successCount === indices.length && !results.some((r) => r.error)) {
+      void clearBatchRecovery().catch(() => {});
+    }
     if (successCount > 0) setTimeout(() => router.push("/drafts"), 1200);
   }
 
