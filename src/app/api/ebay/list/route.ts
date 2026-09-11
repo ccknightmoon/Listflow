@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   upsertInventoryItem, createOffer, updateOffer, deleteOffer, deleteInventoryItem,
   getOfferBySku, getAllOffers, publishOffer, getCategoryIdForTitle, getSafeFallbackCategory,
-  ensureMerchantLocation, recreateMerchantLocation, CONDITION_MAP,
+  ensureMerchantLocation, recreateMerchantLocation, CONDITION_MAP, getConditionCandidates,
 } from "@/lib/ebay-inventory";
 import { invalidateAccessTokenCache } from "@/lib/ebay-oauth";
 import { requireUser } from "@/lib/auth";
@@ -357,7 +357,6 @@ export async function POST(req: NextRequest) {
         // optimizing it is much smaller than the primary publish wait.
         await new Promise((r) => setTimeout(r, 2000));
         const safeCategory = getSafeFallbackCategory(draft.title || "");
-        const originalCondition = CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
         // Only ever retry with the item's OWN actual condition — never widen
         // to a better OR a worse one. This used to fall back to
         // "USED_EXCELLENT" for brand-new items just to force a listing
@@ -372,7 +371,12 @@ export async function POST(req: NextRequest) {
         // direction, not a cosmetic bug -- if retrying with the item's
         // real condition still fails, report the error instead of trying
         // to relabel it.
-        const conditionsToTry = [originalCondition];
+        // getConditionCandidates gives the item's real condition tier in
+        // every API spelling eBay might currently accept for this item
+        // type (apparel categories now require the newer PRE_OWNED_* enum
+        // values; everything else still uses the older USED_* ones) --
+        // always the same tier, never a different one.
+        const conditionsToTry = getConditionCandidates(draft.condition, draft.title || "");
 
         for (const tryCondition of conditionsToTry) {
           const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter);

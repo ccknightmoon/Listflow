@@ -11,6 +11,51 @@ export const CONDITION_MAP: Record<string, string> = {
   "Fair - notable flaws": "USED_ACCEPTABLE",
 };
 
+// eBay's 2025 "pre-loved clothing" condition rollout: Clothing, Shoes &
+// Accessories categories (true clothing -- tops, bottoms, outerwear,
+// dresses) now REJECT the older USED_GOOD / USED_ACCEPTABLE enum values
+// outright ("The provided condition id is invalid for the selected
+// primary category id"), even though those same values still work fine
+// for non-apparel categories (jewelry, bags, general merchandise).
+// Confirmed against eBay's own developer docs and seller announcements:
+// apparel categories now expect PRE_OWNED_EXCELLENT / USED_EXCELLENT /
+// PRE_OWNED_FAIR. USED_EXCELLENT is not a typo here -- eBay documents it
+// as remapped to display as "Pre-owned - Good" for apparel, so it fills
+// the MIDDLE tier, not the top one.
+export const APPAREL_CONDITION_MAP: Record<string, string> = {
+  "New with tags": "NEW",
+  "New without tags": "NEW_OTHER",
+  "Excellent used": "PRE_OWNED_EXCELLENT",
+  "Good - minor flaws": "USED_EXCELLENT", // eBay displays this as "Pre-owned - Good" for apparel
+  "Fair - notable flaws": "PRE_OWNED_FAIR",
+};
+
+// True "clothing" is what eBay's pre-loved-clothing change actually
+// targets. Shoes, bags, jewelry and small accessories (belts, wallets,
+// hats, etc) stay on the general CONDITION_MAP above -- nothing found
+// this session confirms they moved onto the new apparel-only enum
+// values too, and guessing wrong there risks the exact same "invalid
+// condition id" failure in the other direction.
+function isTrueClothing(title: string): boolean {
+  const g = detectGarmentType(title);
+  return g.isTop || g.isBottom || g.isOuterwear || g.isDress;
+}
+
+// Ordered list of condition values worth trying for this item, most
+// likely to succeed first. For true clothing this leads with the
+// apparel-specific mapping (what eBay's live category rules actually
+// require) and keeps the general mapping as a second attempt -- never a
+// DIFFERENT condition tier, just the other known API spelling of the
+// seller's own stated condition, in case a specific leaf category
+// hasn't rolled onto the new enum values yet.
+export function getConditionCandidates(conditionLabel: string | null | undefined, title: string): string[] {
+  const label = conditionLabel ?? "";
+  const general = CONDITION_MAP[label] ?? "USED_GOOD";
+  if (!isTrueClothing(title)) return [general];
+  const apparel = APPAREL_CONDITION_MAP[label] ?? general;
+  return apparel === general ? [apparel] : [apparel, general];
+}
+
 export function getDepartment(title: string): string {
   const lower = (title || "").toLowerCase();
   return (lower.includes("women") || lower.includes("ladies")) ? "Women" : "Men";
@@ -54,7 +99,7 @@ function detectGarmentType(title: string) {
   const isAccessory = !isDress && !isBag && !isJewelry && !!accessoryMatch;
   const isTop = !isDress && !isBag && !isJewelry && !isAccessory && /\b(shirt|tee|t-shirt|top|blouse|polo|button-up|button-down)\b/.test(lower);
   const isOuterwear = !isDress && !isBag && !isJewelry && !isAccessory && !isTop && /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
-  const isBottom = !isDress && !isBag && !isJewelry && !isAccessory && !isTop && !isOuterwear && /\b(pant|jean|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(lower);
+  const isBottom = !isDress && !isBag && !isJewelry && !isAccessory && !isTop && !isOuterwear && /\b(pants?|jeans?|shorts|trousers?|cargo|chinos?|leggings?|skirts?|joggers?|sweatpants?)\b/.test(lower);
   const isShoe = !isDress && !isBag && !isJewelry && !isAccessory && /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
   return {
     isWomens, isDress, isBag, isTop, isOuterwear, isBottom, isShoe,
@@ -342,7 +387,7 @@ export async function upsertInventoryItem(sku: string, draft: {
   // For pants, split "WaistxInseam" (e.g. "38x32") into separate aspects
   const titleLower = (draft.title || "").toLowerCase();
   const isOuterwearItem = /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(titleLower);
-  const isBottomItem = !isOuterwearItem && /\b(pant|jean|shorts|trouser|cargo|chino|legging|skirt|jogger|sweatpant)\b/.test(titleLower);
+  const isBottomItem = !isOuterwearItem && /\b(pants?|jeans?|shorts|trousers?|cargo|chinos?|leggings?|skirts?|joggers?|sweatpants?)\b/.test(titleLower);
   if (isAspect(draft.size)) {
     const pantsMatch = isBottomItem && draft.size.match(/^(\d+)[xX](\d+)$/);
     if (pantsMatch) {
@@ -419,7 +464,7 @@ export async function upsertInventoryItem(sku: string, draft: {
     draft.flaws ? `Notes: ${draft.flaws}` : null,
   ].filter(Boolean);
 
-  const condition = conditionOverride ?? CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
+  const condition = conditionOverride ?? getConditionCandidates(draft.condition, draft.title || "")[0];
   const isUsed = !["NEW", "NEW_OTHER"].includes(condition);
 
   const body: Record<string, unknown> = {
