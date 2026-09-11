@@ -82,6 +82,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [photoUndo, setPhotoUndo] = useState<string[] | null>(null);
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null);
   const [refreshingPrice, setRefreshingPrice] = useState(false);
   const [missingAspectsWarning, setMissingAspectsWarning] = useState<string[] | null>(null);
@@ -103,6 +105,10 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [suggestingStoreCategory, setSuggestingStoreCategory] = useState(false);
   const autoSuggestedStoreCategoryRef = useRef(false);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
+  const photoDragTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const photoDragIdx = useRef<number | null>(null);
+  const photoDropIdx = useRef<number | null>(null);
+  const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const [title, setTitle] = useState("");
   const [brand, setBrand] = useState("");
@@ -580,16 +586,62 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  function onPhotoPDown(e: React.PointerEvent) {
+  function onPhotoPDown(e: React.PointerEvent, idx: number) {
     pointerStart.current = { x: e.clientX, y: e.clientY };
+    photoDragIdx.current = idx;
+    photoDragTimer.current = setTimeout(() => {
+      photoDragTimer.current = null;
+      setDragIdx(idx);
+      (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    }, 350);
+  }
+
+  function onPhotoPMove(e: React.PointerEvent) {
+    if (photoDragTimer.current && pointerStart.current) {
+      const moved = Math.abs(e.clientX - pointerStart.current.x) > 8 || Math.abs(e.clientY - pointerStart.current.y) > 8;
+      if (moved) {
+        clearTimeout(photoDragTimer.current);
+        photoDragTimer.current = null;
+      }
+    }
+    if (photoDragIdx.current === null || dragIdx === null) return;
+    e.preventDefault();
+    for (let i = 0; i < photoRefs.current.length; i++) {
+      const el = photoRefs.current[i];
+      if (!el) continue;
+      const rect = el.getBoundingClientRect();
+      if (e.clientX >= rect.left && e.clientX <= rect.right) {
+        photoDropIdx.current = i;
+        setDropIdx(i);
+        return;
+      }
+    }
   }
 
   function onPhotoPUp(e: React.PointerEvent, url: string) {
+    if (photoDragTimer.current) {
+      clearTimeout(photoDragTimer.current);
+      photoDragTimer.current = null;
+    }
     const start = pointerStart.current;
     const moved = start && (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8);
-    // Let the horizontal scroller handle swipes. Only a stationary tap opens
-    // the larger preview, so browsing photos never accidentally activates it.
-    if (!moved) setZoomedPhoto(url);
+    const from = photoDragIdx.current;
+    const to = photoDropIdx.current;
+    const wasDragging = dragIdx !== null;
+    photoDragIdx.current = null;
+    photoDropIdx.current = null;
+
+    if (wasDragging && from !== null && to !== null && from !== to) {
+      const next = [...photoUrls];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      void savePhotoUrls(next, photoUrls);
+    } else if (!moved && !wasDragging) {
+      setZoomedPhoto(url);
+    }
+
+    setDragIdx(null);
+    setDropIdx(null);
     pointerStart.current = null;
   }
 
@@ -751,10 +803,13 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           {photoUrls.map((url, i) => (
             <div
               key={i}
-              className="relative flex-shrink-0 rounded-xl overflow-hidden cursor-pointer select-none snap-start"
+              ref={(el) => { photoRefs.current[i] = el; }}
+              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-pointer select-none snap-start transition-all${dragIdx === i ? " opacity-50 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
               style={{ width: 184, height: 184, touchAction: "pan-x" }}
-              onPointerDown={onPhotoPDown}
+              onPointerDown={(e) => onPhotoPDown(e, i)}
+              onPointerMove={onPhotoPMove}
               onPointerUp={(e) => onPhotoPUp(e, url)}
+              onPointerCancel={(e) => onPhotoPUp(e, url)}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" draggable={false} />
