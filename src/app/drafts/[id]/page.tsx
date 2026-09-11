@@ -10,6 +10,7 @@ import { uploadThumbnail } from "@/lib/storage";
 import { AiResult } from "@/lib/ai-result";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import AIDisclaimer from "@/components/AIDisclaimer";
+import { getListingReadiness } from "@/lib/listing-readiness";
 
 const CONDITIONS = [
   "New with tags",
@@ -346,6 +347,17 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   async function handleList() {
     const priceNum = price ? Number(price) : null;
+    const readiness = getListingReadiness({
+      photoCount: photoUrls.length,
+      title,
+      price: priceNum,
+      condition,
+      shippingMode,
+    });
+    if (!readiness.ready) {
+      setError(`Before listing: ${readiness.blockers.join(" • ")}`);
+      return;
+    }
     if (!priceNum) {
       if (!confirm("No price set. Continue listing anyway?")) return;
     } else if (priceNum >= 200) {

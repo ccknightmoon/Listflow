@@ -25,6 +25,7 @@ import { AiResult, formatMeasurements } from "@/lib/ai-result";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
+import { getListingReadiness } from "@/lib/listing-readiness";
 
 const CONDITIONS: Condition[] = [
   "New with tags",
@@ -457,6 +458,18 @@ export default function NewListingPage() {
   }
 
   async function handleListOnEbay() {
+    const readiness = getListingReadiness({
+      photoCount: photos.length,
+      title,
+      price: result?.suggestedPrice ?? (customPrice ? Number(customPrice) : null),
+      condition,
+      shippingMode,
+    });
+    if (!readiness.ready) {
+      setListError(`Before listing: ${readiness.blockers.join(" • ")}`);
+      setListStatus("error");
+      return;
+    }
     setListStatus("listing");
     setListError(null);
     setNeedsConnect(false);

@@ -1320,6 +1320,30 @@ export default function BatchUploadPage() {
   }, [results]);
 
   async function handleListOnEbay(index: number): Promise<boolean> {
+    const result = results[index];
+    const group = groups[index] ?? [];
+    const suggestedPrice = result.pricing && !result.pricing.noData
+      ? result.pricing.suggestedPrice
+      : getPriceSuggestion(
+          result.condition,
+          Boolean(result.flaws && result.flaws.trim().length > 0),
+          heavyItems[index] ?? estimateIsHeavy(result.itemType, result.material),
+          result.itemType,
+          result.size,
+          shippingModes[index] ?? defaultShippingMode
+        ).suggestedPrice;
+    const readiness = getListingReadiness({
+      photoCount: group.length,
+      title: result.suggestedTitle,
+      price: customPrices[index] ? Number(customPrices[index]) : suggestedPrice,
+      condition: result.condition,
+      shippingMode: shippingModes[index] ?? defaultShippingMode,
+    });
+    if (!readiness.ready) {
+      setListStatus((prev) => ({ ...prev, [index]: "error" }));
+      setListErrors((prev) => ({ ...prev, [index]: `Before listing: ${readiness.blockers.join(" • ")}` }));
+      return false;
+    }
     setListStatus((prev) => ({ ...prev, [index]: "saving" }));
     const id = await handleSaveDraft(index);
     if (!id) {
