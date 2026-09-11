@@ -357,14 +357,29 @@ export default function BatchUploadPage() {
     let cancelled = false;
     void loadBatchRecovery().then((snapshot) => {
       if (cancelled) return;
-      if (snapshot?.photos.length && snapshot.groups.length) {
-        setStep(snapshot.step === "results" || snapshot.step === "review" ? snapshot.step : "upload");
+      // Only required photos.length to be truthy -- previously this also
+      // required snapshot.groups.length, so a crash/close any time
+      // between selecting photos and grouping finishing (which the
+      // app's own copy warns can take "a few minutes across several
+      // rounds" for a big batch) was unrecoverable even though a valid
+      // snapshot had already been written seconds earlier. Ungrouped
+      // photos now land back on the upload step with the selection
+      // intact, ready to re-run grouping, instead of vanishing.
+      if (snapshot?.photos.length) {
+        const hasGroups = snapshot.groups.length > 0;
+        const restoredStep =
+          hasGroups && (snapshot.step === "results" || snapshot.step === "review") ? snapshot.step : "upload";
+        setStep(restoredStep);
         setPhotos(snapshot.photos as SlotImage[]);
         setGroups(snapshot.groups);
         setResults(snapshot.results as AiResult[]);
         setCustomPrices(snapshot.customPrices);
         setCustomSkus(snapshot.customSkus);
         setDraftIds(snapshot.draftIds);
+        if (snapshot.heavyItems) setHeavyItems(snapshot.heavyItems);
+        if (snapshot.shippingCosts) setShippingCosts(snapshot.shippingCosts);
+        if (snapshot.shippingModes) setShippingModes(snapshot.shippingModes as Record<number, ShippingMode>);
+        if (snapshot.storeCategoryChoice) setStoreCategoryChoice(snapshot.storeCategoryChoice);
         setRecoveredBatch(true);
       }
       recoveryHydrated.current = true;
@@ -386,6 +401,10 @@ export default function BatchUploadPage() {
         customPrices,
         customSkus,
         draftIds,
+        heavyItems,
+        shippingCosts,
+        shippingModes,
+        storeCategoryChoice,
       }).catch(() => {
         // Draft rows remain the durable fallback if browser recovery storage fails.
       });
@@ -393,7 +412,7 @@ export default function BatchUploadPage() {
     return () => {
       if (recoveryWriteTimer.current !== null) window.clearTimeout(recoveryWriteTimer.current);
     };
-  }, [step, photos, groups, results, customPrices, customSkus, draftIds]);
+  }, [step, photos, groups, results, customPrices, customSkus, draftIds, heavyItems, shippingCosts, shippingModes, storeCategoryChoice]);
 
   function discardRecoveredBatch() {
     void clearBatchRecovery().catch(() => {});
