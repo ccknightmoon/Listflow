@@ -55,6 +55,7 @@ function localTimeStringToUtcHour(time: string): number {
 interface EbayPolicy {
   id: string;
   name: string;
+  costType?: string | null;
 }
 
 export default function SettingsPage() {
@@ -795,20 +796,34 @@ export default function SettingsPage() {
                   label="Free shipping policy"
                   value={shippingFreeId}
                   options={fulfillmentPolicies}
+                  expectedCostType="FLAT_RATE"
                   onChange={(v) => { setShippingFreeId(v); savePolicies({ shippingFreeId: v }); }}
                 />
                 <PolicyPicker
                   label="Buyer-pays shipping policy"
                   value={shippingHeavyId}
                   options={fulfillmentPolicies}
+                  expectedCostType="FLAT_RATE"
                   onChange={(v) => { setShippingHeavyId(v); savePolicies({ shippingHeavyId: v }); }}
                 />
                 <PolicyPicker
                   label="Calculated shipping policy"
                   value={shippingCalculatedId}
                   options={fulfillmentPolicies}
+                  expectedCostType="CALCULATED"
                   onChange={(v) => { setShippingCalculatedId(v); savePolicies({ shippingCalculatedId: v }); }}
                 />
+                {shippingCalculatedId && (shippingCalculatedId === shippingHeavyId || shippingCalculatedId === shippingFreeId) && (
+                  <div
+                    className="card p-3 text-xs"
+                    style={{ background: "var(--warning-bg)", borderColor: "var(--warning-border)" }}
+                  >
+                    Your Calculated shipping policy is set to the exact same eBay policy as another
+                    slot above. eBay listings with Calculated shipping need a real &ldquo;cost varies
+                    by buyer location&rdquo; policy — if you don&apos;t have one yet, create it in eBay
+                    Seller Hub (Account &rarr; Business Policies &rarr; Shipping), then pick it here.
+                  </div>
+                )}
                 <PolicyPicker
                   label="Return policy"
                   value={returnPolicyId}
@@ -1050,17 +1065,33 @@ function SettingsSection({
   );
 }
 
+function policyCostTypeLabel(costType?: string | null): string {
+  if (costType === "CALCULATED") return "Calculated";
+  if (costType === "FLAT_RATE") return "Flat rate";
+  return "";
+}
+
 function PolicyPicker({
   label,
   value,
   options,
   onChange,
+  expectedCostType,
 }: {
   label: string;
   value: string;
   options: EbayPolicy[];
   onChange: (value: string) => void;
+  // When set, this slot only makes sense with a policy of this eBay
+  // shipping cost type -- e.g. the Calculated slot needs a real
+  // "cost varies by buyer location" policy, not a flat-rate one, or
+  // eBay rejects the listing with a generic error at publish time
+  // instead of here, where the seller can actually see why.
+  expectedCostType?: "FLAT_RATE" | "CALCULATED";
 }) {
+  const selected = options.find((p) => p.id === value);
+  const mismatch =
+    Boolean(expectedCostType) && Boolean(selected?.costType) && selected?.costType !== expectedCostType;
   return (
     <label className="card p-3 flex flex-col gap-1">
       <span className="text-xs font-medium text-[var(--text-secondary)]">{label}</span>
@@ -1070,10 +1101,19 @@ function PolicyPicker({
         onChange={(e) => onChange(e.target.value)}
       >
         <option value="">— Not set —</option>
-        {options.map((p) => (
-          <option key={p.id} value={p.id}>{p.name}</option>
-        ))}
+        {options.map((p) => {
+          const typeLabel = policyCostTypeLabel(p.costType);
+          return (
+            <option key={p.id} value={p.id}>{typeLabel ? `${p.name} (${typeLabel})` : p.name}</option>
+          );
+        })}
       </select>
+      {mismatch && (
+        <span className="text-xs" style={{ color: "var(--danger)" }}>
+          This is a {policyCostTypeLabel(selected?.costType).toLowerCase()} policy — eBay will reject a{" "}
+          {expectedCostType === "CALCULATED" ? "Calculated" : "flat-rate"} listing using it.
+        </span>
+      )}
     </label>
   );
 }

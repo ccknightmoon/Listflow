@@ -27,6 +27,14 @@ interface FulfillmentPolicy {
   fulfillmentPolicyId: string;
   name: string;
   marketplaceId?: string;
+  // "FLAT_RATE" or "CALCULATED" (eBay's own Account API field) --
+  // surfaced to Settings so a seller can tell which of their real eBay
+  // policies actually support calculated per-buyer rates, instead of
+  // guessing from the name and accidentally picking a flat-rate policy
+  // for the Calculated slot (which eBay silently rejects at publish
+  // time with a generic error). Read from the first DOMESTIC shipping
+  // option, same place eBay itself keys this.
+  shippingOptions?: Array<{ optionType?: string; costType?: string }>;
 }
 interface ReturnPolicy {
   returnPolicyId: string;
@@ -61,7 +69,10 @@ export async function GET() {
       }
 
       const fulfillmentPolicies = ((fulfillmentRes.data as { fulfillmentPolicies?: FulfillmentPolicy[] }).fulfillmentPolicies ?? [])
-        .map((p) => ({ id: p.fulfillmentPolicyId, name: p.name }));
+        .map((p) => {
+          const domestic = p.shippingOptions?.find((o) => o.optionType === "DOMESTIC") ?? p.shippingOptions?.[0];
+          return { id: p.fulfillmentPolicyId, name: p.name, costType: domestic?.costType ?? null };
+        });
       const returnPolicies = ((returnRes.data as { returnPolicies?: ReturnPolicy[] }).returnPolicies ?? [])
         .map((p) => ({ id: p.returnPolicyId, name: p.name }));
 

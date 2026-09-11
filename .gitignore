@@ -8,3 +8,6 @@ npm-debug.log*
 .DS_Store
 tsconfig.tsbuildinfo
 .vercel
+
+# Stray env backups (e.g. .env.local.save) -- never commit a copy of secrets
+.env*.save
