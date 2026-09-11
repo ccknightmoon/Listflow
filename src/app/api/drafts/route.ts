@@ -90,6 +90,32 @@ export async function GET(req: NextRequest) {
   if (filter === "needs-price") {
     query = query.is("suggested_price", null);
   }
+  // "needs-photo" is a true DB filter now (photo_urls is text[] --
+  // confirmed against the live schema): null or the empty array literal
+  // covers every draft with zero photos, same as the old
+  // (d.photo_urls?.length ?? 0) === 0 in-memory check. This moves
+  // "needs-photo" onto the same range()-paginated path as "all"/
+  // "needs-price" below instead of loading every unlisted draft into
+  // memory to filter it in JS.
+  if (filter === "needs-photo") {
+    query = query.or("photo_urls.is.null,photo_urls.eq.{}");
+  }
+  // "ready" still needs the full getListingReadiness() check below (its
+  // >24-photo blocker isn't expressible as a plain column filter), but
+  // title/price/condition each being set is a hard requirement for
+  // "ready" and IS expressible here -- pushing these down first shrinks
+  // what actually has to be loaded into memory and filtered in JS to
+  // roughly just the drafts that are plausibly ready, instead of every
+  // unlisted draft regardless of how incomplete it is.
+  if (filter === "ready") {
+    query = query
+      .not("title", "is", null)
+      .neq("title", "")
+      .not("suggested_price", "is", null)
+      .gt("suggested_price", 0)
+      .not("condition", "is", null)
+      .neq("condition", "");
+  }
 
   const sortColumn = sort === "price-desc" || sort === "price-asc" ? "suggested_price" : "created_at";
   query = query.order(sortColumn, {
@@ -108,20 +134,27 @@ export async function GET(req: NextRequest) {
   // range()-based DB pagination; these two paginate in memory after
   // filtering, which still avoids sending the unused description/
   // item-attribute columns the old full-row select used to.
-  if (filter === "needs-photo" || filter === "ready") {
+  // Only "ready" still needs an in-memory pass -- the >24-photo blocker
+  // and the 80-char title-length blocker aren't expressible as plain
+  // column filters, and getListingReadiness() is the single source of
+  // truth for what "ready" means everywhere else in the app (the Drafts
+  // list UI, drafts/[id]). The DB-level pre-filter above already
+  // narrowed this to drafts that have a title/price/condition set, so
+  // this only loads the plausibly-ready subset, not every unlisted
+  // draft.
+  if (filter === "ready") {
     const { data, error } = await query;
     if (error) return draftsQueryError(error);
     const rows = data ?? [];
-    const matching = rows.filter((d) => {
-      if (filter === "needs-photo") return (d.photo_urls?.length ?? 0) === 0;
-      return getListingReadiness({
+    const matching = rows.filter((d) =>
+      getListingReadiness({
         photoCount: d.photo_urls?.length ?? (d.thumbnail_url ? 1 : 0),
         title: d.title,
         price: d.suggested_price,
         condition: d.condition,
         shippingMode: d.shipping_mode ?? "free",
-      }).ready;
-    });
+      }).ready
+    );
     const total = matching.length;
     const start = (page - 1) * pageSize;
     return NextResponse.json({
