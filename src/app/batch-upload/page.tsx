@@ -328,6 +328,19 @@ export default function BatchUploadPage() {
   // the same unchanged photos crossing the network 2-3x each for nothing.
   const uploadedPhotoUrls = useRef<Record<number, string>>({});
 
+  useEffect(() => {
+    const hasRecoverableWork = results.some((result, index) =>
+      !result.pending && !result.error && saveStatus[index] !== "saved" && saveStatus[index] !== "auto"
+    );
+    if (!hasRecoverableWork) return;
+    const warnBeforeLeaving = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warnBeforeLeaving);
+    return () => window.removeEventListener("beforeunload", warnBeforeLeaving);
+  }, [results, saveStatus]);
+
   // "Add a photo to this item" during review — lets someone patch in a
   // shot they missed on the first upload without starting the whole
   // batch over. One shared hidden input; addPhotoTargetGroup remembers
