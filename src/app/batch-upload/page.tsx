@@ -2627,9 +2627,17 @@ export default function BatchUploadPage() {
                     </p>
                   )}
                   {photoUploadWarnings[i] && (
-                    <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>
+                    <div className="text-xs mb-2 flex items-center gap-2" style={{ color: "var(--danger)" }}>
                       {photoUploadWarnings[i]}
-                    </p>
+                      <button
+                        type="button"
+                        className="underline font-medium whitespace-nowrap"
+                        onClick={() => void handleSaveDraft(i)}
+                        disabled={status === "saving" || listingAll}
+                      >
+                        Retry uploads
+                      </button>
+                    </div>
                   )}
                   {listStatus[i] === "error" && listErrors[i] && (
                     <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>
