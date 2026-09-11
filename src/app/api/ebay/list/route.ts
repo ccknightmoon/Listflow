@@ -68,9 +68,21 @@ export async function POST(req: NextRequest) {
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {
-    return NextResponse.json({ error: "eBay not connected. Authorize your account to start listing.", connect: true }, { status: 400 });
+    // 200, not 400: apiFetch() throws on any non-2xx status before the
+    // caller ever sees the parsed body, so a non-200 here would make
+    // every `if (data.connect)` check below unreachable dead code --
+    // the seller would just see a generic thrown-error message with no
+    // "Connect eBay" link. Matches the pattern already used by
+    // /api/ebay/sales, /ship, /store, /offers, /messages for this exact
+    // signal.
+    return NextResponse.json({ error: "eBay not connected. Authorize your account to start listing.", connect: true }, { status: 200 });
   }
   return ebayContext.run(connection, async () => {
+  // Set once we know this call is purging an already-live listing to
+  // recreate it (an explicit "Relist on eBay" on a draft that's
+  // already listed) -- declared here, not inside the try block, so the
+  // catch block below can see it too.
+  let wasAlreadyListed = false;
   try {
     const { data: draft, error: dbError } = await supabase
       .from("drafts")
@@ -101,6 +113,33 @@ export async function POST(req: NextRequest) {
         alreadyListed: true,
       });
     }
+
+    // From here on, if this is a relist of an already-live draft, the
+    // purge below deletes that live offer before trying to recreate it
+    // -- eBay blocks condition/category changes on an inventory item
+    // with prior offers, so there's no way to edit-in-place. If
+    // anything after the purge fails, the live listing is already gone
+    // but drafts.ebay_listing_id would still point at it, so the UI
+    // would keep showing "View on eBay"/"Relist" for a dead listing.
+    // failRelist() is the one place every error return in this
+    // sequence goes through: it clears ebay_listing_id and says
+    // plainly that the old listing ended, instead of leaving Supabase
+    // and eBay disagreeing about whether the item is live.
+    wasAlreadyListed = Boolean(draft.ebay_listing_id && allowRelist);
+    const failRelist = async (payload: Record<string, unknown>, status = 400) => {
+      if (wasAlreadyListed) {
+        await supabase.from("drafts").update({ ebay_listing_id: null }).eq("id", draftId);
+        return NextResponse.json(
+          {
+            ...payload,
+            listingEnded: true,
+            error: `${payload.error ?? "Relist failed"} Your previous live listing was ended while relisting and could not be re-published -- it is no longer live on eBay. Fix the issue above and try listing it again.`,
+          },
+          { status }
+        );
+      }
+      return NextResponse.json(payload, { status });
+    };
     const draftPhotoCount = Array.isArray(draft.photo_urls) ? draft.photo_urls.length : draft.thumbnail_url ? 1 : 0;
     if (draftPhotoCount < 1) return NextResponse.json({ error: "Add at least one photo before listing." }, { status: 400 });
     if (draftPhotoCount > 24) return NextResponse.json({ error: "eBay allows up to 24 photos per listing." }, { status: 400 });
@@ -200,7 +239,7 @@ export async function POST(req: NextRequest) {
     if (itemResult.status >= 400) {
       const errData = itemResult.data as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
       const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(itemResult.data);
-      return NextResponse.json({ error: msg }, { status: 400 });
+      return failRelist({ error: msg }, 400);
     }
     // eBay-required fields for this category that the AI/draft data didn't
     // cover — surfaced so the frontend can warn the seller before they treat
@@ -236,7 +275,7 @@ export async function POST(req: NextRequest) {
           foundViaSku = match?.sku;
         }
         if (!offerId) {
-          return NextResponse.json({ error: "Offer already exists but could not be retrieved. Please contact eBay support." }, { status: 500 });
+          return failRelist({ error: "Offer already exists but could not be retrieved. Please contact eBay support." }, 500);
         }
         if (foundViaSku && foundViaSku !== sku) {
           // Old-SKU offer: delete it so we can create a fresh one linked to the current inventory item
@@ -245,7 +284,7 @@ export async function POST(req: NextRequest) {
           offerId = (freshResult.data as { offerId?: string }).offerId;
           if (freshResult.status >= 400 || !offerId) {
             const e = (freshResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
-            return NextResponse.json({ error: e?.message ?? "Failed to create offer after deleting old one" }, { status: 400 });
+            return failRelist({ error: e?.message ?? "Failed to create offer after deleting old one" }, 400);
           }
         } else {
           // Same-SKU offer: update price, category, and merchant location
@@ -259,16 +298,16 @@ export async function POST(req: NextRequest) {
         offerId = (retryResult.data as { offerId?: string }).offerId;
         if (retryResult.status >= 400 || !offerId) {
           const retryErr = (retryResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
-          return NextResponse.json({ error: `Location fix failed: ${retryErr?.message ?? JSON.stringify(retryResult.data)}` }, { status: 400 });
+          return failRelist({ error: `Location fix failed: ${retryErr?.message ?? JSON.stringify(retryResult.data)}` }, 400);
         }
 
       } else {
         const errMsg = err0?.longMessage ?? err0?.message ?? "Failed to create offer";
-        return NextResponse.json({ error: errMsg }, { status: 400 });
+        return failRelist({ error: errMsg }, 400);
       }
     }
 
-    if (!offerId) return NextResponse.json({ error: "No offer ID returned" }, { status: 500 });
+    if (!offerId) return failRelist({ error: "No offer ID returned" }, 500);
 
     // Try publishing right away instead of always paying a fixed wait for
     // eBay's inventory service to index the item first -- this used to be
@@ -320,16 +359,20 @@ export async function POST(req: NextRequest) {
         const safeCategory = getSafeFallbackCategory(draft.title || "");
         const originalCondition = CONDITION_MAP[draft.condition ?? ""] ?? "USED_GOOD";
         // Only ever retry with the item's OWN actual condition — never widen
-        // to a worse one. This used to fall back to "USED_EXCELLENT" for
-        // brand-new items just to force a listing through, which meant a
-        // live eBay listing could silently claim a "New with tags" item was
-        // actually used. A wrong condition on a public listing is an
-        // "item not as described" risk, not a cosmetic bug, so if retrying
-        // with the item's real condition still fails, we report the error
-        // instead of trying to relabel it.
-        const conditionsToTry = originalCondition === "USED_ACCEPTABLE"
-          ? ["USED_ACCEPTABLE", "USED_GOOD"]
-          : [originalCondition];
+        // to a better OR a worse one. This used to fall back to
+        // "USED_EXCELLENT" for brand-new items just to force a listing
+        // through, which meant a live eBay listing could silently claim a
+        // "New with tags" item was actually used -- and, separately, a
+        // second fallback below used to escalate USED_ACCEPTABLE to
+        // USED_GOOD on a category-rejection retry, which had the opposite
+        // problem: a flawed item could silently list as "Good - minor
+        // flaws" when the seller had actually marked it "Fair - notable
+        // flaws," with the description/photos unchanged. A wrong condition
+        // on a public listing is an "item not as described" risk either
+        // direction, not a cosmetic bug -- if retrying with the item's
+        // real condition still fails, report the error instead of trying
+        // to relabel it.
+        const conditionsToTry = [originalCondition];
 
         for (const tryCondition of conditionsToTry) {
           const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter);
@@ -357,7 +400,7 @@ export async function POST(req: NextRequest) {
         const retryErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
         const initialCat = categoryId;
         const safecat = getSafeFallbackCategory(draft.title || "");
-        return NextResponse.json({ error: `${retryErr?.longMessage ?? retryErr?.message ?? "Failed to publish listing"} [initial cat:${initialCat}, safe cat:${safecat}]` }, { status: 400 });
+        return failRelist({ error: `${retryErr?.longMessage ?? retryErr?.message ?? "Failed to publish listing"} [initial cat:${initialCat}, safe cat:${safecat}]` }, 400);
       }
     }
 
@@ -393,13 +436,31 @@ export async function POST(req: NextRequest) {
       msg.toLowerCase().includes("token expired") ||
       msg.toLowerCase().includes("invalid access token") ||
       msg.toLowerCase().includes("oauth");
+    if (wasAlreadyListed) {
+      // Same reasoning as failRelist() above: whatever failed, it failed
+      // after the live listing was already purged, so Supabase must
+      // stop claiming it's still listed.
+      await supabase.from("drafts").update({ ebay_listing_id: null }).eq("id", draftId);
+    }
     if (isTokenExpired) {
       // Force the next attempt to fetch a fresh token instead of reusing
       // the cached one that just failed.
       invalidateAccessTokenCache();
-      return NextResponse.json({ error: "eBay token expired. Reconnect eBay to continue listing.", reconnect: true }, { status: 401 });
+      // 200, not 401: a 401 here isn't this app session expiring, it's
+      // this seller's eBay token expiring -- but apiFetch() treats ANY
+      // 401 as an app-session expiry and force-navigates the whole
+      // browser to /login, so this used to silently log the seller out
+      // of Listflow mid-listing instead of showing "Reconnect eBay."
+      // Same dead-code problem as the connect:true case above, too.
+      return NextResponse.json({
+        error: wasAlreadyListed
+          ? "eBay token expired mid-relist. Your previous live listing was ended and could not be re-published -- reconnect eBay, then try listing it again."
+          : "eBay token expired. Reconnect eBay to continue listing.",
+        reconnect: true,
+        listingEnded: wasAlreadyListed || undefined,
+      }, { status: 200 });
     }
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return NextResponse.json({ error: msg, listingEnded: wasAlreadyListed || undefined }, { status: 500 });
   }
   });
 }
