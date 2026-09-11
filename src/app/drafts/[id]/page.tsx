@@ -81,6 +81,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [shippingMode, setShippingMode] = useState<ShippingMode>("free");
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const [photoUndo, setPhotoUndo] = useState<string[] | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null);
@@ -480,6 +481,28 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  async function savePhotoUrls(next: string[], previous: string[]) {
+    setPhotoUndo(previous);
+    setPhotoUrls(next);
+    setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
+    await apiFetch(`/api/drafts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] ?? null }),
+    });
+  }
+
+  async function handleUndoPhotoChange() {
+    if (!photoUndo) return;
+    const previous = photoUrls;
+    try {
+      await savePhotoUrls(photoUndo, previous);
+      setPhotoUndo(null);
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
   async function handleAddListingPhoto(file: File | undefined) {
     if (!file) return;
     setError(null);
@@ -491,14 +514,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         reader.readAsDataURL(file);
       });
       const url = await uploadThumbnail(dataUrl);
-      const next = [...photoUrls, url];
-      setPhotoUrls(next);
-      setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: prev.thumbnail_url ?? url } : prev);
-      await apiFetch(`/api/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoUrls: next, ...(photoUrls.length === 0 ? { thumbnailUrl: url } : {}) }),
-      });
+      await savePhotoUrls([...photoUrls, url], photoUrls);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -506,14 +522,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   async function handleDeleteListingPhoto(index: number) {
     const next = photoUrls.filter((_, i) => i !== index);
-    setPhotoUrls(next);
-    setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
     try {
-      await apiFetch(`/api/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] ?? null }),
-      });
+      await savePhotoUrls(next, photoUrls);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -524,14 +534,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     if (target < 0 || target >= photoUrls.length) return;
     const next = [...photoUrls];
     [next[index], next[target]] = [next[target], next[index]];
-    setPhotoUrls(next);
-    setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
     try {
-      await apiFetch(`/api/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] ?? null }),
-      });
+      await savePhotoUrls(next, photoUrls);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -613,12 +617,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       const next = [...photoUrls];
       const [item] = next.splice(currentDrag, 1);
       next.splice(dropIdx, 0, item);
-      setPhotoUrls(next);
-      await apiFetch(`/api/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] }),
-      });
+      await savePhotoUrls(next, photoUrls);
     }
 
     setDragIdx(null);
@@ -767,13 +766,26 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       )}
 
       {photoUrls.length > 0 ? (
-        <div className="grid grid-cols-2 gap-2 mb-4">
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-[var(--text-secondary)]">Photos · swipe to see all</p>
+            {photoUndo && (
+              <button
+                type="button"
+                onClick={() => void handleUndoPhotoChange()}
+                className="btn text-xs py-1.5 px-2.5"
+              >
+                Undo photo change
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2 overflow-x-auto pb-2 -mx-5 px-5 snap-x snap-mandatory">
           {photoUrls.map((url, i) => (
             <div
               key={i}
               ref={(el) => { photoRefs.current[i] = el; }}
-              className={`relative rounded-xl overflow-hidden cursor-grab select-none transition-all${dragIdx === i ? " opacity-40 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
-              style={{ aspectRatio: "1", touchAction: "none" }}
+              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none transition-all snap-start${dragIdx === i ? " opacity-40 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
+              style={{ width: 184, height: 184, touchAction: "none" }}
               onPointerDown={(e) => onPhotoPDown(e, i)}
               onPointerMove={onPhotoPMove}
               onPointerUp={(e) => onPhotoPUp(e, url)}
@@ -826,12 +838,14 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           <button
             type="button"
             onClick={() => photoInputRef.current?.click()}
-            className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 text-xs text-[var(--text-secondary)] min-h-32"
+            className="flex-shrink-0 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 text-xs text-[var(--text-secondary)]"
+            style={{ width: 184, height: 184 }}
           >
             <Upload className="w-5 h-5" />
             Add photo
           </button>
           <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { void handleAddListingPhoto(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+          </div>
         </div>
       ) : draft?.thumbnail_url ? (
         <div className="w-full mb-4 cursor-zoom-in" onClick={() => setZoomedPhoto(draft!.thumbnail_url!)}>
@@ -845,6 +859,17 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       ) : (
         <div className="mb-4">
+          {photoUndo && (
+            <div className="flex justify-end mb-2">
+              <button
+                type="button"
+                onClick={() => void handleUndoPhotoChange()}
+                className="btn text-xs py-1.5 px-2.5"
+              >
+                Undo photo change
+              </button>
+            </div>
+          )}
           <button
             type="button"
             onClick={() => photoInputRef.current?.click()}
