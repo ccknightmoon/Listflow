@@ -71,36 +71,36 @@ export function getCategoryId(title: string): string {
 // Jewelry sub-types are checked in this order (most to least specific) so a
 // title like "gold pendant necklace" lands on necklace, not a generic match.
 const JEWELRY_TYPES: Array<{ re: RegExp; kind: "necklace" | "earrings" | "ring" | "bracelet" }> = [
-  { re: /\b(necklace|pendant|choker)\b/, kind: "necklace" },
-  { re: /\b(earring|earrings|studs?)\b/, kind: "earrings" },
-  { re: /\b(ring|rings)\b/, kind: "ring" },
-  { re: /\b(bracelet|bangle|anklet)\b/, kind: "bracelet" },
+  { re: /\b(necklaces?|pendants?|chokers?)\b/, kind: "necklace" },
+  { re: /\b(earrings?|studs?)\b/, kind: "earrings" },
+  { re: /\b(rings?)\b/, kind: "ring" },
+  { re: /\b(bracelets?|bangles?|anklets?)\b/, kind: "bracelet" },
 ];
 
 // Same idea for non-jewelry accessories — belts, wallets, hats, sunglasses,
 // scarves. Checked after jewelry/bags/dresses/shoes so e.g. "backpack"
 // (already a bag) or "beanie" (arguably outerwear-adjacent) don't collide.
 const ACCESSORY_TYPES: Array<{ re: RegExp; kind: "belt" | "wallet" | "hat" | "sunglasses" | "scarf" }> = [
-  { re: /\b(belt)\b/, kind: "belt" },
-  { re: /\b(wallet|billfold|card holder)\b/, kind: "wallet" },
-  { re: /\b(hat|cap|beanie|fedora|beret)\b/, kind: "hat" },
+  { re: /\b(belts?)\b/, kind: "belt" },
+  { re: /\b(wallets?|billfolds?|card holders?)\b/, kind: "wallet" },
+  { re: /\b(hats?|caps?|beanies?|fedoras?|berets?)\b/, kind: "hat" },
   { re: /\b(sunglasses|shades)\b/, kind: "sunglasses" },
-  { re: /\b(scarf|scarves|wrap)\b/, kind: "scarf" },
+  { re: /\b(scarf|scarves|wraps?)\b/, kind: "scarf" },
 ];
 
 function detectGarmentType(title: string) {
   const lower = (title || "").toLowerCase();
   const isWomens = lower.includes("women") || lower.includes("ladies");
-  const isDress = /\b(dress|gown|sundress|maxi dress|midi dress)\b/.test(lower);
-  const isBag = /\b(handbag|purse|tote|clutch|crossbody|satchel|backpack)\b/.test(lower);
+  const isDress = /\b(dress(?:es)?|gowns?|sundress(?:es)?|maxi dress(?:es)?|midi dress(?:es)?)\b/.test(lower);
+  const isBag = /\b(handbags?|purses?|totes?|clutch(?:es)?|crossbody|crossbodies|satchels?|backpacks?)\b/.test(lower);
   const jewelryMatch = JEWELRY_TYPES.find((j) => j.re.test(lower));
   const isJewelry = !isBag && !!jewelryMatch;
   const accessoryMatch = !isJewelry ? ACCESSORY_TYPES.find((a) => a.re.test(lower)) : undefined;
   const isAccessory = !isDress && !isBag && !isJewelry && !!accessoryMatch;
-  const isTop = !isDress && !isBag && !isJewelry && !isAccessory && /\b(shirt|tee|t-shirt|top|blouse|polo|button-up|button-down)\b/.test(lower);
-  const isOuterwear = !isDress && !isBag && !isJewelry && !isAccessory && !isTop && /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(lower);
+  const isTop = !isDress && !isBag && !isJewelry && !isAccessory && /\b(shirts?|tees?|t-shirts?|tops?|blouses?|polos?|button-ups?|button-downs?)\b/.test(lower);
+  const isOuterwear = !isDress && !isBag && !isJewelry && !isAccessory && !isTop && /\b(jackets?|coats?|hoodies?|sweatshirts?|vests?|bombers?|windbreakers?|blazers?|fleeces?|puffers?|anoraks?)\b/.test(lower);
   const isBottom = !isDress && !isBag && !isJewelry && !isAccessory && !isTop && !isOuterwear && /\b(pants?|jeans?|shorts|trousers?|cargo|chinos?|leggings?|skirts?|joggers?|sweatpants?)\b/.test(lower);
-  const isShoe = !isDress && !isBag && !isJewelry && !isAccessory && /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(lower);
+  const isShoe = !isDress && !isBag && !isJewelry && !isAccessory && /\b(shoes?|boots?|sneakers?|sandals?|slippers?|loafers?|heels?|flats?)\b/.test(lower);
   return {
     isWomens, isDress, isBag, isTop, isOuterwear, isBottom, isShoe,
     isJewelry, jewelryKind: jewelryMatch?.kind,
@@ -403,7 +403,7 @@ export async function upsertInventoryItem(sku: string, draft: {
   // actually wants gets picked up by the normalization pass below instead
   // of silently missing (the AI already reads the shoe size off the
   // box/tag into `size`, same as it does for clothing).
-  const isShoeItem = /\b(shoe|boot|sneaker|sandal|slipper|loafer|heel|flat)\b/.test(titleLower);
+  const isShoeItem = /\b(shoes?|boots?|sneakers?|sandals?|slippers?|loafers?|heels?|flats?)\b/.test(titleLower);
   if (isShoeItem && isAspect(draft.size)) {
     aspects["US Shoe Size"] = [draft.size];
   }
