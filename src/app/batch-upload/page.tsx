@@ -2173,20 +2173,61 @@ export default function BatchUploadPage() {
                     )}
                   </div>
                 )}
-                {/* Scrollable photo strip — swipe to see all photos in this group */}
+                {/* Show the full group so every photo is easy to review and edit. */}
                 {groupPhotos.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto px-4 pt-4 pb-2 snap-x snap-mandatory">
+                  <div className="grid grid-cols-3 gap-2 px-4 pt-4 pb-2">
                     {groupPhotos.map((url, pi) => (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        key={pi}
-                        src={url}
-                        alt={`Photo ${pi + 1}`}
-                        loading="lazy"
-                        decoding="async"
-                        className="h-36 w-36 object-cover rounded-lg flex-shrink-0 snap-start"
-                      />
+                      <div key={pi} className="relative aspect-square">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={url}
+                          alt={`Photo ${pi + 1}`}
+                          loading="lazy"
+                          decoding="async"
+                          className="w-full h-full object-cover rounded-lg"
+                        />
+                        <div className="absolute bottom-1 left-1 right-1 flex justify-between">
+                          <button
+                            type="button"
+                            aria-label="Move photo earlier"
+                            disabled={pi === 0}
+                            onClick={() => movePhotoEarlier(group[pi], i)}
+                            className="rounded-full bg-black/60 p-1 text-white disabled:opacity-30"
+                          >
+                            <ChevronLeft className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Delete photo"
+                            disabled={group.length <= 1}
+                            onClick={() => removePhoto(group[pi], i)}
+                            className="rounded-full bg-black/60 p-1 text-white disabled:opacity-30"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Move photo later"
+                            disabled={pi === group.length - 1}
+                            onClick={() => movePhotoLater(group[pi], i)}
+                            className="rounded-full bg-black/60 p-1 text-white disabled:opacity-30"
+                          >
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddPhotoTargetGroup(i);
+                        addPhotoInput.current?.click();
+                      }}
+                      className="aspect-square rounded-lg border-2 border-dashed flex flex-col items-center justify-center gap-1 text-xs text-[var(--text-secondary)]"
+                    >
+                      <Plus className="w-5 h-5" />
+                      Add photo
+                    </button>
                   </div>
                 )}
                 <div className="px-4 pb-4">

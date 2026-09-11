@@ -3,7 +3,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight } from "lucide-react";
 import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
 import { uploadThumbnail } from "@/lib/storage";
@@ -80,6 +80,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [shippingCost, setShippingCost] = useState("");
   const [shippingMode, setShippingMode] = useState<ShippingMode>("free");
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null);
@@ -455,6 +456,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             } catch {
               return null;
             }
+
           })
         )
       ).filter((u): u is string => !!u);
@@ -475,6 +477,63 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       setError((err as Error).message);
     } finally {
       setReanalyzing(false);
+    }
+  }
+
+  async function handleAddListingPhoto(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error("Could not read photo"));
+        reader.readAsDataURL(file);
+      });
+      const url = await uploadThumbnail(dataUrl);
+      const next = [...photoUrls, url];
+      setPhotoUrls(next);
+      setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: prev.thumbnail_url ?? url } : prev);
+      await apiFetch(`/api/drafts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoUrls: next, ...(photoUrls.length === 0 ? { thumbnailUrl: url } : {}) }),
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function handleDeleteListingPhoto(index: number) {
+    const next = photoUrls.filter((_, i) => i !== index);
+    setPhotoUrls(next);
+    setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
+    try {
+      await apiFetch(`/api/drafts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] ?? null }),
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  }
+
+  async function moveListingPhoto(index: number, direction: -1 | 1) {
+    const target = index + direction;
+    if (target < 0 || target >= photoUrls.length) return;
+    const next = [...photoUrls];
+    [next[index], next[target]] = [next[target], next[index]];
+    setPhotoUrls(next);
+    setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
+    try {
+      await apiFetch(`/api/drafts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] ?? null }),
+      });
+    } catch (err) {
+      setError((err as Error).message);
     }
   }
 
@@ -708,13 +767,13 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       )}
 
       {photoUrls.length > 0 ? (
-        <div className="flex gap-2 overflow-x-auto -mx-5 px-5 mb-4">
+        <div className="grid grid-cols-2 gap-2 mb-4">
           {photoUrls.map((url, i) => (
             <div
               key={i}
               ref={(el) => { photoRefs.current[i] = el; }}
-              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none transition-all${dragIdx === i ? " opacity-40 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
-              style={{ width: 208, height: 208, touchAction: "none" }}
+              className={`relative rounded-xl overflow-hidden cursor-grab select-none transition-all${dragIdx === i ? " opacity-40 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
+              style={{ aspectRatio: "1", touchAction: "none" }}
               onPointerDown={(e) => onPhotoPDown(e, i)}
               onPointerMove={onPhotoPMove}
               onPointerUp={(e) => onPhotoPUp(e, url)}
@@ -731,8 +790,48 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                   <span className="text-white text-[10px]">Main</span>
                 </div>
               )}
+              <button
+                type="button"
+                aria-label={`Delete photo ${i + 1}`}
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => { e.stopPropagation(); void handleDeleteListingPhoto(i); }}
+                className="absolute top-1 right-1 p-1 rounded-full bg-black/60 text-white"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+              <div className="absolute bottom-1 left-1 right-1 flex justify-between">
+                <button
+                  type="button"
+                  aria-label="Move photo earlier"
+                  disabled={i === 0}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void moveListingPhoto(i, -1); }}
+                  className="rounded-full bg-black/60 p-1 text-white disabled:opacity-30"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Move photo later"
+                  disabled={i === photoUrls.length - 1}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => { e.stopPropagation(); void moveListingPhoto(i, 1); }}
+                  className="rounded-full bg-black/60 p-1 text-white disabled:opacity-30"
+                >
+                  <ChevronRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           ))}
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            className="rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-1 text-xs text-[var(--text-secondary)] min-h-32"
+          >
+            <Upload className="w-5 h-5" />
+            Add photo
+          </button>
+          <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { void handleAddListingPhoto(e.target.files?.[0]); e.currentTarget.value = ""; }} />
         </div>
       ) : draft?.thumbnail_url ? (
         <div className="w-full mb-4 cursor-zoom-in" onClick={() => setZoomedPhoto(draft!.thumbnail_url!)}>
@@ -745,8 +844,17 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           />
         </div>
       ) : (
-        <div className="card flex items-center justify-center mb-4" style={{ height: 160 }}>
-          <Shirt className="w-10 h-10 text-[var(--text-tertiary)]" />
+        <div className="mb-4">
+          <button
+            type="button"
+            onClick={() => photoInputRef.current?.click()}
+            className="card w-full flex flex-col items-center justify-center gap-2 text-sm text-[var(--text-secondary)]"
+            style={{ height: 160 }}
+          >
+            <Upload className="w-6 h-6" />
+            Add your first photo
+          </button>
+          <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { void handleAddListingPhoto(e.target.files?.[0]); e.currentTarget.value = ""; }} />
         </div>
       )}
 
