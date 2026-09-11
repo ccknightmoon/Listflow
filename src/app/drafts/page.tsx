@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X, Copy } from "lucide-react";
@@ -9,13 +9,19 @@ import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
 import type { ShippingMode } from "@/lib/shipping";
-import { getListingReadiness } from "@/lib/listing-readiness";
 
 // Drafts rarely changes shape between visits within one tab (add/remove a
 // few items at most) — showing the last list instantly while a fresh fetch
 // runs quietly beats reflashing the loading spinner every time you tap
 // into this tab from BottomNav.
 const DRAFTS_CACHE_KEY = "drafts:list";
+
+// Server-paginated (see GET /api/drafts) -- a seller's draft backlog can
+// run into the hundreds, and this page used to fetch every single one on
+// every visit. 30 keeps each page small while still showing enough that
+// "Select all" + bulk list stays useful for a normal batch-review session.
+const PAGE_SIZE = 30;
+const SEARCH_DEBOUNCE_MS = 300;
 
 interface Draft {
   id: string;
@@ -45,10 +51,39 @@ function timeAgo(dateStr: string | null): string {
 type SortKey = "newest" | "oldest" | "price-desc" | "price-asc";
 type DraftFilter = "all" | "ready" | "needs-photo" | "needs-price";
 
+// Resolves whether an item is heavy / its shipping cost the same way for
+// every id regardless of which page it was loaded on -- falls back to the
+// pre-migration localStorage cache (see drafts/[id]) for a draft saved
+// before is_heavy/shipping_cost were persisted server-side and never
+// re-saved since. Used both for the current page's badges and for bulk
+// "List on eBay", which can include ids selected on a page that isn't the
+// one currently loaded.
+function resolveIsHeavy(id: string, draft: Draft | undefined): boolean {
+  if (draft?.is_heavy != null) return draft.is_heavy;
+  try {
+    return JSON.parse(localStorage.getItem(`heavy-${id}`) ?? "false");
+  } catch {
+    return false;
+  }
+}
+function resolveShippingCost(id: string, draft: Draft | undefined): number | undefined {
+  if (draft?.shipping_cost != null && draft.shipping_cost > 0) return draft.shipping_cost;
+  const saved = localStorage.getItem(`shippingCost-${id}`);
+  if (saved) {
+    const n = parseFloat(saved);
+    if (n > 0) return n;
+  }
+  return undefined;
+}
+
 export default function DraftsPage() {
   const router = useRouter();
   const [drafts, setDrafts] = useState<Draft[]>(() => getPageCache<Draft[]>(DRAFTS_CACHE_KEY) ?? []);
   const [loading, setLoading] = useState(() => getPageCache<Draft[]>(DRAFTS_CACHE_KEY) === undefined);
+  // Set on every re-fetch after the first (search/sort/filter/page change)
+  // -- unlike `loading`, this never hides the current list; it just flags
+  // the controls as busy so a fast double-click can't fire two requests.
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [deleting, setDeleting] = useState(false);
@@ -57,29 +92,106 @@ export default function DraftsPage() {
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
   const [heavyIds, setHeavyIds] = useState<Set<string>>(new Set());
-  const [shippingCostMap, setShippingCostMap] = useState<Record<string, number>>({});
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("newest");
   const [filter, setFilter] = useState<DraftFilter>("all");
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
-  useEffect(() => { loadDrafts(); }, []);
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(() => getPageCache<Draft[]>(DRAFTS_CACHE_KEY)?.length ?? 0);
+  const [totalPages, setTotalPages] = useState(1);
+  // Count of not-yet-priced drafts across the WHOLE backlog, not just the
+  // current page/filter -- kept as its own lightweight query (pageSize=1,
+  // so only the count comes back) so the warning banner below stays
+  // accurate now that `drafts` only ever holds one page at a time.
+  const [noPriceTotal, setNoPriceTotal] = useState(0);
+
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Accumulates every draft object this tab has fetched on any page this
+  // session, keyed by id. `drafts` itself only ever holds the current
+  // page's rows, so bulk actions (list, delete, the no-price confirm)
+  // need this instead to resolve an id that was selected on a page that
+  // isn't the one currently loaded -- otherwise a multi-page selection
+  // would silently lose that item's title/shipping/price info.
+  const draftsByIdRef = useRef<Record<string, Draft>>({});
+
+  useEffect(() => {
+    loadDrafts();
+    loadNoPriceTotal();
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+    // Intentionally run once on mount only -- loadDrafts/loadNoPriceTotal
+    // read `page`/`search`/`sort`/`filter` via their own default-argument
+    // fallbacks, but every place those change already calls loadDrafts
+    // directly with explicit overrides (see handleSearchChange etc.),
+    // so re-running this effect on every state change would double-fetch.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Keeps the cache in sync with every change to `drafts` — the initial
   // load below, and the later mutations (delete, the post-bulk-list
   // refresh) — without needing a cache write at each individual call site.
   useEffect(() => { setPageCache(DRAFTS_CACHE_KEY, drafts); }, [drafts]);
 
-  async function loadDrafts() {
-    // No setLoading(true) here: the initial state above already reflects
-    // whether we had a cached list to show. loadDrafts() runs again later
-    // (after a bulk "List on eBay" completes) purely to quietly refresh the
-    // list in place — flashing back to a full loading spinner at that point
-    // would undo the "done" state the screen just showed.
-    setError(null);
+  async function loadNoPriceTotal() {
     try {
-      const data = await apiFetch<{ drafts?: Array<Draft & { ebay_listing_id?: string | null }>; error?: string }>("/api/drafts");
-      const loaded = (data.drafts ?? []).filter((d) => !d.ebay_listing_id) as Draft[];
+      const data = await apiFetch<{ total?: number }>("/api/drafts?filter=needs-price&page=1&pageSize=1");
+      setNoPriceTotal(data.total ?? 0);
+    } catch {
+      // Non-critical -- the banner just stays at its last known count.
+      // The main list load below already surfaces real errors.
+    }
+  }
+
+  async function loadDrafts(overrides?: { page?: number; search?: string; sort?: SortKey; filter?: DraftFilter }) {
+    const targetPage = overrides?.page ?? page;
+    const targetSearch = overrides?.search ?? search;
+    const targetSort = overrides?.sort ?? sort;
+    const targetFilter = overrides?.filter ?? filter;
+
+    // No setLoading(true) here (matches the original behavior this
+    // replaces): the initial state above already reflects whether we had
+    // a cached list to show, and flashing back to the full spinner on
+    // every search keystroke or page click would be jarring. `refreshing`
+    // covers "a fetch is in flight" for the controls instead.
+    setError(null);
+    setRefreshing(true);
+    try {
+      const params = new URLSearchParams();
+      params.set("page", String(targetPage));
+      params.set("pageSize", String(PAGE_SIZE));
+      if (targetSearch.trim()) params.set("search", targetSearch.trim());
+      params.set("sort", targetSort);
+      params.set("filter", targetFilter);
+
+      const data = await apiFetch<{
+        drafts?: Draft[];
+        total?: number;
+        page?: number;
+        totalPages?: number;
+        error?: string;
+      }>(`/api/drafts?${params.toString()}`);
+
+      const loaded = data.drafts ?? [];
+      const effectiveTotalPages = data.totalPages ?? 1;
+      const effectivePage = data.page ?? targetPage;
+
+      // A page that's gone stale (the last item on it was just deleted, or
+      // a filter change shrank the result set below the page you were on)
+      // comes back empty even though earlier pages still have rows --
+      // rather than show a confusing blank list, drop back to the last
+      // real page once.
+      if (loaded.length === 0 && effectivePage > 1 && effectiveTotalPages < effectivePage) {
+        return loadDrafts({ page: effectiveTotalPages, search: targetSearch, sort: targetSort, filter: targetFilter });
+      }
+
       setDrafts(loaded);
+      setPage(effectivePage);
+      setTotal(data.total ?? loaded.length);
+      setTotalPages(effectiveTotalPages);
+
+      for (const d of loaded) draftsByIdRef.current[d.id] = d;
+
       // Prefer the draft's own saved is_heavy/shipping_cost (now persisted
       // by every save path -- new-listing, batch-upload, and drafts/[id])
       // over localStorage, which only ever got set by opening this exact
@@ -87,28 +199,38 @@ export default function DraftsPage() {
       // used to silently list here as non-heavy since heavyIds only ever
       // came from localStorage before. Still falls back to localStorage for
       // any draft saved before this migration that hasn't been re-saved yet.
-      setHeavyIds(
-        new Set(
-          loaded
-            .filter((d) => d.is_heavy ?? JSON.parse(localStorage.getItem(`heavy-${d.id}`) ?? "false"))
-            .map((d) => d.id)
-        )
-      );
-      const costMap: Record<string, number> = {};
-      for (const d of loaded) {
-        if (d.shipping_cost != null && d.shipping_cost > 0) {
-          costMap[d.id] = d.shipping_cost;
-          continue;
-        }
-        const saved = localStorage.getItem(`shippingCost-${d.id}`);
-        if (saved) { const n = parseFloat(saved); if (n > 0) costMap[d.id] = n; }
-      }
-      setShippingCostMap(costMap);
+      setHeavyIds(new Set(loaded.filter((d) => resolveIsHeavy(d.id, d)).map((d) => d.id)));
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  }
+
+  function handleSearchChange(value: string) {
+    setSearch(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      loadDrafts({ page: 1, search: value });
+    }, SEARCH_DEBOUNCE_MS);
+  }
+  function handleSearchClear() {
+    setSearch("");
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    loadDrafts({ page: 1, search: "" });
+  }
+  function handleSortChange(value: SortKey) {
+    setSort(value);
+    loadDrafts({ page: 1, sort: value });
+  }
+  function handleFilterChange(value: DraftFilter) {
+    setFilter(value);
+    loadDrafts({ page: 1, filter: value });
+  }
+  function goToPage(p: number) {
+    if (p < 1 || p > totalPages || p === page || refreshing) return;
+    loadDrafts({ page: p });
   }
 
   // Spins off a fresh draft with this row's details but no photos/SKU/
@@ -145,32 +267,38 @@ export default function DraftsPage() {
     });
   }
 
+  // Selects/deselects only the rows on the CURRENT page -- selections on
+  // other pages (tracked in the `selected` Set, which is never reset by a
+  // page change) are left exactly as they were.
   function toggleSelectAll() {
-    const allFilteredSelected = filtered.every((d) => selected.has(d.id));
-    if (allFilteredSelected) {
+    const allOnPageSelected = drafts.every((d) => selected.has(d.id));
+    if (allOnPageSelected) {
       setSelected((prev) => {
         const next = new Set(prev);
-        filtered.forEach((d) => next.delete(d.id));
+        drafts.forEach((d) => next.delete(d.id));
         return next;
       });
     } else {
-      setSelected((prev) => new Set([...prev, ...filtered.map((d) => d.id)]));
+      setSelected((prev) => new Set([...prev, ...drafts.map((d) => d.id)]));
     }
   }
 
 
   async function handleDeleteSelected() {
     if (selected.size === 0) return;
+    const ids = Array.from(selected);
     setDeleting(true);
     try {
       const data = await apiFetch<{ error?: string }>("/api/drafts", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids: Array.from(selected) }),
+        body: JSON.stringify({ ids }),
       });
       if (data.error) throw new Error(data.error);
-      setDrafts((prev) => prev.filter((d) => !selected.has(d.id)));
+      for (const id of ids) delete draftsByIdRef.current[id];
       setSelected(new Set());
+      await loadDrafts();
+      loadNoPriceTotal();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -182,7 +310,10 @@ export default function DraftsPage() {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
 
-    const noPriceCount = drafts.filter((d) => ids.includes(d.id) && !d.suggested_price).length;
+    // Cross-page safe: every selectable id was rendered on some page at
+    // some point, so it's guaranteed to be in draftsByIdRef even if that
+    // page isn't the one currently loaded into `drafts`.
+    const noPriceCount = ids.filter((id) => !draftsByIdRef.current[id]?.suggested_price).length;
     if (noPriceCount > 0) {
       if (!confirm(`${noPriceCount} item${noPriceCount !== 1 ? "s" : ""} have no price set. List anyway?`)) return;
     }
@@ -210,16 +341,19 @@ export default function DraftsPage() {
     async function worker() {
       while (cursor < ids.length) {
         const i = cursor++;
-        const draftTitle = drafts.find((d) => d.id === ids[i])?.title ?? `Item ${i + 1}`;
+        const id = ids[i];
+        const draftInfo = draftsByIdRef.current[id];
+        const draftTitle = draftInfo?.title ?? `Item ${i + 1}`;
+        const isHeavyItem = resolveIsHeavy(id, draftInfo);
         try {
           const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string }>("/api/ebay/list", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              draftId: ids[i],
-              shippingMode: drafts.find((d) => d.id === ids[i])?.shipping_mode ?? (heavyIds.has(ids[i]) ? "buyer_pays" : "free"),
-              isHeavy: heavyIds.has(ids[i]),
-              shippingCost: shippingCostMap[ids[i]],
+              draftId: id,
+              shippingMode: draftInfo?.shipping_mode ?? (isHeavyItem ? "buyer_pays" : "free"),
+              isHeavy: isHeavyItem,
+              shippingCost: resolveShippingCost(id, draftInfo),
             }),
           });
           if (data.error) {
@@ -257,12 +391,14 @@ export default function DraftsPage() {
     setListStatus("done");
     window.dispatchEvent(new Event("listflow:counts-changed"));
     await loadDrafts();
+    loadNoPriceTotal();
     setTimeout(() => {
       setListStatus("idle");
       setListProgress(0);
-      // Only clear the selection for items that actually listed, so failed
-      // items stay selected and visible for a retry instead of vanishing
-      // from the user's view of "what still needs attention."
+      // Only clear the selection when every item listed — on any failure,
+      // the whole selection (including any items that did succeed) stays
+      // put so the failures are still visible for a retry, matching the
+      // list's original behavior.
       if (failures.length === 0) {
         setSelected(new Set());
       }
@@ -270,41 +406,7 @@ export default function DraftsPage() {
     }, failures.length > 0 ? 4000 : 1500);
   }
 
-  const q = search.trim().toLowerCase();
-
-  // Recomputed from scratch on every render before this (every selection
-  // toggle, every save, every keystroke in search) — memoized since drafts
-  // can run into the hundreds for an active reseller.
-  const filtered = useMemo(() => {
-    const base = drafts.filter((d) => {
-      if (q && !(d.title ?? "").toLowerCase().includes(q)) return false;
-      if (filter === "needs-photo") return (d.photo_urls?.length ?? 0) === 0;
-      if (filter === "needs-price") return !d.suggested_price;
-      if (filter === "ready") {
-        return getListingReadiness({
-          photoCount: d.photo_urls?.length ?? (d.thumbnail_url ? 1 : 0),
-          title: d.title,
-          price: d.suggested_price,
-          condition: d.condition,
-          shippingMode: d.shipping_mode ?? "free",
-        }).ready;
-      }
-      return true;
-    });
-    return [...base].sort((a, b) => {
-      if (sort === "newest" || sort === "oldest") {
-        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-        return sort === "newest" ? tb - ta : ta - tb;
-      }
-      const pa = a.suggested_price ?? 0;
-      const pb = b.suggested_price ?? 0;
-      return sort === "price-desc" ? pb - pa : pa - pb;
-    });
-  }, [drafts, q, sort, filter]);
-
-  const noPriceDrafts = useMemo(() => drafts.filter((d) => !d.suggested_price), [drafts]);
-  const allSelected = filtered.length > 0 && filtered.every((d) => selected.has(d.id));
+  const allSelected = drafts.length > 0 && drafts.every((d) => selected.has(d.id));
   const hasSelection = selected.size > 0;
 
 
@@ -327,10 +429,10 @@ export default function DraftsPage() {
         >
           <ArrowLeft className="w-4 h-4" />
         </Link>
-        <h1 className="text-xl font-medium">Drafts ({q ? `${filtered.length}/` : ""}{drafts.length})</h1>
+        <h1 className="text-xl font-medium">Drafts ({total})</h1>
       </div>
 
-      {!loading && drafts.length > 0 && (
+      {!loading && (drafts.length > 0 || search || filter !== "all") && (
         <div className="flex items-center gap-2 mb-4">
           <div className="relative flex-1 min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
@@ -338,19 +440,19 @@ export default function DraftsPage() {
               type="search"
               placeholder="Search drafts..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="w-full text-sm rounded-xl border pl-9 pr-9 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
             />
             {search && (
-              <button onClick={() => setSearch("")} className="tap absolute right-3 top-1/2 -translate-y-1/2">
+              <button onClick={handleSearchClear} className="tap absolute right-3 top-1/2 -translate-y-1/2">
                 <X className="w-4 h-4 text-[var(--text-tertiary)]" />
               </button>
             )}
           </div>
           <select
             value={sort}
-            onChange={(e) => setSort(e.target.value as SortKey)}
+            onChange={(e) => handleSortChange(e.target.value as SortKey)}
             className="shrink-0 w-[108px] text-sm rounded-xl border px-2 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
           >
@@ -361,7 +463,7 @@ export default function DraftsPage() {
           </select>
           <select
             value={filter}
-            onChange={(e) => setFilter(e.target.value as DraftFilter)}
+            onChange={(e) => handleFilterChange(e.target.value as DraftFilter)}
             className="shrink-0 w-[112px] text-sm rounded-xl border px-2 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
           >
@@ -394,19 +496,27 @@ export default function DraftsPage() {
         </div>
       )}
 
-      {!loading && noPriceDrafts.length > 0 && (
+      {!loading && noPriceTotal > 0 && (
         <div className="card p-3 mb-4 flex items-center gap-2 text-sm" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>
           <span className="text-base">⚠️</span>
           <p style={{ color: "var(--text-primary)" }}>
-            {noPriceDrafts.length} draft{noPriceDrafts.length !== 1 ? "s" : ""} have no price — set one before listing.
+            {noPriceTotal} draft{noPriceTotal !== 1 ? "s" : ""} have no price — set one before listing.
           </p>
         </div>
       )}
 
-      {!loading && !error && drafts.length === 0 && (
+      {!loading && !error && drafts.length === 0 && !search && filter === "all" && (
         <div className="card p-8 text-center">
           <p className="text-sm text-[var(--text-secondary)]">
             No drafts yet. Save one from the new listing or batch upload screens.
+          </p>
+        </div>
+      )}
+
+      {!loading && drafts.length === 0 && (search || filter !== "all") && (
+        <div className="card p-6 text-center mb-4">
+          <p className="text-sm text-[var(--text-secondary)]">
+            {search ? <>No drafts match &ldquo;{search.trim()}&rdquo;</> : "No drafts match this filter."}
           </p>
         </div>
       )}
@@ -418,21 +528,15 @@ export default function DraftsPage() {
               onClick={toggleSelectAll}
               className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             >
-              {allSelected ? "Deselect all" : "Select all"}
+              {allSelected ? "Deselect page" : "Select page"}
             </button>
             {hasSelection && (
               <p className="text-xs text-[var(--text-secondary)]">{selected.size} selected</p>
             )}
           </div>
 
-          {q && filtered.length === 0 && (
-            <div className="card p-6 text-center mb-4">
-              <p className="text-sm text-[var(--text-secondary)]">No drafts match &ldquo;{search.trim()}&rdquo;</p>
-            </div>
-          )}
-
-          <div className="flex flex-col gap-2 mb-6">
-            {filtered.map((d, rowIndex) => {
+          <div className="flex flex-col gap-2 mb-4">
+            {drafts.map((d, rowIndex) => {
               const isSelected = selected.has(d.id);
               const isHeavy = heavyIds.has(d.id);
               return (
@@ -516,6 +620,30 @@ export default function DraftsPage() {
               );
             })}
           </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mb-6 text-sm">
+              <button
+                onClick={() => goToPage(page - 1)}
+                disabled={page <= 1 || refreshing}
+                className="tap px-3 py-1.5 rounded-lg disabled:opacity-40"
+                style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+              >
+                Previous
+              </button>
+              <span className="text-[var(--text-secondary)]">
+                {refreshing ? <Loader2 className="w-3.5 h-3.5 inline animate-spin" /> : `Page ${page} of ${totalPages}`}
+              </span>
+              <button
+                onClick={() => goToPage(page + 1)}
+                disabled={page >= totalPages || refreshing}
+                className="tap px-3 py-1.5 rounded-lg disabled:opacity-40"
+                style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
+              >
+                Next
+              </button>
+            </div>
+          )}
         </>
       )}
 

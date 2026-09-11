@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { isValidCostBasis } from "@/lib/profit";
+import { getListingReadiness } from "@/lib/listing-readiness";
 
 // isHeavy/shippingCost mirror the same fields POST /api/ebay/list already
 // accepts at listing time -- persisting them here too means a heavy item
@@ -32,31 +33,118 @@ function normalizeCustomSku(value: unknown): string | null {
   return sku || null;
 }
 
-export async function GET() {
+// Narrowed to exactly what the Drafts list screen renders (src/app/drafts/
+// page.tsx's own Draft interface) instead of select("*") -- the full row
+// also carries the AI-generated description, photo_urls, and a dozen+
+// item-attribute columns (style, material, theme, sleeve_length, ...) that
+// this list view never reads. Those only matter once a single draft is
+// opened for editing, which fetches its own full row separately (see GET
+// /api/drafts/[id]). A seller with a large draft backlog was shipping all
+// of that unused text over the wire on every visit to this page. photo_urls
+// itself is kept (only this one array) since the list needs its length for
+// the "needs-photo" filter and readiness check below.
+const DRAFTS_SELECT_COLUMNS =
+  "id, title, suggested_price, sell_odds, condition, thumbnail_url, photo_urls, created_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode";
+
+const SORT_KEYS = new Set(["newest", "oldest", "price-desc", "price-asc"]);
+const FILTER_KEYS = new Set(["all", "ready", "needs-photo", "needs-price"]);
+const DEFAULT_PAGE_SIZE = 30;
+const MAX_PAGE_SIZE = 100;
+
+function draftsQueryError(error: { code?: string; message: string }) {
+  if (error.code === "23505" && error.message.toLowerCase().includes("custom_sku")) {
+    return NextResponse.json({ error: "That SKU is already used by another draft. Choose a different SKU." }, { status: 409 });
+  }
+  return NextResponse.json({ error: error.message }, { status: 500 });
+}
+
+export async function GET(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
 
-  // Narrowed to exactly what the Drafts list screen renders (src/app/drafts/
-  // page.tsx's own Draft interface) instead of select("*") -- the full row
-  // also carries the AI-generated description, photo_urls, and a dozen+
-  // item-attribute columns (style, material, theme, sleeve_length, ...)
-  // that this list view never reads. Those only matter once a single draft
-  // is opened for editing, which fetches its own full row separately (see
-  // GET /api/drafts/[id]). A seller with a large draft backlog was shipping
-  // all of that unused text over the wire on every visit to this page.
-  const { data, error } = await auth.supabase
-    .from("drafts")
-    .select("id, title, suggested_price, sell_odds, condition, thumbnail_url, photo_urls, created_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode")
-    .order("created_at", { ascending: false });
+  const url = new URL(req.url);
+  const search = (url.searchParams.get("search") ?? "").trim();
+  const rawSort = url.searchParams.get("sort") ?? "newest";
+  const sort = SORT_KEYS.has(rawSort) ? rawSort : "newest";
+  const rawFilter = url.searchParams.get("filter") ?? "all";
+  const filter = FILTER_KEYS.has(rawFilter) ? rawFilter : "all";
+  const page = Math.max(1, Math.trunc(Number(url.searchParams.get("page"))) || 1);
+  const pageSize = Math.min(
+    MAX_PAGE_SIZE,
+    Math.max(1, Math.trunc(Number(url.searchParams.get("pageSize"))) || DEFAULT_PAGE_SIZE)
+  );
 
-  if (error) {
-    if (error.code === "23505" && error.message.toLowerCase().includes("custom_sku")) {
-      return NextResponse.json({ error: "That SKU is already used by another draft. Choose a different SKU." }, { status: 409 });
-    }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  // Only ever returns drafts that haven't been listed yet -- the drafts
+  // screen has always dropped listed items after fetching everything (see
+  // drafts/page.tsx's old client-side `!d.ebay_listing_id` filter);
+  // pushing that same exclusion into the query itself is the same pattern
+  // dashboard/stats/route.ts already uses for its own "unlisted" count.
+  let query = auth.supabase
+    .from("drafts")
+    .select(DRAFTS_SELECT_COLUMNS, { count: "exact" })
+    .is("ebay_listing_id", null);
+
+  if (search) {
+    query = query.ilike("title", `%${search}%`);
+  }
+  if (filter === "needs-price") {
+    query = query.is("suggested_price", null);
   }
 
-  return NextResponse.json({ drafts: data });
+  const sortColumn = sort === "price-desc" || sort === "price-asc" ? "suggested_price" : "created_at";
+  query = query.order(sortColumn, {
+    ascending: sort === "oldest" || sort === "price-asc",
+    nullsFirst: false,
+  });
+
+  // "needs-photo" and "ready" each combine several columns (photo count,
+  // title, price, condition, shipping mode) in ways a single Postgrest
+  // column filter can't express. Rather than guess at raw SQL against a
+  // column whose exact array type isn't pinned down here, this reuses the
+  // exact readiness/photo-count logic drafts/page.tsx used to run
+  // client-side -- just moved server-side, still scoped by the same search
+  // text and unlisted-only condition above, so results are byte-for-byte
+  // the same as before this change. Only "all" and "needs-price" get true
+  // range()-based DB pagination; these two paginate in memory after
+  // filtering, which still avoids sending the unused description/
+  // item-attribute columns the old full-row select used to.
+  if (filter === "needs-photo" || filter === "ready") {
+    const { data, error } = await query;
+    if (error) return draftsQueryError(error);
+    const rows = data ?? [];
+    const matching = rows.filter((d) => {
+      if (filter === "needs-photo") return (d.photo_urls?.length ?? 0) === 0;
+      return getListingReadiness({
+        photoCount: d.photo_urls?.length ?? (d.thumbnail_url ? 1 : 0),
+        title: d.title,
+        price: d.suggested_price,
+        condition: d.condition,
+        shippingMode: d.shipping_mode ?? "free",
+      }).ready;
+    });
+    const total = matching.length;
+    const start = (page - 1) * pageSize;
+    return NextResponse.json({
+      drafts: matching.slice(start, start + pageSize),
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+    });
+  }
+
+  const start = (page - 1) * pageSize;
+  const { data, error, count } = await query.range(start, start + pageSize - 1);
+  if (error) return draftsQueryError(error);
+
+  const total = count ?? data?.length ?? 0;
+  return NextResponse.json({
+    drafts: data,
+    total,
+    page,
+    pageSize,
+    totalPages: Math.max(1, Math.ceil(total / pageSize)),
+  });
 }
 
 export async function DELETE(req: NextRequest) {
