@@ -74,13 +74,6 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
-    if (draft.ebay_listing_id) {
-      return NextResponse.json({
-        error: "This draft is already listed on eBay.",
-        listingId: String(draft.ebay_listing_id),
-        url: `https://www.ebay.com/itm/${draft.ebay_listing_id}`,
-      }, { status: 409 });
-    }
     if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before listing" }, { status: 400 });
 
     const draftShippingMode = (draft.shipping_mode === "calculated" || draft.shipping_mode === "buyer_pays") ? draft.shipping_mode : "free";
