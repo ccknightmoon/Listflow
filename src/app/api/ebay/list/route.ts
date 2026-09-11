@@ -70,6 +70,7 @@ export async function POST(req: NextRequest) {
       .from("drafts")
       .select("*")
       .eq("id", draftId)
+      .eq("user_id", auth.user.id)
       .single();
 
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });

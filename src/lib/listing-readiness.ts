@@ -18,7 +18,9 @@ export function getListingReadiness(input: ListingReadinessInput): ListingReadin
   const warnings: string[] = [];
 
   if (input.photoCount < 1) blockers.push("Add at least one photo");
+  if (input.photoCount > 24) blockers.push("Use 24 photos or fewer");
   if (!input.title?.trim()) blockers.push("Add a title");
+  if ((input.title?.trim().length ?? 0) > 80) blockers.push("Keep the title to 80 characters or fewer");
   if (input.price == null || !Number.isFinite(input.price) || input.price <= 0) {
     blockers.push("Set a price");
   }

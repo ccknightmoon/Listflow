@@ -30,4 +30,16 @@ describe("getListingReadiness", () => {
     });
     expect(result.blockers).toContain("Finish the shipping policy in eBay settings");
   });
+
+  it("blocks marketplace-invalid photo counts and titles", () => {
+    const result = getListingReadiness({
+      photoCount: 25,
+      title: "x".repeat(81),
+      price: 20,
+      condition: "Excellent used",
+      shippingMode: "free",
+    });
+    expect(result.blockers).toContain("Use 24 photos or fewer");
+    expect(result.blockers).toContain("Keep the title to 80 characters or fewer");
+  });
 });

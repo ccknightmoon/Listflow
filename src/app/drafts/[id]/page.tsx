@@ -145,6 +145,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [characterFamily, setCharacterFamily] = useState("");
   const [yearManufactured, setYearManufactured] = useState("");
   const [season, setSeason] = useState("");
+  const draftLoadedRef = useRef(false);
+  const autosaveTimer = useRef<number | null>(null);
+  const draftSaveQueue = useRef(Promise.resolve());
 
   useEffect(() => {
     async function load() {
@@ -215,6 +218,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         setStoreCategoryId(d.store_category_id ?? null);
         setStoreCategoryName(d.store_category_name ?? null);
         if (d.ebay_listing_id) setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
+        draftLoadedRef.current = true;
       } catch (err) {
 
         setError((err as Error).message);
@@ -238,6 +242,29 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       .then((data) => setStoreCategories(Array.isArray(data.categories) ? data.categories : []))
       .catch(() => {});
   }, []);
+
+  const formSignature = JSON.stringify({
+    title, brand, color, size, condition, flaws, price, cost, customSku,
+    itemType, style, material, theme, sleeveLength, neckline, fit, pattern,
+    description, vintage, character, characterFamily, yearManufactured, season,
+    storeCategoryId, storeCategoryName, shippingMode, isHeavy, shippingCost,
+  });
+
+  useEffect(() => {
+    if (!draftLoadedRef.current || loading || listing || saving || reanalyzing) return;
+    if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      void saveDraft().then(() => {
+        setSaved(true);
+        window.setTimeout(() => setSaved(false), 2000);
+      }).catch((err) => {
+        setError((err as Error).message);
+      });
+    }, 800);
+    return () => {
+      if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    };
+  }, [formSignature, loading, listing, saving, reanalyzing]);
 
   async function requestStoreCategoryAi(d: {
     title: string | null;
@@ -354,12 +381,16 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   async function saveDraft(extra: Record<string, unknown> = {}) {
     const payload = getDraftPayload();
-    await apiFetch(`/api/drafts/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...payload, ...extra }),
+    const save = draftSaveQueue.current.catch(() => undefined).then(async () => {
+      await apiFetch(`/api/drafts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payload, ...extra }),
+      });
+      initialCustomSku.current = customSku.trim() || null;
     });
-    initialCustomSku.current = customSku.trim() || null;
+    draftSaveQueue.current = save.then(() => undefined, () => undefined);
+    await save;
   }
 
   async function handleSave() {
