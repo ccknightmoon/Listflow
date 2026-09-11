@@ -454,6 +454,31 @@ export default function BatchUploadPage() {
     for (const i of failedIndices) {
       await handleRetry(i);
     }
+
+  }
+
+  async function handleRetryFailedListings() {
+    const failedIndices = results
+      .map((r, i) => ({ r, i }))
+      .filter(({ r, i }) => !r.error && !r.pending && listStatus[i] === "error")
+      .map(({ i }) => i);
+    if (failedIndices.length === 0) return;
+    setListingAll(true);
+    setListingAllProgress({ done: 0, total: failedIndices.length });
+    let cursor = 0;
+    let done = 0;
+    async function worker() {
+      while (cursor < failedIndices.length) {
+        const index = failedIndices[cursor++];
+        await handleListOnEbay(index);
+        done++;
+        setListingAllProgress({ done, total: failedIndices.length });
+      }
+    }
+    const concurrency = 2;
+    await Promise.all(Array.from({ length: Math.min(concurrency, failedIndices.length) }, () => worker()));
+    setListingAll(false);
+    setListingAllProgress(null);
   }
 
   async function handleSaveAllDrafts() {
@@ -1952,6 +1977,7 @@ export default function BatchUploadPage() {
             const unlistedCount = results.filter((r, i) => !r.error && !r.pending && listStatus[i] !== "listed").length;
             const allListed = results.filter((r) => !r.error).length > 0 && results.every((r, i) => r.error || listStatus[i] === "listed");
             const failedCount = results.filter((r) => r.error).length;
+            const failedListingCount = results.filter((r, i) => !r.error && listStatus[i] === "error").length;
             const anyRetrying = Object.values(retrying).some(Boolean);
             return (
               <div className="flex flex-col gap-2">
@@ -1997,6 +2023,16 @@ export default function BatchUploadPage() {
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
                       <RotateCw className="w-4 h-4" />
+                    )}
+                    {failedListingCount > 0 && (
+                      <button
+                        onClick={() => void handleRetryFailedListings()}
+                        disabled={listingAll}
+                        className="btn w-full"
+                      >
+                        {listingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCw className="w-4 h-4" />}
+                        {listingAll ? "Retrying listings..." : `Retry failed listings (${failedListingCount})`}
+                      </button>
                     )}
                     {anyRetrying ? "Retrying..." : `Retry failed (${failedCount})`}
                   </button>

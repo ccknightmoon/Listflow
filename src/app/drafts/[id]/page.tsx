@@ -657,6 +657,43 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     pointerStart.current = null;
   }
 
+  function onPhotoDragStart(e: React.DragEvent, index: number) {
+    photoDragIdx.current = index;
+    setDragIdx(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index));
+  }
+
+  function onPhotoDragOver(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDropIdx(index);
+    photoDropIdx.current = index;
+  }
+
+  function onPhotoDrop(e: React.DragEvent, index: number) {
+    e.preventDefault();
+    const from = photoDragIdx.current;
+    const to = index;
+    if (from !== null && from !== to) {
+      const next = [...photoUrls];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      void savePhotoUrls(next, photoUrls);
+    }
+    photoDragIdx.current = null;
+    photoDropIdx.current = null;
+    setDragIdx(null);
+    setDropIdx(null);
+  }
+
+  function onPhotoDragEnd() {
+    photoDragIdx.current = null;
+    photoDropIdx.current = null;
+    setDragIdx(null);
+    setDropIdx(null);
+  }
+
   async function handleDelete() {
     if (!confirm("Delete this draft?")) return;
     setDeleting(true);
@@ -816,12 +853,17 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             <div
               key={i}
               ref={(el) => { photoRefs.current[i] = el; }}
-              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-pointer select-none snap-start transition-all${dragIdx === i ? " opacity-50 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
-              style={{ width: 184, height: 184, touchAction: "pan-x" }}
+              draggable
+              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none snap-start transition-all${dragIdx === i ? " opacity-50 scale-95 cursor-grabbing" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
+              style={{ width: 184, height: 184, touchAction: dragIdx === i ? "none" : "pan-x" }}
               onPointerDown={(e) => onPhotoPDown(e, i)}
               onPointerMove={onPhotoPMove}
               onPointerUp={(e) => onPhotoPUp(e, url)}
               onPointerCancel={(e) => onPhotoPUp(e, url)}
+              onDragStart={(e) => onPhotoDragStart(e, i)}
+              onDragOver={(e) => onPhotoDragOver(e, i)}
+              onDrop={(e) => onPhotoDrop(e, i)}
+              onDragEnd={onPhotoDragEnd}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" draggable={false} />
