@@ -26,6 +26,12 @@ function isValidShippingMode(value: unknown): value is "free" | "calculated" | "
   return value === "free" || value === "calculated" || value === "buyer_pays";
 }
 
+function normalizeCustomSku(value: unknown): string | null {
+  if (typeof value !== "string") return value == null ? null : String(value);
+  const sku = value.trim();
+  return sku || null;
+}
+
 export async function GET() {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
@@ -118,7 +124,7 @@ export async function POST(req: NextRequest) {
         size: body.size ?? null,
         condition: body.condition ?? null,
         flaws: body.flaws ?? null,
-        custom_sku: body.customSku ?? null,
+        custom_sku: normalizeCustomSku(body.customSku),
         suggested_price: body.suggestedPrice ?? null,
         avg_sold: body.avgSold ?? null,
         active_range_low: body.activeRangeLow ?? null,

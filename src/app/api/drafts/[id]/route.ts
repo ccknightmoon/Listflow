@@ -18,6 +18,12 @@ function isValidShippingMode(value: unknown): value is "free" | "calculated" | "
   return value === "free" || value === "calculated" || value === "buyer_pays";
 }
 
+function normalizeCustomSku(value: unknown): string | null {
+  if (typeof value !== "string") return value == null ? null : String(value);
+  const sku = value.trim();
+  return sku || null;
+}
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
@@ -77,7 +83,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.condition !== undefined && { condition: body.condition }),
       ...(body.flaws !== undefined && { flaws: body.flaws }),
       ...(body.suggestedPrice !== undefined && { suggested_price: body.suggestedPrice }),
-      ...(body.customSku !== undefined && { custom_sku: body.customSku }),
+      ...(body.customSku !== undefined && { custom_sku: normalizeCustomSku(body.customSku) }),
       ...(body.itemType !== undefined && { item_type: body.itemType }),
       ...(body.style !== undefined && { style: body.style }),
       ...(body.material !== undefined && { material: body.material }),
