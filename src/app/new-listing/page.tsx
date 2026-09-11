@@ -733,12 +733,16 @@ export default function NewListingPage() {
       <AIDisclaimer className="mb-4" />
 
       <div className="flex flex-col gap-3 mb-4">
-        <input
-          className="input"
-          placeholder="Title (auto-filled by AI)"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
+        <div>
+          <input
+            className="input"
+            maxLength={80}
+            placeholder="Title (auto-filled by AI)"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <p className="mt-1 text-right text-[11px] text-[var(--text-tertiary)]">{title.length}/80</p>
+        </div>
 
         <select
           className="input"

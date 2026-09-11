@@ -1231,7 +1231,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       <div className="flex flex-col gap-3 mb-4">
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Title</label>
-          <input className="input w-full" value={title} onChange={(e) => setTitle(e.target.value)} />
+          <input className="input w-full" maxLength={80} value={title} onChange={(e) => setTitle(e.target.value)} />
+          <p className="mt-1 text-right text-[11px] text-[var(--text-tertiary)]">{title.length}/80</p>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
