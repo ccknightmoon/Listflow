@@ -3,7 +3,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
 import { uploadThumbnail } from "@/lib/storage";
@@ -907,10 +907,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               draggable
               className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none snap-start transition-all${dragIdx === i ? " opacity-50 scale-95 cursor-grabbing" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
               style={{ width: 184, height: 184, touchAction: dragIdx === i ? "none" : "pan-x" }}
-              onPointerDown={(e) => onPhotoPDown(e, i)}
-              onPointerMove={onPhotoPMove}
-              onPointerUp={(e) => onPhotoPUp(e, url)}
-              onPointerCancel={(e) => onPhotoPUp(e, url)}
               onDragStart={(e) => onPhotoDragStart(e, i)}
               onDragOver={(e) => onPhotoDragOver(e, i)}
               onDrop={(e) => onPhotoDrop(e, i)}
@@ -918,6 +914,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" draggable={false} />
+              <div
+                role="button"
+                tabIndex={0}
+                aria-label={`Hold and drag photo ${i + 1} to reorder`}
+                title="Hold and drag to reorder"
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white cursor-grab touch-none"
+                onPointerDown={(e) => { e.stopPropagation(); onPhotoPDown(e, i); }}
+                onPointerMove={(e) => { e.stopPropagation(); onPhotoPMove(e); }}
+                onPointerUp={(e) => { e.stopPropagation(); onPhotoPUp(e, url); }}
+                onPointerCancel={(e) => { e.stopPropagation(); onPhotoPUp(e, url); }}
+              >
+                <GripVertical className="w-5 h-5" />
+              </div>
               {photoUrls.length > 1 && (
                 <div className="absolute bottom-1 right-1 bg-black/50 rounded-full px-1.5 py-0.5">
                   <span className="text-white text-[10px]">{i + 1}/{photoUrls.length}</span>

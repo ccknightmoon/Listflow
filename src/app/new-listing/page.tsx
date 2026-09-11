@@ -17,6 +17,7 @@ import {
   ChevronRight,
   Undo2,
   X,
+  GripVertical,
 } from "lucide-react";
 
 import { Condition, PriceSuggestion } from "@/lib/pricing";
@@ -1073,6 +1074,19 @@ function PhotoCard({
       <div className="aspect-square relative">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={photo.previewUrl} alt={photo.label ?? `Photo ${index + 1}`} className="absolute inset-0 w-full h-full object-cover" draggable={false} />
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={`Hold and drag photo ${index + 1} to reorder`}
+          title="Hold and drag to reorder"
+          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white cursor-grab touch-none"
+          onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e); }}
+          onPointerMove={(e) => { e.stopPropagation(); onPointerMove(e); }}
+          onPointerUp={(e) => { e.stopPropagation(); onPointerUp(e); }}
+          onPointerCancel={(e) => { e.stopPropagation(); onPointerUp(e); }}
+        >
+          <GripVertical className="w-5 h-5" />
+        </div>
         <span className="absolute top-1 left-1 rounded bg-black/60 text-white text-[10px] px-1.5 py-0.5">
           {index + 1}
         </span>
