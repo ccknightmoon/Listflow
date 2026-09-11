@@ -317,6 +317,7 @@ export default function BatchUploadPage() {
   // persisted, so it never re-saves an item just because `results`
   // changed again for an unrelated reason (a pricing lookup landing).
   const autoSavedForIndex = useRef<Set<number>>(new Set());
+  const autoSavingForIndex = useRef<Set<number>>(new Set());
   // Supabase Storage URL each photo slot has already uploaded to, keyed by
   // photo index (not group/item index -- a photo's own data never changes
   // once picked, only which item it belongs to). handleSaveDraft now runs
@@ -1344,9 +1345,20 @@ export default function BatchUploadPage() {
   useEffect(() => {
     results.forEach((r, i) => {
       if (r.pending || r.error) return;
-      if (autoSavedForIndex.current.has(i)) return;
-      autoSavedForIndex.current.add(i);
-      handleSaveDraft(i, { silent: true });
+      if (autoSavedForIndex.current.has(i) || autoSavingForIndex.current.has(i)) return;
+      autoSavingForIndex.current.add(i);
+      void handleSaveDraft(i, { silent: true }).then((draftId) => {
+        autoSavingForIndex.current.delete(i);
+        if (draftId) {
+          autoSavedForIndex.current.add(i);
+        } else {
+          window.setTimeout(() => {
+            if (!autoSavedForIndex.current.has(i)) {
+              setResults((current) => [...current]);
+            }
+          }, 3000);
+        }
+      });
     });
     // Deliberately keyed only on `results`: handleSaveDraft reads
     // groups/heavyItems/customPrices/customSkus/draftIds via this render's

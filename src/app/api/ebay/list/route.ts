@@ -74,7 +74,16 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
-    if (!draft.suggested_price) return NextResponse.json({ error: "Set a price before listing" }, { status: 400 });
+    const draftPhotoCount = Array.isArray(draft.photo_urls) ? draft.photo_urls.length : draft.thumbnail_url ? 1 : 0;
+    if (draftPhotoCount < 1) return NextResponse.json({ error: "Add at least one photo before listing." }, { status: 400 });
+    if (draftPhotoCount > 24) return NextResponse.json({ error: "eBay allows up to 24 photos per listing." }, { status: 400 });
+    if (!draft.title?.trim()) return NextResponse.json({ error: "Add a title before listing." }, { status: 400 });
+    if (draft.title.trim().length > 80) return NextResponse.json({ error: "Keep the title to 80 characters or fewer." }, { status: 400 });
+    if (typeof draft.suggested_price !== "number" || !Number.isFinite(draft.suggested_price) || draft.suggested_price <= 0) {
+      return NextResponse.json({ error: "Set a valid price before listing." }, { status: 400 });
+    }
+    if (!draft.condition || !CONDITION_MAP[draft.condition]) {
+      return NextResponse.json({ error: "Choose a valid item condition before listing." }, { status: 400 });
 
     const draftShippingMode = (draft.shipping_mode === "calculated" || draft.shipping_mode === "buyer_pays") ? draft.shipping_mode : "free";
     if (rawShippingMode === undefined && draft.shipping_mode) shippingMode = draftShippingMode;
@@ -89,26 +98,40 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Auto-assign next sequential SKU if none set. NOTE: this read-then-write
-    // is still not fully race-proof under truly concurrent "list all" clicks —
-    // a DB-level unique constraint on custom_sku (added in the RLS migration)
-    // means a genuine collision now fails loudly instead of silently
-    // double-assigning, but it isn't retried automatically here.
-    let assignedSku = requestCustomSku || (draft.custom_sku as string | null);
+    // Auto-assign next sequential SKU if none set. The conditional update and
+    // unique constraint make concurrent assignments retry safely.
+    let assignedSku = (typeof requestCustomSku === "string" ? requestCustomSku.trim() : "") || (draft.custom_sku as string | null);
     if (!assignedSku) {
-      const { data: maxRow } = await supabase
-        .from("drafts")
-        .select("custom_sku")
-        .not("custom_sku", "is", null)
-        .order("custom_sku", { ascending: false })
-        .limit(50);
-      const maxNum = (maxRow ?? [])
-        .map((r) => parseInt(r.custom_sku as string, 10))
-        .filter((n) => !isNaN(n))
-        .reduce((max, n) => (n > max ? n : max), 0);
-      assignedSku = String(maxNum + 1);
-      // Save it so it's visible on the draft
-      await supabase.from("drafts").update({ custom_sku: assignedSku }).eq("id", draftId);
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const { data: maxRow } = await supabase
+          .from("drafts")
+          .select("custom_sku")
+          .not("custom_sku", "is", null)
+          .order("custom_sku", { ascending: false })
+          .limit(50);
+        const maxNum = (maxRow ?? [])
+          .map((r) => parseInt(r.custom_sku as string, 10))
+          .filter((n) => !isNaN(n))
+          .reduce((max, n) => (n > max ? n : max), 0);
+        const candidate = String(maxNum + 1 + attempt);
+        const { data: skuRow, error: skuError } = await supabase
+          .from("drafts")
+          .update({ custom_sku: candidate })
+          .eq("id", draftId)
+          .eq("user_id", auth.user.id)
+          .is("custom_sku", null)
+          .select("id")
+          .maybeSingle();
+        if (!skuError && skuRow) {
+          assignedSku = candidate;
+          break;
+        }
+        if (!skuError) continue;
+        if (skuError.code !== "23505") {
+          return NextResponse.json({ error: "Could not assign a SKU safely. Please try again." }, { status: 500 });
+        }
+      }
+      if (!assignedSku) return NextResponse.json({ error: "Could not assign a unique SKU. Please try again." }, { status: 409 });
     }
     const autoSku = String(parseInt(draftId.replace(/-/g, "").slice(0, 8), 16) % 1000000);
     const sku = assignedSku;
