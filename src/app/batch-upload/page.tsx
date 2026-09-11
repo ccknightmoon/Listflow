@@ -504,7 +504,19 @@ export default function BatchUploadPage() {
     setError(null);
     setManualDividers(new Set());
 
-    const fileArray = Array.from(files).slice(0, MAX_PHOTOS);
+    // Appends to whatever's already selected instead of replacing it --
+    // re-opening the picker (a second album/folder, or the OS dialog
+    // re-triggered) used to silently discard the whole first selection
+    // with no warning, easy to not notice until grouping produced far
+    // fewer items than expected.
+    const room = MAX_PHOTOS - photos.length;
+    const incoming = Array.from(files);
+    const fileArray = incoming.slice(0, Math.max(room, 0));
+    const skipped = incoming.length - fileArray.length;
+    if (fileArray.length === 0) {
+      setError(`This batch is already at the ${MAX_PHOTOS}-photo limit -- remove some photos before adding more.`);
+      return;
+    }
 
     try {
       const resized = await Promise.all(
@@ -513,7 +525,13 @@ export default function BatchUploadPage() {
           return { data: dataUrl.split(",")[1], mediaType, previewUrl: dataUrl };
         })
       );
-      setPhotos(resized);
+      setPhotos((prev) => [...prev, ...resized]);
+      // Surfaced, not silent: previously any photos past MAX_PHOTOS were
+      // just dropped with the count line reading a smaller-than-expected
+      // number and no explanation why.
+      if (skipped > 0) {
+        setError(`Added ${fileArray.length} photo${fileArray.length === 1 ? "" : "s"} -- ${skipped} more couldn't fit under the ${MAX_PHOTOS}-photo batch limit and ${skipped === 1 ? "was" : "were"} skipped.`);
+      }
     } catch (err) {
       setError(`Could not process photos: ${(err as Error).message}`);
     }
@@ -533,7 +551,9 @@ export default function BatchUploadPage() {
       setError(`This batch is already at the ${MAX_PHOTOS}-photo limit.`);
       return;
     }
-    const fileArray = Array.from(files).slice(0, room);
+    const incoming = Array.from(files);
+    const fileArray = incoming.slice(0, room);
+    const skipped = incoming.length - fileArray.length;
 
     try {
       const startIndex = photos.length;
@@ -550,6 +570,9 @@ export default function BatchUploadPage() {
         next[gIdx] = [...next[gIdx], ...newIndices];
         return next;
       });
+      if (skipped > 0) {
+        setError(`Added ${fileArray.length} photo${fileArray.length === 1 ? "" : "s"} -- ${skipped} more couldn't fit under the ${MAX_PHOTOS}-photo batch limit and ${skipped === 1 ? "was" : "were"} skipped.`);
+      }
     } catch (err) {
       setError(`Could not add photo: ${(err as Error).message}`);
     }
@@ -1828,6 +1851,20 @@ export default function BatchUploadPage() {
         <h1 className="text-xl font-medium">Batch upload</h1>
       </div>
 
+      <input
+        ref={addPhotoInput}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = e.target.files;
+          const gIdx = addPhotoTargetGroup;
+          if (gIdx !== null) handleAddPhotosToGroup(gIdx, files);
+          e.target.value = "";
+        }}
+      />
+
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "var(--danger)" }}>
           {error}
@@ -2044,20 +2081,6 @@ export default function BatchUploadPage() {
               </div>
             </div>
           )}
-
-          <input
-            ref={addPhotoInput}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => {
-              const files = e.target.files;
-              const gIdx = addPhotoTargetGroup;
-              if (gIdx !== null) handleAddPhotosToGroup(gIdx, files);
-              e.target.value = "";
-            }}
-          />
 
           <div className="flex flex-col gap-4 mb-4">
             {groups.map((group, gIdx) => (
