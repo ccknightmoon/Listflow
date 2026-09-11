@@ -6,13 +6,16 @@ import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Camera,
-  Ruler,
-  ZoomIn,
   Sparkles,
   Upload,
   FileText,
   Loader2,
   Check,
+  Plus,
+  Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Undo2,
 } from "lucide-react";
 
 import { Condition, PriceSuggestion } from "@/lib/pricing";
@@ -31,17 +34,14 @@ const CONDITIONS: Condition[] = [
   "Fair - notable flaws",
 ];
 
-interface SlotImage {
+interface PhotoItem {
+  id: string;
   data: string;
   mediaType: string;
   previewUrl: string;
+  label?: "front" | "measure" | "flaw";
+  uploadedUrl?: string;
 }
-
-const SLOTS = [
-  { key: "front", label: "Front", icon: Camera },
-  { key: "measure", label: "Measure", icon: Ruler },
-  { key: "flaw", label: "Flaw", icon: ZoomIn },
-] as const;
 
 const MAX_DIMENSION = 1568;
 
@@ -86,7 +86,9 @@ function resizeImage(file: File): Promise<{ dataUrl: string; mediaType: string }
 
 export default function NewListingPage() {
   const router = useRouter();
-  const [photos, setPhotos] = useState<Record<string, SlotImage>>({});
+  const [photos, setPhotos] = useState<PhotoItem[]>([]);
+  const [photoUndo, setPhotoUndo] = useState<PhotoItem[] | null>(null);
+  const [photoUndoLabel, setPhotoUndoLabel] = useState("");
   const [title, setTitle] = useState("");
   const [condition, setCondition] = useState<Condition>("Excellent used");
   const [flaws, setFlaws] = useState("");
@@ -176,22 +178,61 @@ export default function NewListingPage() {
     );
   }
 
-  const fileInputs = useRef<Record<string, HTMLInputElement | null>>({});
+  const fileInput = useRef<HTMLInputElement | null>(null);
+  const draggedPhoto = useRef<number | null>(null);
 
-  async function handleFileChange(slotKey: string, file: File | undefined) {
+  async function handleFileChange(file: File | undefined) {
     if (!file) return;
 
     try {
       const { dataUrl, mediaType } = await resizeImage(file);
       const base64 = dataUrl.split(",")[1];
 
-      setPhotos((prev) => ({
+      setPhotos((prev) => [
         ...prev,
-        [slotKey]: { data: base64, mediaType, previewUrl: dataUrl },
-      }));
+        {
+          id: typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`,
+          data: base64,
+          mediaType,
+          previewUrl: dataUrl,
+          label: prev.length === 0 ? "front" : prev.length === 1 ? "measure" : prev.length === 2 ? "flaw" : undefined,
+        },
+      ]);
     } catch (err) {
       setError(`Could not process image: ${(err as Error).message}`);
     }
+  }
+
+  function rememberPhotoChange(label: string) {
+      setPhotoUndo(photos.map((photo) => ({ ...photo })));
+      setPhotoUndoLabel(label);
+    }
+
+  function removePhoto(index: number) {
+      rememberPhotoChange("Photo removed");
+      setPhotos((prev) => prev.filter((_, i) => i !== index));
+    }
+
+  function movePhoto(from: number, to: number) {
+      if (to < 0 || to >= photos.length || from === to) return;
+      rememberPhotoChange("Photo reordered");
+      setPhotos((prev) => {
+        const next = [...prev];
+        const [photo] = next.splice(from, 1);
+        next.splice(to, 0, photo);
+        return next;
+      });
+    }
+
+  function undoPhotoChange() {
+      if (!photoUndo) return;
+      setPhotos(photoUndo);
+      setPhotoUndo(null);
+      setPhotoUndoLabel("");
+    }
+
+  function setPhotoLabel(index: number, label: PhotoItem["label"]) {
+      setPhotos((prev) => prev.map((photo, i) => (i === index ? { ...photo, label } : photo)));
   }
 
   async function fetchPricing(pTitle: string, pBrand: string | undefined, pCondition: Condition, pImage?: string, pIsHeavy?: boolean, pItemType?: string, pSize?: string) {
@@ -213,18 +254,18 @@ export default function NewListingPage() {
 
   async function handleAnalyze() {
     setError(null);
-    const images = Object.values(photos).map((p) => ({
+    const images = photos.map((p) => ({
       data: p.data,
       mediaType: p.mediaType,
     }));
 
     if (images.length === 0) {
-      fetchPricing(title, undefined, condition, photos["front"]?.data);
+      fetchPricing(title, undefined, condition, photos.find((p) => p.label === "front")?.data ?? photos[0]?.data);
       return;
     }
 
     setLoading(true);
-    const frontPhoto = photos["front"]?.data ?? photos[Object.keys(photos)[0]]?.data;
+    const frontPhoto = photos.find((p) => p.label === "front")?.data ?? photos[0]?.data;
 
     try {
       // Run AI analysis and pricing in parallel — pricing uses the image for visual search
@@ -315,35 +356,34 @@ export default function NewListingPage() {
     setSaveStatus("saving");
     setPhotoUploadWarning(null);
     try {
-      // The three photo slots upload independently of each other, so they
-      // run concurrently instead of one at a time. Promise.all keeps
-      // results in the same ["front", "measure", "flaw"] order regardless
-      // of which upload actually finishes first, so "front" is still
-      // reliably preferred as the thumbnail below.
-      const uploadKeys: Array<"front" | "measure" | "flaw"> = ["front", "measure", "flaw"];
       const uploadOutcomes = await Promise.all(
-        uploadKeys.map(async (key) => {
-          const preview = photos[key]?.previewUrl;
-          if (!preview) return null;
+        photos.map(async (photo) => {
+          if (photo.uploadedUrl) return photo.uploadedUrl;
           try {
-            return await uploadThumbnail(preview);
+            return await uploadThumbnail(photo.previewUrl);
           } catch (err) {
-            console.error(`Photo upload failed (${key}):`, (err as Error).message);
-            return { failedKey: key };
+            console.error(`Photo upload failed (${photo.id}):`, (err as Error).message);
+            return { failedId: photo.id };
           }
         })
       );
       const allPhotoUrls: string[] = [];
       const failedKeys: string[] = [];
-      let thumbnailUrl: string | null = null;
+      const uploadedById = new Map<string, string>();
       uploadOutcomes.forEach((outcome, i) => {
         if (typeof outcome === "string") {
           allPhotoUrls.push(outcome);
-          if (uploadKeys[i] === "front" || !thumbnailUrl) thumbnailUrl = outcome;
+          uploadedById.set(photos[i].id, outcome);
         } else if (outcome) {
-          failedKeys.push(outcome.failedKey);
+          failedKeys.push(photos[i].label ?? `photo ${i + 1}`);
         }
       });
+      if (uploadedById.size > 0) {
+        setPhotos((prev) => prev.map((photo) => {
+          const uploadedUrl = uploadedById.get(photo.id);
+          return uploadedUrl ? { ...photo, uploadedUrl } : photo;
+        }));
+      }
       if (failedKeys.length > 0) {
         setPhotoUploadWarning(
           `Saved, but ${failedKeys.length} photo${failedKeys.length > 1 ? "s" : ""} (${failedKeys.join(", ")}) failed to upload. Re-add ${failedKeys.length > 1 ? "them" : "it"} before listing.`
@@ -365,11 +405,10 @@ export default function NewListingPage() {
         activeRangeLow: activeRangeLow ?? null,
         activeRangeHigh: activeRangeHigh ?? null,
         sellOdds: sellOdds ?? null,
-        // Photos: only overwrite what we actually re-uploaded this call —
-        // an empty result here (e.g. every slot already had a URL and
-        // nothing new was picked) shouldn't wipe out photos saved earlier.
-        ...(thumbnailUrl ? { thumbnailUrl } : {}),
-        ...(allPhotoUrls.length > 0 ? { photoUrls: allPhotoUrls } : {}),
+        // Send the complete ordered list every time. URLs are cached on each
+        // local photo, so saving/listing again never uploads the same image.
+        photoUrls: allPhotoUrls,
+        thumbnailUrl: allPhotoUrls[0] ?? null,
         itemType: aiResult?.itemType ?? null,
         style: aiResult?.style ?? null,
         material: aiResult?.material ?? null,
@@ -460,10 +499,10 @@ export default function NewListingPage() {
   // Deliberately does NOT touch storeCategories/aiStoreCategorySuggestions —
   // those are account-level settings fetched once on mount, not per-item.
   function resetForOtherItem() {
-    setPhotos({});
-    Object.values(fileInputs.current).forEach((el) => {
-      if (el) el.value = "";
-    });
+    setPhotos([]);
+    if (fileInput.current) fileInput.current.value = "";
+    setPhotoUndo(null);
+    setPhotoUndoLabel("");
     setTitle("");
     setCondition("Excellent used");
     setFlaws("");
@@ -507,18 +546,54 @@ export default function NewListingPage() {
         <h1 className="text-xl font-medium">New listing</h1>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 mb-4">
-        {SLOTS.map(({ key, label, icon: Icon }) => (
-          <PhotoSlot
-            key={key}
-            icon={Icon}
-            label={label}
-            image={photos[key]}
-            onClick={() => fileInputs.current[key]?.click()}
-            inputRef={(el) => (fileInputs.current[key] = el)}
-            onFileChange={(file) => handleFileChange(key, file)}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs text-[var(--text-secondary)]">Photos ({photos.length})</p>
+          <button type="button" className="btn text-xs py-1.5 px-2.5" onClick={() => fileInput.current?.click()}>
+            <Plus className="w-3.5 h-3.5" /> Add photo
+          </button>
+          <input
+            ref={fileInput}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              void handleFileChange(e.target.files?.[0]);
+              e.currentTarget.value = "";
+            }}
           />
-        ))}
+        </div>
+        {photos.length === 0 ? (
+          <button type="button" onClick={() => fileInput.current?.click()} className="card border-dashed w-full py-8 flex flex-col items-center gap-2">
+            <Camera className="w-6 h-6 text-accent" />
+            <span className="text-sm text-[var(--text-secondary)]">Add your first photo</span>
+          </button>
+        ) : (
+          <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
+            {photos.map((photo, index) => (
+              <PhotoCard
+                key={photo.id}
+                photo={photo}
+                index={index}
+                count={photos.length}
+                onRemove={() => removePhoto(index)}
+                onMove={(to) => movePhoto(index, to)}
+                onLabelChange={(label) => setPhotoLabel(index, label)}
+                onDragStart={() => { draggedPhoto.current = index; }}
+                onDrop={() => {
+                  if (draggedPhoto.current != null) movePhoto(draggedPhoto.current, index);
+                  draggedPhoto.current = null;
+                }}
+              />
+            ))}
+          </div>
+        )}
+        {photoUndo && (
+          <button type="button" onClick={undoPhotoChange} className="mt-1 text-xs flex items-center gap-1 text-[var(--accent)]">
+            <Undo2 className="w-3.5 h-3.5" /> Undo {photoUndoLabel.toLowerCase()}
+          </button>
+        )}
       </div>
 
       <AIDisclaimer className="mb-4" />
@@ -855,57 +930,65 @@ export default function NewListingPage() {
   );
 }
 
-function PhotoSlot({
-  icon: Icon,
-  label,
-  image,
-  onClick,
-  inputRef,
-  onFileChange,
+function PhotoCard({
+  photo,
+  index,
+  count,
+  onRemove,
+  onMove,
+  onLabelChange,
+  onDragStart,
+  onDrop,
 }: {
-  icon: React.ElementType;
-  label: string;
-  image?: SlotImage;
-  onClick: () => void;
-  inputRef: (el: HTMLInputElement | null) => void;
-  onFileChange: (file: File | undefined) => void;
+  photo: PhotoItem;
+  index: number;
+  count: number;
+  onRemove: () => void;
+  onMove: (to: number) => void;
+  onLabelChange: (label: PhotoItem["label"]) => void;
+  onDragStart: () => void;
+  onDrop: () => void;
 }) {
   return (
     <div
-      onClick={onClick}
-      className="card border-dashed flex flex-col items-center justify-center gap-1 aspect-square cursor-pointer overflow-hidden relative"
+      draggable
+      onDragStart={onDragStart}
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={onDrop}
+      className="card flex-none w-44 snap-start overflow-hidden relative"
     >
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => onFileChange(e.target.files?.[0])}
-      />
-      {image ? (
-        <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={image.previewUrl}
-            alt={label}
-            className="absolute inset-0 w-full h-full object-cover"
-          />
-          <div className="absolute top-1 right-1 bg-white rounded-full p-0.5">
-            <Check className="w-3 h-3" style={{ color: "var(--success)" }} />
-          </div>
-        </>
-      ) : (
-        <>
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center"
-            style={{ background: "color-mix(in srgb, var(--accent) 14%, var(--bg-surface))" }}
-          >
-            <Icon className="w-[18px] h-[18px]" style={{ color: "var(--accent)" }} />
-          </div>
-          <span className="text-[10px] text-[var(--text-secondary)]">{label}</span>
-        </>
-      )}
+      <div className="aspect-square relative">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={photo.previewUrl} alt={photo.label ?? `Photo ${index + 1}`} className="absolute inset-0 w-full h-full object-cover" draggable={false} />
+        <span className="absolute top-1 left-1 rounded bg-black/60 text-white text-[10px] px-1.5 py-0.5">
+          {index + 1}
+        </span>
+        <button type="button" aria-label="Delete photo" onClick={onRemove} className="absolute top-1 right-1 rounded-full bg-white/90 p-1">
+          <Trash2 className="w-3.5 h-3.5 text-red-600" />
+        </button>
+      </div>
+      <div className="p-2">
+        <select
+          aria-label={`Label photo ${index + 1}`}
+          className="input text-xs py-1 w-full"
+          value={photo.label ?? ""}
+          onChange={(e) => onLabelChange((e.target.value || undefined) as PhotoItem["label"])}
+        >
+          <option value="">No label</option>
+          <option value="front">Front</option>
+          <option value="measure">Measure</option>
+          <option value="flaw">Flaw</option>
+        </select>
+        <div className="flex justify-between mt-2">
+          <button type="button" disabled={index === 0} onClick={() => onMove(index - 1)} aria-label="Move photo left" className="p-1 disabled:opacity-30">
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <span className="text-[10px] text-[var(--text-tertiary)] self-center">drag to reorder</span>
+          <button type="button" disabled={index === count - 1} onClick={() => onMove(index + 1)} aria-label="Move photo right" className="p-1 disabled:opacity-30">
+            <ChevronRight className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -35,6 +35,7 @@ import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-cate
 import { estimateIsHeavy, estimateShipping, type ShippingMode } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
 import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
+import { getListingReadiness } from "@/lib/listing-readiness";
 
 interface SlotImage {
   data: string;
@@ -237,6 +238,7 @@ export default function BatchUploadPage() {
   const [retrying, setRetrying] = useState<Record<number, boolean>>({});
   const [retryingPricing, setRetryingPricing] = useState<Record<number, boolean>>({});
   const [saveStatus, setSaveStatus] = useState<Record<number, SaveStatus>>({});
+  const [saveErrors, setSaveErrors] = useState<Record<number, string>>({});
   const [photoUploadWarnings, setPhotoUploadWarnings] = useState<Record<number, string>>({});
   const [savingAll, setSavingAll] = useState(false);
   const [draftIds, setDraftIds] = useState<Record<number, string>>({});
@@ -1262,6 +1264,11 @@ export default function BatchUploadPage() {
       }
 
       if (!id) throw new Error("Failed to save draft");
+      setSaveErrors((prev) => {
+        const next = { ...prev };
+        delete next[index];
+        return next;
+      });
       setDraftIds((prev) => ({ ...prev, [index]: id }));
       setSaveStatus((prev) => {
         // Never downgrade an explicit confirmation: if the seller has
@@ -1272,7 +1279,8 @@ export default function BatchUploadPage() {
         return prev[index] === "saved" ? prev : { ...prev, [index]: "auto" };
       });
       return id;
-    } catch {
+    } catch (err) {
+      setSaveErrors((prev) => ({ ...prev, [index]: (err as Error).message || "Failed to save draft" }));
       setSaveStatus((prev) => {
         if (silent && prev[index] === "saved") return prev;
         return { ...prev, [index]: "error" };
@@ -2140,6 +2148,13 @@ export default function BatchUploadPage() {
             const pricingAttempted = Boolean(result.pricing);
             const pricingReady = Boolean(livePricing);
             const pricingNoData = pricingAttempted && !livePricing;
+            const readiness = getListingReadiness({
+              photoCount: group.length,
+              title: result.suggestedTitle,
+              price: customPrices[i] ? Number(customPrices[i]) : suggestion.suggestedPrice,
+              condition: result.condition,
+              shippingMode: shippingModes[i] ?? defaultShippingMode,
+            });
 
             return (
               <div key={i} id={`result-item-${i}`} className="card overflow-hidden">
@@ -2231,6 +2246,16 @@ export default function BatchUploadPage() {
                   </div>
                 )}
                 <div className="px-4 pb-4">
+                  <div
+                    className="mb-2 rounded-lg px-2.5 py-2 text-xs"
+                    style={{
+                      background: readiness.ready ? "var(--accent-tint)" : "var(--warning-bg)",
+                      color: readiness.ready ? "var(--accent)" : "var(--warning-border)",
+                    }}
+                  >
+                    <strong>{readiness.ready ? "Ready to list" : "Needs review"}</strong>
+                    {!readiness.ready && <span className="ml-1">· {readiness.blockers.join(" · ")}</span>}
+                  </div>
                   <div className="mb-3 mt-2">
                     <input
                       className="input w-full text-sm font-medium mb-1"
@@ -2489,7 +2514,7 @@ export default function BatchUploadPage() {
 
                   {status === "error" && (
                     <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>
-                      Could not save draft. Try again.
+                      {saveErrors[i] || "Could not save draft. Try again."}
                     </p>
                   )}
                   {photoUploadWarnings[i] && (
