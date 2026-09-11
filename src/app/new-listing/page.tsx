@@ -186,6 +186,9 @@ export default function NewListingPage() {
 
   const fileInput = useRef<HTMLInputElement | null>(null);
   const draggedPhoto = useRef<number | null>(null);
+  const photoEditorRef = useRef<HTMLDivElement | null>(null);
+  const dragPointer = useRef<{ x: number; y: number } | null>(null);
+  const dragScrollFrame = useRef<number | null>(null);
 
   async function handleFileChange(file: File | undefined) {
     if (!file) return;
@@ -254,6 +257,59 @@ export default function NewListingPage() {
         return next;
       });
       draggedPhoto.current = to;
+    }
+
+    function movePhotoAtPointer(x: number, y: number) {
+      const cards = Array.from(photoEditorRef.current?.querySelectorAll<HTMLElement>("[data-photo-index]") ?? []);
+      if (!cards.length) return;
+      const target = cards.find((card) => {
+        const rect = card.getBoundingClientRect();
+        return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      }) ?? cards.reduce((closest, card) => {
+        const rect = card.getBoundingClientRect();
+        const closestRect = closest.getBoundingClientRect();
+        const distance = Math.hypot(x - (rect.left + rect.width / 2), y - (rect.top + rect.height / 2));
+        const closestDistance = Math.hypot(x - (closestRect.left + closestRect.width / 2), y - (closestRect.top + closestRect.height / 2));
+        return distance < closestDistance ? card : closest;
+      });
+      const index = Number(target.dataset.photoIndex);
+      const rect = target.getBoundingClientRect();
+      const slot = photoEditorLayout === "grid"
+        ? (x < rect.left + rect.width / 2 ? index : index + 1)
+        : (x < rect.left + rect.width / 2 ? index : index + 1);
+      movePhotoDuringDrag(slot);
+    }
+
+    function stopPhotoAutoScroll() {
+      if (dragScrollFrame.current !== null) cancelAnimationFrame(dragScrollFrame.current);
+      dragScrollFrame.current = null;
+      dragPointer.current = null;
+    }
+
+    function runPhotoAutoScroll() {
+      const pointer = dragPointer.current;
+      const scroller = photoEditorRef.current;
+      if (!pointer || !scroller || photoEditorLayout !== "carousel") {
+        dragScrollFrame.current = null;
+        return;
+      }
+      const rect = scroller.getBoundingClientRect();
+      const edge = 72;
+      const distance = pointer.x < rect.left + edge
+        ? pointer.x - (rect.left + edge)
+        : pointer.x > rect.right - edge
+          ? pointer.x - (rect.right - edge)
+          : 0;
+      if (distance !== 0) {
+        scroller.scrollLeft += Math.sign(distance) * Math.min(18, Math.max(3, Math.abs(distance) / 3));
+        movePhotoAtPointer(pointer.x, pointer.y);
+      }
+      dragScrollFrame.current = requestAnimationFrame(runPhotoAutoScroll);
+    }
+
+    function startPhotoAutoScroll(x: number, y: number) {
+      dragPointer.current = { x, y };
+      if (dragScrollFrame.current === null) dragScrollFrame.current = requestAnimationFrame(runPhotoAutoScroll);
     }
 
   function undoPhotoChange() {
@@ -621,7 +677,10 @@ export default function NewListingPage() {
             <span className="text-sm text-[var(--text-secondary)]">Add your first photo</span>
           </button>
         ) : (
-          <div className={photoEditorLayout === "grid" ? "grid grid-cols-3 gap-3" : "flex gap-3 overflow-x-auto pb-2 snap-x"}>
+          <div
+            ref={photoEditorRef}
+            className={photoEditorLayout === "grid" ? "grid grid-cols-3 gap-3" : "flex gap-3 overflow-x-auto pb-2 snap-x"}
+          >
             {photos.map((photo, index) => (
               <PhotoCard
                 key={photo.id}
@@ -633,9 +692,13 @@ export default function NewListingPage() {
                 onReorder={(from, to) => movePhoto(from, to)}
                 onLabelChange={(label) => setPhotoLabel(index, label)}
                 onDragStart={() => { rememberPhotoChange("Photo reordered"); draggedPhoto.current = index; }}
-                onPreviewReorder={movePhotoDuringDrag}
+                onPreviewReorder={(x, y) => {
+                  startPhotoAutoScroll(x, y);
+                  movePhotoAtPointer(x, y);
+                }}
                 onDrop={(slot) => {
                   draggedPhoto.current = null;
+                  stopPhotoAutoScroll();
                 }}
               />
             ))}
@@ -1037,7 +1100,7 @@ function PhotoCard({
   onRemove: () => void;
   onMove: (to: number) => void;
   onReorder: (from: number, to: number) => void;
-  onPreviewReorder: (slot: number) => void;
+  onPreviewReorder: (x: number, y: number) => void;
   onLabelChange: (label: PhotoItem["label"]) => void;
   onDragStart: () => void;
   onDrop: (slot: number) => void;
@@ -1072,10 +1135,8 @@ function PhotoCard({
     const target = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-photo-index]");
     if (target) {
       const targetIndex = Number(target.dataset.photoIndex);
-      const rect = target.getBoundingClientRect();
-      const slot = e.clientX < rect.left + rect.width / 2 ? targetIndex : targetIndex + 1;
-      dropIndex.current = slot;
-      onPreviewReorder(slot);
+      dropIndex.current = targetIndex;
+      onPreviewReorder(e.clientX, e.clientY);
     }
   }
 

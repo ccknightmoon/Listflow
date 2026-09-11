@@ -118,6 +118,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const photoDragOriginal = useRef<string[] | null>(null);
   const photoDragWorking = useRef<string[]>([]);
   const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const photoAutoScrollFrame = useRef<number | null>(null);
+  const photoPointer = useRef<{ x: number; y: number } | null>(null);
 
   const [title, setTitle] = useState("");
   const [brand, setBrand] = useState("");
@@ -618,6 +620,66 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }, 350);
   }
 
+  function updatePhotoAtPointer(x: number, y: number) {
+    const cards = photoRefs.current.filter((card): card is HTMLDivElement => card !== null);
+    if (!cards.length) return;
+    const target = cards.find((card) => {
+      const rect = card.getBoundingClientRect();
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    }) ?? cards.reduce((closest, card) => {
+      const rect = card.getBoundingClientRect();
+      const closestRect = closest.getBoundingClientRect();
+      const distance = Math.hypot(x - (rect.left + rect.width / 2), y - (rect.top + rect.height / 2));
+      const closestDistance = Math.hypot(x - (closestRect.left + closestRect.width / 2), y - (closestRect.top + closestRect.height / 2));
+      return distance < closestDistance ? card : closest;
+    });
+    const targetIndex = Number(target.dataset.photoIndex);
+    const rect = target.getBoundingClientRect();
+    const slot = x < rect.left + rect.width / 2 ? targetIndex : targetIndex + 1;
+    const from = photoDragIdx.current;
+    if (from === null) return;
+    const insertionIndex = slot > from ? slot - 1 : slot;
+    if (insertionIndex === from) {
+      setDropIdx(insertionIndex);
+      return;
+    }
+    const next = [...photoDragWorking.current];
+    const [item] = next.splice(from, 1);
+    next.splice(insertionIndex, 0, item);
+    photoDragWorking.current = next;
+    photoDragIdx.current = insertionIndex;
+    setPhotoUrls(next);
+    setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
+    setDropIdx(insertionIndex);
+  }
+
+  function stopPhotoAutoScroll() {
+    if (photoAutoScrollFrame.current !== null) cancelAnimationFrame(photoAutoScrollFrame.current);
+    photoAutoScrollFrame.current = null;
+    photoPointer.current = null;
+  }
+
+  function runPhotoAutoScroll() {
+    const pointer = photoPointer.current;
+    const scroller = photoScrollerRef.current;
+    if (!pointer || !scroller || photoEditorLayout !== "carousel") {
+      photoAutoScrollFrame.current = null;
+      return;
+    }
+    const rect = scroller.getBoundingClientRect();
+    const edge = 72;
+    const distance = pointer.x < rect.left + edge
+      ? pointer.x - (rect.left + edge)
+      : pointer.x > rect.right - edge
+        ? pointer.x - (rect.right - edge)
+        : 0;
+    if (distance !== 0) {
+      scroller.scrollLeft += Math.sign(distance) * Math.min(18, Math.max(3, Math.abs(distance) / 3));
+      updatePhotoAtPointer(pointer.x, pointer.y);
+    }
+    photoAutoScrollFrame.current = requestAnimationFrame(runPhotoAutoScroll);
+  }
+
   function onPhotoPMove(e: React.PointerEvent) {
     if (photoDragTimer.current && pointerStart.current) {
       const moved = Math.abs(e.clientX - pointerStart.current.x) > 8 || Math.abs(e.clientY - pointerStart.current.y) > 8;
@@ -628,35 +690,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
     if (photoDragIdx.current === null || !activePhotoDrag.current) return;
     e.preventDefault();
-    if (photoEditorLayout === "carousel" && photoScrollerRef.current) {
-      const rect = photoScrollerRef.current.getBoundingClientRect();
-      const edge = 72;
-      const speed = e.clientX < rect.left + edge ? -Math.max(2, (rect.left + edge - e.clientX) / 8) :
-        e.clientX > rect.right - edge ? Math.max(2, (e.clientX - (rect.right - edge)) / 8) : 0;
-      if (speed) photoScrollerRef.current.scrollLeft += speed;
-    }
-    for (let i = 0; i < photoRefs.current.length; i++) {
-      const el = photoRefs.current[i];
-      if (!el) continue;
-      const rect = el.getBoundingClientRect();
-      if (e.clientX >= rect.left && e.clientX <= rect.right) {
-        const slot = e.clientX < rect.left + rect.width / 2 ? i : i + 1;
-        const from = photoDragIdx.current;
-        const insertionIndex = from !== null && slot > from ? slot - 1 : slot;
-        if (from !== null && insertionIndex !== from) {
-          const next = [...photoDragWorking.current];
-          const [item] = next.splice(from, 1);
-          next.splice(insertionIndex, 0, item);
-          photoDragWorking.current = next;
-          photoDragIdx.current = insertionIndex;
-          setPhotoUrls(next);
-          setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
-        }
-        photoDropIdx.current = insertionIndex;
-        setDropIdx(insertionIndex);
-        return;
-      }
-    }
+    photoPointer.current = { x: e.clientX, y: e.clientY };
+    if (photoAutoScrollFrame.current === null) photoAutoScrollFrame.current = requestAnimationFrame(runPhotoAutoScroll);
+    updatePhotoAtPointer(e.clientX, e.clientY);
   }
 
   function onPhotoPUp(e: React.PointerEvent, url: string) {
@@ -680,6 +716,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     } else if (!moved && !wasDragging) {
       setZoomedPhoto(url);
     }
+    stopPhotoAutoScroll();
 
     if (photoPointerId.current !== null && photoDragTarget.current?.hasPointerCapture(photoPointerId.current)) {
       photoDragTarget.current.releasePointerCapture(photoPointerId.current);
@@ -952,6 +989,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           {photoUrls.map((url, i) => (
             <div
               key={url}
+              data-photo-index={i}
               ref={(el) => { photoRefs.current[i] = el; }}
               className={`relative ${photoEditorLayout === "carousel" ? "flex-shrink-0 snap-start" : ""} rounded-xl overflow-hidden cursor-grab select-none transition-all${dragIdx === i ? " opacity-50 scale-95 cursor-grabbing" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
               style={{ width: photoEditorLayout === "carousel" ? 184 : "100%", aspectRatio: "1", touchAction: dragIdx === i ? "none" : photoEditorLayout === "carousel" ? "pan-x" : "none" }}
