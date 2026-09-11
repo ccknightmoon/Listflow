@@ -470,6 +470,10 @@ export default function NewListingPage() {
       setListStatus("error");
       return;
     }
+    const finalPrice = result?.suggestedPrice ?? (customPrice ? Number(customPrice) : null);
+    if (!window.confirm(`List "${title}" on eBay for $${finalPrice?.toFixed(2)} with ${photos.length} photo${photos.length === 1 ? "" : "s"} and ${shippingMode} shipping?`)) {
+      return;
+    }
     setListStatus("listing");
     setListError(null);
     setNeedsConnect(false);

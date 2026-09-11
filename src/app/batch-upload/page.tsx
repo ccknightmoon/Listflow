@@ -1389,6 +1389,9 @@ export default function BatchUploadPage() {
       .map((_, i) => i)
       .filter((i) => !results[i].error && !results[i].pending && listStatus[i] !== "listed");
 
+    if (indices.length === 0) return;
+    if (!window.confirm(`List ${indices.length} item${indices.length === 1 ? "" : "s"} on eBay now?`)) return;
+
     setListingAll(true);
     setListingAllProgress({ done: 0, total: indices.length });
 
