@@ -488,11 +488,17 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     setPhotoUndo(previous);
     setPhotoUrls(next);
     setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
-    await apiFetch(`/api/drafts/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] ?? null }),
-    });
+    try {
+      await apiFetch(`/api/drafts/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ photoUrls: next, thumbnailUrl: next[0] ?? null }),
+      });
+    } catch (err) {
+      setPhotoUrls(previous);
+      setDraft((prev) => prev ? { ...prev, photo_urls: previous, thumbnail_url: previous[0] ?? null } : prev);
+      throw err;
+    }
   }
 
   async function handleUndoPhotoChange() {

@@ -467,10 +467,12 @@ export default function BatchUploadPage() {
     setListingAllProgress({ done: 0, total: failedIndices.length });
     let cursor = 0;
     let done = 0;
+    let retrySuccessCount = 0;
     async function worker() {
       while (cursor < failedIndices.length) {
         const index = failedIndices[cursor++];
-        await handleListOnEbay(index);
+        const succeeded = await handleListOnEbay(index);
+        if (succeeded) retrySuccessCount++;
         done++;
         setListingAllProgress({ done, total: failedIndices.length });
       }
@@ -479,6 +481,15 @@ export default function BatchUploadPage() {
     await Promise.all(Array.from({ length: Math.min(concurrency, failedIndices.length) }, () => worker()));
     setListingAll(false);
     setListingAllProgress(null);
+    const remainingFailures = failedIndices.length - retrySuccessCount;
+    if (remainingFailures === 0) {
+      setError(null);
+    } else {
+      setError(
+        `${retrySuccessCount} failed listing${retrySuccessCount === 1 ? "" : "s"} recovered. ` +
+        `${remainingFailures} still failed and can be retried below.`
+      );
+    }
   }
 
   async function handleSaveAllDrafts() {
