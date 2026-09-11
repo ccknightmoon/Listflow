@@ -104,12 +104,18 @@ export async function POST(req: NextRequest) {
     let assignedSku = (typeof requestCustomSku === "string" ? requestCustomSku.trim() : "") || (draft.custom_sku as string | null);
     if (!assignedSku) {
       for (let attempt = 0; attempt < 5; attempt++) {
+        // Scans every one of this user's non-null SKUs (RLS already scopes
+        // this to one user, so the row count stays small) instead of
+        // sorting by custom_sku and taking the top 50 -- custom_sku is
+        // stored as text, so a DB-side text sort ranks "9" above "100",
+        // which could hand back a SKU that is already used, or lower than
+        // the real max, once a seller passes roughly 50-100 listings.
+        // Parsing every row as a number and taking the max in JS avoids
+        // the text-sort problem entirely.
         const { data: maxRow } = await supabase
           .from("drafts")
           .select("custom_sku")
-          .not("custom_sku", "is", null)
-          .order("custom_sku", { ascending: false })
-          .limit(50);
+          .not("custom_sku", "is", null);
         const maxNum = (maxRow ?? [])
           .map((r) => parseInt(r.custom_sku as string, 10))
           .filter((n) => !isNaN(n))
