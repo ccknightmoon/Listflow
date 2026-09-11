@@ -336,6 +336,12 @@ export default function BatchUploadPage() {
   const uploadedPhotoUrls = useRef<Record<number, string>>({});
   const pauseRef = useRef(false);
   const cancelRef = useRef(false);
+  // Tracks the batch_jobs id for whichever bulk listing run
+  // (handleListAllOnEbay or handleRetryFailedListings) is currently in
+  // flight, so pauseBatch/cancelBatch can sync that durable record's
+  // status too -- null when no run is active (including the per-row
+  // single "List" click, which isn't part of a tracked batch at all).
+  const activeBatchJobIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     pauseRef.current = batchPaused;
@@ -550,13 +556,29 @@ export default function BatchUploadPage() {
     if (failedIndices.length === 0) return;
     setListingAll(true);
     setListingAllProgress({ done: 0, total: failedIndices.length });
+
+    // Durable record of this retry run, same as handleListAllOnEbay below
+    // -- best-effort, see its own comment for why.
+    let batchJobId: string | undefined;
+    try {
+      const jobData = await apiFetch<{ id?: string }>("/api/batch-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ totalItems: failedIndices.length }),
+      });
+      batchJobId = jobData.id;
+      activeBatchJobIdRef.current = batchJobId ?? null;
+    } catch {
+      // Tracking only -- proceed untracked.
+    }
+
     let cursor = 0;
     let done = 0;
     let retrySuccessCount = 0;
     async function worker() {
       while (cursor < failedIndices.length) {
         const index = failedIndices[cursor++];
-        const succeeded = await handleListOnEbay(index);
+        const succeeded = await handleListOnEbay(index, batchJobId);
         if (succeeded) retrySuccessCount++;
         done++;
         setListingAllProgress({ done, total: failedIndices.length });
@@ -567,6 +589,14 @@ export default function BatchUploadPage() {
     setListingAll(false);
     setListingAllProgress(null);
     const remainingFailures = failedIndices.length - retrySuccessCount;
+    if (batchJobId) {
+      void apiFetch(`/api/batch-jobs/${batchJobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "completed", completedItems: retrySuccessCount, failedItems: remainingFailures }),
+      }).catch(() => {});
+      activeBatchJobIdRef.current = null;
+    }
     if (remainingFailures === 0) {
       setError(null);
     } else {
@@ -1465,7 +1495,7 @@ export default function BatchUploadPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results]);
 
-  async function handleListOnEbay(index: number): Promise<boolean> {
+  async function handleListOnEbay(index: number, batchJobId?: string): Promise<boolean> {
     if (photoUploadWarnings[index]) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
       setListErrors((prev) => ({
@@ -1506,6 +1536,28 @@ export default function BatchUploadPage() {
       return false;
     }
 
+    // Best-effort durable tracking for this one item within the current
+    // batch run (see supabase-migrations/022_batch_jobs.sql) -- only
+    // created when this call came from handleListAllOnEbay/
+    // handleRetryFailedListings (they pass batchJobId); a single-row
+    // "List" click isn't part of a tracked batch. Never lets a failure
+    // here block or fail the actual eBay publish below -- if this write
+    // fails, the listing attempt still proceeds exactly as it would
+    // without it.
+    let batchJobItemId: string | null = null;
+    if (batchJobId) {
+      try {
+        const itemData = await apiFetch<{ id?: string }>(`/api/batch-jobs/${batchJobId}/items`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ draftId: id }),
+        });
+        batchJobItemId = itemData.id ?? null;
+      } catch {
+        // Tracking only -- proceed untracked rather than block listing.
+      }
+    }
+
     setListStatus((prev) => ({ ...prev, [index]: "listing" }));
     try {
       const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; storeCategoryWarning?: string; url?: string | null }>("/api/ebay/list", {
@@ -1530,10 +1582,24 @@ export default function BatchUploadPage() {
         setListStoreCategoryWarnings((prev) => ({ ...prev, [index]: data.storeCategoryWarning as string }));
       }
       window.dispatchEvent(new Event("listflow:counts-changed"));
+      if (batchJobId && batchJobItemId) {
+        void apiFetch(`/api/batch-jobs/${batchJobId}/items/${batchJobItemId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "success" }),
+        }).catch(() => {});
+      }
       return true;
     } catch (err) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
       setListErrors((prev) => ({ ...prev, [index]: (err as Error).message }));
+      if (batchJobId && batchJobItemId) {
+        void apiFetch(`/api/batch-jobs/${batchJobId}/items/${batchJobItemId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "failed", error: (err as Error).message }),
+        }).catch(() => {});
+      }
       return false;
     }
   }
@@ -1551,6 +1617,23 @@ export default function BatchUploadPage() {
     cancelRef.current = false;
     setListingAllProgress({ done: 0, total: indices.length });
 
+    // Durable record of this run (see supabase-migrations/022_batch_jobs.sql)
+    // so it can be reviewed or resumed after the tab closes -- best-effort:
+    // a failure here just means this run proceeds untracked, same as every
+    // batch run before this existed.
+    let batchJobId: string | undefined;
+    try {
+      const jobData = await apiFetch<{ id?: string }>("/api/batch-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ totalItems: indices.length }),
+      });
+      batchJobId = jobData.id;
+      activeBatchJobIdRef.current = batchJobId ?? null;
+    } catch {
+      // Tracking only -- proceed untracked.
+    }
+
     // A couple of listings at a time instead of strictly one at a time.
     // Kept lower than ANALYSIS_CONCURRENCY above: a single listing is
     // already several sequential eBay calls internally (SKU cleanup,
@@ -1567,7 +1650,7 @@ export default function BatchUploadPage() {
         await waitForBatchResume();
         if (cancelRef.current) return;
         const n = cursor++;
-        const ok = await handleListOnEbay(indices[n]);
+        const ok = await handleListOnEbay(indices[n], batchJobId);
         if (ok) successCount++;
         doneCount++;
         setListingAllProgress({ done: doneCount, total: indices.length });
@@ -1582,6 +1665,18 @@ export default function BatchUploadPage() {
     setBatchPaused(false);
     setListingAllProgress(null);
     const failedCount = indices.length - successCount;
+    if (batchJobId) {
+      void apiFetch(`/api/batch-jobs/${batchJobId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: cancelRef.current ? "canceled" : "completed",
+          completedItems: successCount,
+          failedItems: failedCount,
+        }),
+      }).catch(() => {});
+      activeBatchJobIdRef.current = null;
+    }
     if (failedCount > 0) {
       setError(
         successCount > 0
@@ -1596,7 +1691,23 @@ export default function BatchUploadPage() {
   }
 
   function pauseBatch() {
-    setBatchPaused((current) => !current);
+    // A plain toggle + a side-effect call here, rather than putting the
+    // API call inside setBatchPaused's updater function -- React can
+    // invoke an updater function more than once for one state change
+    // (Strict Mode's dev-only double-invoke), which would risk firing
+    // this best-effort PATCH twice for a single click.
+    const next = !batchPaused;
+    setBatchPaused(next);
+    // Lets a resumed session (or a future reconciliation view) see that
+    // this run is paused rather than just silently stalled. Doesn't
+    // block the pause itself either way.
+    if (activeBatchJobIdRef.current) {
+      void apiFetch(`/api/batch-jobs/${activeBatchJobIdRef.current}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: next ? "paused" : "processing" }),
+      }).catch(() => {});
+    }
   }
 
   function cancelBatch() {
@@ -1604,6 +1715,13 @@ export default function BatchUploadPage() {
     pauseRef.current = false;
     setBatchPaused(false);
     setBatchCancelled(true);
+    if (activeBatchJobIdRef.current) {
+      void apiFetch(`/api/batch-jobs/${activeBatchJobIdRef.current}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "canceled" }),
+      }).catch(() => {});
+    }
   }
 
   // Items still open for bulk editing -- once a draft is saved (draftIds[i]
