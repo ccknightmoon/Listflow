@@ -46,7 +46,7 @@ export async function GET() {
   // all of that unused text over the wire on every visit to this page.
   const { data, error } = await auth.supabase
     .from("drafts")
-    .select("id, title, suggested_price, sell_odds, condition, thumbnail_url, created_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode")
+    .select("id, title, suggested_price, sell_odds, condition, thumbnail_url, photo_urls, created_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode")
     .order("created_at", { ascending: false });
 
   if (error) {
