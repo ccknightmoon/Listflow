@@ -1048,7 +1048,6 @@ function PhotoCard({
   const [hoverSlot, setHoverSlot] = useState<number | null>(null);
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
-    if (e.pointerType === "mouse") return;
     startPoint.current = { x: e.clientX, y: e.clientY };
     dragTarget.current = e.currentTarget;
     dropIndex.current = index;
@@ -1092,22 +1091,6 @@ function PhotoCard({
   return (
     <div
       data-photo-index={index}
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={(e) => {
-        e.preventDefault();
-        const rect = e.currentTarget.getBoundingClientRect();
-        const slot = e.clientX < rect.left + rect.width / 2 ? index : index + 1;
-        setHoverSlot(slot);
-        onPreviewReorder(slot);
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        const rect = e.currentTarget.getBoundingClientRect();
-        onDrop(e.clientX < rect.left + rect.width / 2 ? index : index + 1);
-        setHoverSlot(null);
-      }}
-      onDragEnd={() => setHoverSlot(null)}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}

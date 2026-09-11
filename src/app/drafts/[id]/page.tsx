@@ -934,15 +934,10 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           <div className="flex gap-2 overflow-x-auto overscroll-x-contain pb-2 -mx-5 px-5 snap-x snap-mandatory">
           {photoUrls.map((url, i) => (
             <div
-              key={i}
+              key={url}
               ref={(el) => { photoRefs.current[i] = el; }}
-              draggable
               className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none snap-start transition-all${dragIdx === i ? " opacity-50 scale-95 cursor-grabbing" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
               style={{ width: 184, height: 184, touchAction: dragIdx === i ? "none" : "pan-x" }}
-              onDragStart={(e) => onPhotoDragStart(e, i)}
-              onDragOver={(e) => onPhotoDragOver(e, i)}
-              onDrop={onPhotoDrop}
-              onDragEnd={onPhotoDragEnd}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={url} alt={`Photo ${i + 1}`} className="w-full h-full object-cover" draggable={false} />
