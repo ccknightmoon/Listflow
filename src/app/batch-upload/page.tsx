@@ -36,6 +36,7 @@ import { estimateIsHeavy, estimateShipping, type ShippingMode } from "@/lib/ship
 import AIDisclaimer from "@/components/AIDisclaimer";
 import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
 import { getListingReadiness } from "@/lib/listing-readiness";
+import { clearBatchRecovery, loadBatchRecovery, saveBatchRecovery } from "@/lib/batch-recovery";
 
 interface SlotImage {
   data: string;
@@ -266,6 +267,7 @@ export default function BatchUploadPage() {
   const [batchCancelled, setBatchCancelled] = useState(false);
   const [recoveredBatch, setRecoveredBatch] = useState(false);
   const recoveryHydrated = useRef(false);
+  const recoveryWriteTimer = useRef<number | null>(null);
   const [listingAllProgress, setListingAllProgress] = useState<{ done: number; total: number } | null>(null);
   const [analyzingProgress, setAnalyzingProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -346,58 +348,49 @@ export default function BatchUploadPage() {
   }
 
   useEffect(() => {
-      try {
-        const saved = localStorage.getItem("listflow-batch-recovery");
-        if (!saved) {
-          recoveryHydrated.current = true;
-          return;
-        }
-        const snapshot = JSON.parse(saved) as {
-          step?: Step;
-          photos?: SlotImage[];
-          groups?: number[][];
-          results?: AiResult[];
-          customPrices?: Record<number, string>;
-          customSkus?: Record<number, string>;
-          draftIds?: Record<number, string>;
-        };
-        if (snapshot.photos?.length && snapshot.groups?.length) {
-          setStep(snapshot.step === "results" || snapshot.step === "review" ? snapshot.step : "upload");
-          setPhotos(snapshot.photos);
-          setGroups(snapshot.groups);
-          setResults(snapshot.results ?? []);
-          setCustomPrices(snapshot.customPrices ?? {});
-          setCustomSkus(snapshot.customSkus ?? {});
-          setDraftIds(snapshot.draftIds ?? {});
-          setRecoveredBatch(true);
-        }
-      } catch {
-        localStorage.removeItem("listflow-batch-recovery");
-      } finally {
-        recoveryHydrated.current = true;
+    let cancelled = false;
+    void loadBatchRecovery().then((snapshot) => {
+      if (cancelled) return;
+      if (snapshot?.photos.length && snapshot.groups.length) {
+        setStep(snapshot.step === "results" || snapshot.step === "review" ? snapshot.step : "upload");
+        setPhotos(snapshot.photos as SlotImage[]);
+        setGroups(snapshot.groups);
+        setResults(snapshot.results as AiResult[]);
+        setCustomPrices(snapshot.customPrices);
+        setCustomSkus(snapshot.customSkus);
+        setDraftIds(snapshot.draftIds);
+        setRecoveredBatch(true);
       }
+      recoveryHydrated.current = true;
+    }).catch(() => {
+      recoveryHydrated.current = true;
+    });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
-      if (!recoveryHydrated.current || photos.length === 0) return;
-      try {
-        localStorage.setItem("listflow-batch-recovery", JSON.stringify({
-          step,
-          photos,
-          groups,
-          results,
-          customPrices,
-          customSkus,
-          draftIds,
-        }));
-      } catch {
-        // Large photo batches may exceed localStorage; the existing drafts remain
-        // the durable fallback and the page's beforeunload warning still applies.
-      }
+    if (!recoveryHydrated.current || photos.length === 0) return;
+    if (recoveryWriteTimer.current !== null) window.clearTimeout(recoveryWriteTimer.current);
+    recoveryWriteTimer.current = window.setTimeout(() => {
+      void saveBatchRecovery({
+        step,
+        photos,
+        groups,
+        results,
+        customPrices,
+        customSkus,
+        draftIds,
+      }).catch(() => {
+        // Draft rows remain the durable fallback if browser recovery storage fails.
+      });
+    }, 750);
+    return () => {
+      if (recoveryWriteTimer.current !== null) window.clearTimeout(recoveryWriteTimer.current);
+    };
   }, [step, photos, groups, results, customPrices, customSkus, draftIds]);
 
   function discardRecoveredBatch() {
-      localStorage.removeItem("listflow-batch-recovery");
+    void clearBatchRecovery().catch(() => {});
       setRecoveredBatch(false);
       setStep("upload");
       setPhotos([]);
@@ -1596,7 +1589,7 @@ export default function BatchUploadPage() {
           : `None of the ${failedCount} selected items listed. Review the errors and retry below.`
       );
     } else if (successCount > 0) {
-      if (failedCount === 0) localStorage.removeItem("listflow-batch-recovery");
+      if (failedCount === 0) void clearBatchRecovery().catch(() => {});
       setTimeout(() => router.push("/store"), 1500);
     }
 
