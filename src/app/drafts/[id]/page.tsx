@@ -113,6 +113,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const photoDragTarget = useRef<HTMLElement | null>(null);
   const photoPointerId = useRef<number | null>(null);
   const activePhotoDrag = useRef(false);
+  const photoDragOriginal = useRef<string[] | null>(null);
+  const photoDragWorking = useRef<string[]>([]);
   const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const [title, setTitle] = useState("");
@@ -597,6 +599,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     if (e.pointerType === "mouse" && e.button !== 0) return;
     pointerStart.current = { x: e.clientX, y: e.clientY };
     photoDragIdx.current = idx;
+    photoDragOriginal.current = [...photoUrls];
+    photoDragWorking.current = [...photoUrls];
     photoDropIdx.current = null;
     photoDragTarget.current = e.currentTarget as HTMLElement;
     photoPointerId.current = e.pointerId;
@@ -625,8 +629,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       const rect = el.getBoundingClientRect();
       if (e.clientX >= rect.left && e.clientX <= rect.right) {
         const slot = e.clientX < rect.left + rect.width / 2 ? i : i + 1;
-        photoDropIdx.current = slot;
-        setDropIdx(slot);
+        const from = photoDragIdx.current;
+        const insertionIndex = from !== null && slot > from ? slot - 1 : slot;
+        if (from !== null && insertionIndex !== from) {
+          const next = [...photoDragWorking.current];
+          const [item] = next.splice(from, 1);
+          next.splice(insertionIndex, 0, item);
+          photoDragWorking.current = next;
+          photoDragIdx.current = insertionIndex;
+          setPhotoUrls(next);
+          setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
+        }
+        photoDropIdx.current = insertionIndex;
+        setDropIdx(insertionIndex);
         return;
       }
     }
@@ -640,21 +655,16 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     const start = pointerStart.current;
     const moved = start && (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8);
     const from = photoDragIdx.current;
-    const to = photoDropIdx.current;
+    const original = photoDragOriginal.current;
+    const finalOrder = photoDragWorking.current;
     const wasDragging = activePhotoDrag.current;
     photoDragIdx.current = null;
     photoDropIdx.current = null;
 
-    if (wasDragging && from !== null && to !== null) {
-      const next = [...photoUrls];
-      const [item] = next.splice(from, 1);
-      const insertionIndex = to > from ? to - 1 : to;
-      if (insertionIndex !== from) {
-        next.splice(insertionIndex, 0, item);
-        void savePhotoUrls(next, photoUrls).catch((err) => {
+    if (wasDragging && original && JSON.stringify(finalOrder) !== JSON.stringify(original)) {
+        void savePhotoUrls(finalOrder, original).catch((err) => {
           setError((err as Error).message);
         });
-      }
     } else if (!moved && !wasDragging) {
       setZoomedPhoto(url);
     }
@@ -668,10 +678,14 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     photoDragTarget.current = null;
     photoPointerId.current = null;
     activePhotoDrag.current = false;
+    photoDragOriginal.current = null;
+    photoDragWorking.current = [];
   }
 
   function onPhotoDragStart(e: React.DragEvent, index: number) {
     photoDragIdx.current = index;
+    photoDragOriginal.current = [...photoUrls];
+    photoDragWorking.current = [...photoUrls];
     activePhotoDrag.current = true;
     setDragIdx(index);
     e.dataTransfer.effectAllowed = "move";
@@ -682,31 +696,38 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const from = photoDragIdx.current;
     const slot = e.clientX < rect.left + rect.width / 2 ? index : index + 1;
-    setDropIdx(slot);
-    photoDropIdx.current = slot;
+    const insertionIndex = from !== null && slot > from ? slot - 1 : slot;
+    if (from !== null && insertionIndex !== from) {
+      const next = [...photoDragWorking.current];
+      const [item] = next.splice(from, 1);
+      next.splice(insertionIndex, 0, item);
+      photoDragWorking.current = next;
+      photoDragIdx.current = insertionIndex;
+      setPhotoUrls(next);
+      setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
+    }
+    photoDropIdx.current = insertionIndex;
+    setDropIdx(insertionIndex);
   }
 
   function onPhotoDrop(e: React.DragEvent) {
     e.preventDefault();
-    const from = photoDragIdx.current;
-    const to = photoDropIdx.current;
-    if (from !== null && to !== null) {
-      const next = [...photoUrls];
-      const [item] = next.splice(from, 1);
-      const insertionIndex = to > from ? to - 1 : to;
-      if (insertionIndex !== from) {
-        next.splice(insertionIndex, 0, item);
-        void savePhotoUrls(next, photoUrls).catch((err) => {
-          setError((err as Error).message);
-        });
-      }
+    const original = photoDragOriginal.current;
+    const finalOrder = photoDragWorking.current;
+    if (original && JSON.stringify(finalOrder) !== JSON.stringify(original)) {
+      void savePhotoUrls(finalOrder, original).catch((err) => {
+        setError((err as Error).message);
+      });
     }
     photoDragIdx.current = null;
     photoDropIdx.current = null;
     setDragIdx(null);
     setDropIdx(null);
     activePhotoDrag.current = false;
+    photoDragOriginal.current = null;
+    photoDragWorking.current = [];
   }
 
   function onPhotoDragEnd() {
@@ -715,6 +736,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     setDragIdx(null);
     setDropIdx(null);
     activePhotoDrag.current = false;
+    photoDragOriginal.current = null;
+    photoDragWorking.current = [];
   }
 
   async function handleDelete() {

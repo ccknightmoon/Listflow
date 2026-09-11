@@ -240,6 +240,20 @@ export default function NewListingPage() {
       });
     }
 
+    function movePhotoDuringDrag(slot: number) {
+      const from = draggedPhoto.current;
+      if (from == null) return;
+      const to = slot > from ? slot - 1 : slot;
+      if (to === from || to < 0 || to >= photos.length) return;
+      setPhotos((prev) => {
+        const next = [...prev];
+        const [photo] = next.splice(from, 1);
+        next.splice(to, 0, photo);
+        return next;
+      });
+      draggedPhoto.current = to;
+    }
+
   function undoPhotoChange() {
       if (!photoUndo) return;
       setPhotos(photoUndo);
@@ -616,9 +630,9 @@ export default function NewListingPage() {
                 onMove={(to) => movePhoto(index, to)}
                 onReorder={(from, to) => movePhoto(from, to)}
                 onLabelChange={(label) => setPhotoLabel(index, label)}
-                onDragStart={() => { draggedPhoto.current = index; }}
+                onDragStart={() => { rememberPhotoChange("Photo reordered"); draggedPhoto.current = index; }}
+                onPreviewReorder={movePhotoDuringDrag}
                 onDrop={(slot) => {
-                  if (draggedPhoto.current != null) movePhotoToSlot(draggedPhoto.current, slot);
                   draggedPhoto.current = null;
                 }}
               />
@@ -1010,6 +1024,7 @@ function PhotoCard({
   onRemove,
   onMove,
   onReorder,
+  onPreviewReorder,
   onLabelChange,
   onDragStart,
   onDrop,
@@ -1020,6 +1035,7 @@ function PhotoCard({
   onRemove: () => void;
   onMove: (to: number) => void;
   onReorder: (from: number, to: number) => void;
+  onPreviewReorder: (slot: number) => void;
   onLabelChange: (label: PhotoItem["label"]) => void;
   onDragStart: () => void;
   onDrop: (slot: number) => void;
@@ -1053,15 +1069,18 @@ function PhotoCard({
     if (!touchDragging) return;
     e.preventDefault();
     const target = document.elementFromPoint(e.clientX, e.clientY)?.closest<HTMLElement>("[data-photo-index]");
-    const targetIndex = target ? Number(target.dataset.photoIndex) : null;
-    if (targetIndex !== null && Number.isInteger(targetIndex)) dropIndex.current = targetIndex;
+    if (target) {
+      const targetIndex = Number(target.dataset.photoIndex);
+      const rect = target.getBoundingClientRect();
+      const slot = e.clientX < rect.left + rect.width / 2 ? targetIndex : targetIndex + 1;
+      dropIndex.current = slot;
+      onPreviewReorder(slot);
+    }
   }
 
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     if (dragTimer.current !== null) window.clearTimeout(dragTimer.current);
-    if (touchDragging && dropIndex.current !== null && dropIndex.current !== index) {
-      onReorder(index, dropIndex.current);
-    }
+    if (touchDragging && dropIndex.current !== null) onDrop(dropIndex.current);
     if (dragTarget.current?.hasPointerCapture(e.pointerId)) dragTarget.current.releasePointerCapture(e.pointerId);
     dragTimer.current = null;
     dragTarget.current = null;
@@ -1078,7 +1097,9 @@ function PhotoCard({
       onDragOver={(e) => {
         e.preventDefault();
         const rect = e.currentTarget.getBoundingClientRect();
-        setHoverSlot(e.clientX < rect.left + rect.width / 2 ? index : index + 1);
+        const slot = e.clientX < rect.left + rect.width / 2 ? index : index + 1;
+        setHoverSlot(slot);
+        onPreviewReorder(slot);
       }}
       onDrop={(e) => {
         e.preventDefault();
@@ -1104,7 +1125,7 @@ function PhotoCard({
           aria-label={`Hold and drag photo ${index + 1} to reorder`}
           title="Hold and drag to reorder"
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white cursor-grab touch-none"
-          onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e); }}
+          onPointerDown={(e) => { e.stopPropagation(); onDragStart(); onPointerDown(e); }}
           onPointerMove={(e) => { e.stopPropagation(); onPointerMove(e); }}
           onPointerUp={(e) => { e.stopPropagation(); onPointerUp(e); }}
           onPointerCancel={(e) => { e.stopPropagation(); onPointerUp(e); }}
