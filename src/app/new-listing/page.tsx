@@ -140,6 +140,7 @@ export default function NewListingPage() {
   const [aiStoreCategorySuggestions, setAiStoreCategorySuggestions] = useState(false);
   const [photoEditorLayout, setPhotoEditorLayout] = useState<"carousel" | "grid">("carousel");
   const [suggestingStoreCategory, setSuggestingStoreCategory] = useState(false);
+  const autosaveTimer = useRef<number | null>(null);
 
   useEffect(() => {
     fetch("/api/settings")
@@ -155,6 +156,24 @@ export default function NewListingPage() {
       .then((data) => setStoreCategories(Array.isArray(data.categories) ? data.categories : []))
       .catch(() => {});
   }, []);
+
+  const newListingSignature = JSON.stringify({
+    photos: photos.map((photo) => ({ id: photo.id, uploadedUrl: photo.uploadedUrl, label: photo.label })),
+    title, condition, flaws, customPrice, cost, brand, size, color,
+    storeCategoryId, storeCategoryName, isHeavy, shippingCost, shippingMode,
+    aiResult, result,
+  });
+
+  useEffect(() => {
+    if (!savedDraftId || loading || listStatus === "listing") return;
+    if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = window.setTimeout(() => {
+      void handleSaveDraft();
+    }, 900);
+    return () => {
+      if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+    };
+  }, [newListingSignature, savedDraftId, loading, listStatus]);
 
   async function requestStoreCategoryAi(item: {
     title: string | null;
