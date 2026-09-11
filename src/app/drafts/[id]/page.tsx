@@ -130,6 +130,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [price, setPrice] = useState("");
   const [cost, setCost] = useState(""); // cost_basis (migration 017, src/lib/profit.ts)
   const [customSku, setCustomSku] = useState("");
+  const initialCustomSku = useRef<string | null>(null);
   const [itemType, setItemType] = useState("");
   const [style, setStyle] = useState("");
   const [material, setMaterial] = useState("");
@@ -194,7 +195,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         setFlaws(str(d.flaws));
         setPrice(d.suggested_price != null ? String(d.suggested_price) : "");
         setCost(d.cost_basis != null ? String(d.cost_basis) : "");
-        setCustomSku(str(d.custom_sku));
+        const loadedSku = str(d.custom_sku).trim();
+        initialCustomSku.current = loadedSku || null;
+        setCustomSku(loadedSku);
         setItemType(str(d.item_type));
         setStyle(str(d.style));
         setMaterial(str(d.material));
@@ -332,11 +335,12 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   function getDraftPayload() {
-    return {
+    const normalizedSku = customSku.trim() || null;
+    const payload: Record<string, unknown> = {
       title, brand, color, size, condition, flaws,
       suggestedPrice: price ? Number(price) : null,
       costBasis: cost ? Number(cost) : null,
-      customSku, itemType, style, material, theme,
+      itemType, style, material, theme,
       sleeveLength, neckline, fit, pattern, description,
       vintage, character, characterFamily, yearManufactured, season,
       storeCategoryId, storeCategoryName,
@@ -344,14 +348,18 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       isHeavy: shippingMode === "buyer_pays",
       shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
     };
+    if (normalizedSku !== initialCustomSku.current) payload.customSku = normalizedSku;
+    return payload;
   }
 
   async function saveDraft(extra: Record<string, unknown> = {}) {
+    const payload = getDraftPayload();
     await apiFetch(`/api/drafts/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...getDraftPayload(), ...extra }),
+      body: JSON.stringify({ ...payload, ...extra }),
     });
+    initialCustomSku.current = customSku.trim() || null;
   }
 
   async function handleSave() {
@@ -581,12 +589,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            title, brand, color, size, condition, flaws,
+            ...getDraftPayload(),
             suggestedPrice: data.suggestedPrice ?? (price ? Number(price) : null),
-            costBasis: cost ? Number(cost) : null,
-            customSku, itemType, style, material, theme,
-            sleeveLength, neckline, fit, pattern, description,
-            vintage, character, characterFamily, yearManufactured, season,
             storeCategoryId, storeCategoryName,
             avgSold: data.avgSold ?? null,
             activeRangeLow: data.activeRangeLow ?? null,

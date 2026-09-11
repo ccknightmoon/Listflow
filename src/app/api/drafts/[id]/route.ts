@@ -117,7 +117,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .select()
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    if (error.code === "23505" && error.message.toLowerCase().includes("custom_sku")) {
+      return NextResponse.json({ error: "That SKU is already used by another draft. Choose a different SKU." }, { status: 409 });
+    }
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
   return NextResponse.json({ draft: data });
 }
 
