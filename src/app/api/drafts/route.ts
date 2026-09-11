@@ -50,6 +50,9 @@ export async function GET() {
     .order("created_at", { ascending: false });
 
   if (error) {
+    if (error.code === "23505" && error.message.toLowerCase().includes("custom_sku")) {
+      return NextResponse.json({ error: "That SKU is already used by another draft. Choose a different SKU." }, { status: 409 });
+    }
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
