@@ -624,8 +624,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       if (!el) continue;
       const rect = el.getBoundingClientRect();
       if (e.clientX >= rect.left && e.clientX <= rect.right) {
-        photoDropIdx.current = i;
-        setDropIdx(i);
+        const slot = e.clientX < rect.left + rect.width / 2 ? i : i + 1;
+        photoDropIdx.current = slot;
+        setDropIdx(slot);
         return;
       }
     }
@@ -644,13 +645,16 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     photoDragIdx.current = null;
     photoDropIdx.current = null;
 
-    if (wasDragging && from !== null && to !== null && from !== to) {
+    if (wasDragging && from !== null && to !== null) {
       const next = [...photoUrls];
       const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      void savePhotoUrls(next, photoUrls).catch((err) => {
-        setError((err as Error).message);
-      });
+      const insertionIndex = to > from ? to - 1 : to;
+      if (insertionIndex !== from) {
+        next.splice(insertionIndex, 0, item);
+        void savePhotoUrls(next, photoUrls).catch((err) => {
+          setError((err as Error).message);
+        });
+      }
     } else if (!moved && !wasDragging) {
       setZoomedPhoto(url);
     }
@@ -677,21 +681,26 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   function onPhotoDragOver(e: React.DragEvent, index: number) {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
-    setDropIdx(index);
-    photoDropIdx.current = index;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const slot = e.clientX < rect.left + rect.width / 2 ? index : index + 1;
+    setDropIdx(slot);
+    photoDropIdx.current = slot;
   }
 
-  function onPhotoDrop(e: React.DragEvent, index: number) {
+  function onPhotoDrop(e: React.DragEvent) {
     e.preventDefault();
     const from = photoDragIdx.current;
-    const to = index;
-    if (from !== null && from !== to) {
+    const to = photoDropIdx.current;
+    if (from !== null && to !== null) {
       const next = [...photoUrls];
       const [item] = next.splice(from, 1);
-      next.splice(to, 0, item);
-      void savePhotoUrls(next, photoUrls).catch((err) => {
-        setError((err as Error).message);
-      });
+      const insertionIndex = to > from ? to - 1 : to;
+      if (insertionIndex !== from) {
+        next.splice(insertionIndex, 0, item);
+        void savePhotoUrls(next, photoUrls).catch((err) => {
+          setError((err as Error).message);
+        });
+      }
     }
     photoDragIdx.current = null;
     photoDropIdx.current = null;
@@ -909,7 +918,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               style={{ width: 184, height: 184, touchAction: dragIdx === i ? "none" : "pan-x" }}
               onDragStart={(e) => onPhotoDragStart(e, i)}
               onDragOver={(e) => onPhotoDragOver(e, i)}
-              onDrop={(e) => onPhotoDrop(e, i)}
+              onDrop={onPhotoDrop}
               onDragEnd={onPhotoDragEnd}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -936,6 +945,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
                 <div className="absolute top-1 left-1 bg-black/50 rounded px-1.5 py-0.5">
                   <span className="text-white text-[10px]">Main</span>
                 </div>
+              )}
+              {dropIdx === i && dragIdx !== i && (
+                <div className="absolute left-0 top-0 bottom-0 w-1 rounded-full bg-[var(--accent)]" />
               )}
               <button
                 type="button"
@@ -970,6 +982,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               </div>
             </div>
           ))}
+          {dropIdx === photoUrls.length && dragIdx !== null && (
+            <div className="flex-shrink-0 w-1 rounded-full bg-[var(--accent)]" style={{ height: 184 }} />
+          )}
           <button
             type="button"
             onClick={() => photoInputRef.current?.click()}

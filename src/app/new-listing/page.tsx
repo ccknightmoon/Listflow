@@ -228,6 +228,18 @@ export default function NewListingPage() {
       });
     }
 
+    function movePhotoToSlot(from: number, slot: number) {
+      const insertionIndex = slot > from ? slot - 1 : slot;
+      if (insertionIndex === from || insertionIndex < 0 || insertionIndex >= photos.length) return;
+      rememberPhotoChange("Photo reordered");
+      setPhotos((prev) => {
+        const next = [...prev];
+        const [photo] = next.splice(from, 1);
+        next.splice(insertionIndex, 0, photo);
+        return next;
+      });
+    }
+
   function undoPhotoChange() {
       if (!photoUndo) return;
       setPhotos(photoUndo);
@@ -605,8 +617,8 @@ export default function NewListingPage() {
                 onReorder={(from, to) => movePhoto(from, to)}
                 onLabelChange={(label) => setPhotoLabel(index, label)}
                 onDragStart={() => { draggedPhoto.current = index; }}
-                onDrop={() => {
-                  if (draggedPhoto.current != null) movePhoto(draggedPhoto.current, index);
+                onDrop={(slot) => {
+                  if (draggedPhoto.current != null) movePhotoToSlot(draggedPhoto.current, slot);
                   draggedPhoto.current = null;
                 }}
               />
@@ -1010,13 +1022,14 @@ function PhotoCard({
   onReorder: (from: number, to: number) => void;
   onLabelChange: (label: PhotoItem["label"]) => void;
   onDragStart: () => void;
-  onDrop: () => void;
+  onDrop: (slot: number) => void;
 }) {
   const dragTimer = useRef<number | null>(null);
   const dragTarget = useRef<HTMLDivElement | null>(null);
   const startPoint = useRef<{ x: number; y: number } | null>(null);
   const dropIndex = useRef<number | null>(null);
   const [touchDragging, setTouchDragging] = useState(false);
+  const [hoverSlot, setHoverSlot] = useState<number | null>(null);
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     if (e.pointerType === "mouse") return;
@@ -1062,8 +1075,18 @@ function PhotoCard({
       data-photo-index={index}
       draggable
       onDragStart={onDragStart}
-      onDragOver={(e) => e.preventDefault()}
-      onDrop={onDrop}
+      onDragOver={(e) => {
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        setHoverSlot(e.clientX < rect.left + rect.width / 2 ? index : index + 1);
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        onDrop(e.clientX < rect.left + rect.width / 2 ? index : index + 1);
+        setHoverSlot(null);
+      }}
+      onDragEnd={() => setHoverSlot(null)}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -1071,6 +1094,7 @@ function PhotoCard({
       className={`card flex-none w-44 snap-start overflow-hidden relative${touchDragging ? " opacity-60 scale-95" : ""}`}
       style={{ touchAction: touchDragging ? "none" : "pan-x" }}
     >
+      {hoverSlot === index && <div className="absolute left-0 top-0 bottom-0 w-1 rounded-full bg-[var(--accent)] z-10" />}
       <div className="aspect-square relative">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={photo.previewUrl} alt={photo.label ?? `Photo ${index + 1}`} className="absolute inset-0 w-full h-full object-cover" draggable={false} />
