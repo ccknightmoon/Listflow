@@ -1447,7 +1447,16 @@ export default function BatchUploadPage() {
 
     setListingAll(false);
     setListingAllProgress(null);
-    if (successCount > 0) setTimeout(() => router.push("/store"), 1500);
+    const failedCount = indices.length - successCount;
+    if (failedCount > 0) {
+      setError(
+        successCount > 0
+          ? `${successCount} item${successCount === 1 ? "" : "s"} listed. ${failedCount} failed and can be retried below.`
+          : `None of the ${failedCount} selected items listed. Review the errors and retry below.`
+      );
+    } else if (successCount > 0) {
+      setTimeout(() => router.push("/store"), 1500);
+    }
   }
 
   // Items still open for bulk editing -- once a draft is saved (draftIds[i]
@@ -2024,17 +2033,17 @@ export default function BatchUploadPage() {
                     ) : (
                       <RotateCw className="w-4 h-4" />
                     )}
-                    {failedListingCount > 0 && (
-                      <button
-                        onClick={() => void handleRetryFailedListings()}
-                        disabled={listingAll}
-                        className="btn w-full"
-                      >
-                        {listingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCw className="w-4 h-4" />}
-                        {listingAll ? "Retrying listings..." : `Retry failed listings (${failedListingCount})`}
-                      </button>
-                    )}
                     {anyRetrying ? "Retrying..." : `Retry failed (${failedCount})`}
+                  </button>
+                )}
+                {failedListingCount > 0 && (
+                  <button
+                    onClick={() => void handleRetryFailedListings()}
+                    disabled={listingAll}
+                    className="btn w-full"
+                  >
+                    {listingAll ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCw className="w-4 h-4" />}
+                    {listingAll ? "Retrying listings..." : `Retry failed listings (${failedListingCount})`}
                   </button>
                 )}
               </div>

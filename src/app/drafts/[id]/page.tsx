@@ -69,6 +69,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [deleting, setDeleting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [listing, setListing] = useState(false);
+  const [showPublishReview, setShowPublishReview] = useState(false);
   const [listingUrl, setListingUrl] = useState<string | null>(null);
   const [justListed, setJustListed] = useState(false);
   const [suggesting, setSuggesting] = useState(false);
@@ -318,24 +319,34 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  function getDraftPayload() {
+    return {
+      title, brand, color, size, condition, flaws,
+      suggestedPrice: price ? Number(price) : null,
+      costBasis: cost ? Number(cost) : null,
+      customSku, itemType, style, material, theme,
+      sleeveLength, neckline, fit, pattern, description,
+      vintage, character, characterFamily, yearManufactured, season,
+      storeCategoryId, storeCategoryName,
+      shippingMode,
+      isHeavy: shippingMode === "buyer_pays",
+      shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
+    };
+  }
+
+  async function saveDraft(extra: Record<string, unknown> = {}) {
+    await apiFetch(`/api/drafts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...getDraftPayload(), ...extra }),
+    });
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaved(false);
     try {
-      await apiFetch(`/api/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title, brand, color, size, condition, flaws,
-          suggestedPrice: price ? Number(price) : null,
-          costBasis: cost ? Number(cost) : null,
-          customSku, itemType, style, material, theme,
-          sleeveLength, neckline, fit, pattern, description,
-          vintage, character, characterFamily, yearManufactured, season,
-          storeCategoryId, storeCategoryName,
-          shippingMode, isHeavy: shippingMode === "buyer_pays", shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
-        }),
-      });
+      await saveDraft();
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch (err) {
@@ -358,32 +369,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       setError(`Before listing: ${readiness.blockers.join(" • ")}`);
       return;
     }
-    if (!priceNum) {
-      if (!confirm("No price set. Continue listing anyway?")) return;
-    } else if (priceNum >= 200) {
-      if (!confirm(`List at $${priceNum.toFixed(2)}? Make sure that's the right price.`)) return;
-    }
+    setShowPublishReview(true);
+  }
+
+  async function handlePublish() {
     setListing(true);
+    setShowPublishReview(false);
     setError(null);
     try {
       // Auto-save current form values first so the listing API uses the latest data.
       // The listing call reads the draft back from the database, so if this
       // save silently failed, it would previously go on to list whatever
       // stale data was already there with no warning at all.
-      await apiFetch(`/api/drafts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title, brand, color, size, condition, flaws,
-          suggestedPrice: price ? Number(price) : null,
-          costBasis: cost ? Number(cost) : null,
-          customSku, itemType, style, material, theme,
-          sleeveLength, neckline, fit, pattern, description,
-          vintage, character, characterFamily, yearManufactured, season,
-          storeCategoryId, storeCategoryName,
-          shippingMode, isHeavy: shippingMode === "buyer_pays", shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
-        }),
-      });
+      await saveDraft();
 
       const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; url?: string; listingId?: string; storeCategoryWarning?: string }>("/api/ebay/list", {
         method: "POST",
@@ -394,19 +392,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error ?? "Failed to list"); }
       // Save all form values + ebay_listing_id together so nothing gets wiped
       if (data.listingId) {
-        await apiFetch(`/api/drafts/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            title, brand, color, size, condition, flaws,
-            suggestedPrice: price ? Number(price) : null,
-            costBasis: cost ? Number(cost) : null,
-            customSku, itemType, style, material, theme,
-            sleeveLength, neckline, fit, pattern, description,
-            storeCategoryId, storeCategoryName,
-            ebayListingId: String(data.listingId),
-          }),
-        });
+        await saveDraft({ ebayListingId: String(data.listingId) });
       }
       setListingUrl(data.url ?? null);
       setJustListed(true);
@@ -831,6 +817,43 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           >
             <X className="w-6 h-6" />
           </button>
+        </div>
+      )}
+
+      {showPublishReview && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-4 sm:items-center">
+          <div className="card w-full max-w-md p-4" role="dialog" aria-modal="true" aria-labelledby="publish-review-title">
+            <div className="flex items-center justify-between mb-3">
+              <h2 id="publish-review-title" className="text-lg font-medium">Review before publishing</h2>
+              <button type="button" onClick={() => setShowPublishReview(false)} aria-label="Close publish review" className="p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex gap-3 mb-4">
+              {photoUrls[0] && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photoUrls[0]} alt="" className="w-20 h-20 rounded-lg object-cover" />
+              )}
+              <div className="min-w-0">
+                <p className="font-medium truncate">{title || "Untitled listing"}</p>
+                <p className="text-sm text-[var(--text-secondary)]">{photoUrls.length} photo{photoUrls.length === 1 ? "" : "s"}</p>
+                <p className="text-sm font-medium">${price ? Number(price).toFixed(2) : "No price"}</p>
+              </div>
+            </div>
+            <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "var(--glass)" }}>
+              <p><strong>Condition:</strong> {condition || "Not set"}</p>
+              <p><strong>Shipping:</strong> {shippingMode === "free" ? "Free shipping" : shippingMode === "calculated" ? "Calculated shipping" : `Buyer pays${shippingCost ? ` ($${Number(shippingCost).toFixed(2)})` : ""}`}</p>
+              {cost && <p><strong>Cost basis:</strong> ${Number(cost).toFixed(2)}</p>}
+              {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowPublishReview(false)} className="btn flex-1">Back to edit</button>
+              <button type="button" onClick={() => void handlePublish()} disabled={listing} className="btn btn-primary flex-1">
+                {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {listing ? "Publishing..." : "Publish on eBay"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

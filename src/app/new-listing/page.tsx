@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Undo2,
+  X,
 } from "lucide-react";
 
 import { Condition, PriceSuggestion } from "@/lib/pricing";
@@ -102,6 +103,7 @@ export default function NewListingPage() {
   const [savedDraftId, setSavedDraftId] = useState<string | null>(null);
   const [photoUploadWarning, setPhotoUploadWarning] = useState<string | null>(null);
   const [listStatus, setListStatus] = useState<"idle" | "listing" | "listed" | "error">("idle");
+  const [showPublishReview, setShowPublishReview] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [missingAspectsWarning, setMissingAspectsWarning] = useState<string[] | null>(null);
   const [storeCategoryWarning, setStoreCategoryWarning] = useState<string | null>(null);
@@ -471,9 +473,12 @@ export default function NewListingPage() {
       return;
     }
     const finalPrice = result?.suggestedPrice ?? (customPrice ? Number(customPrice) : null);
-    if (!window.confirm(`List "${title}" on eBay for $${finalPrice?.toFixed(2)} with ${photos.length} photo${photos.length === 1 ? "" : "s"} and ${shippingMode} shipping?`)) {
-      return;
-    }
+    setShowPublishReview(true);
+  }
+
+  async function handlePublish() {
+    const finalPrice = result?.suggestedPrice ?? (customPrice ? Number(customPrice) : null);
+    setShowPublishReview(false);
     setListStatus("listing");
     setListError(null);
     setNeedsConnect(false);
@@ -678,6 +683,43 @@ export default function NewListingPage() {
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "var(--danger)" }}>
           {error}
+        </div>
+      )}
+
+      {showPublishReview && (
+        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-4 sm:items-center">
+          <div className="card w-full max-w-md p-4" role="dialog" aria-modal="true" aria-labelledby="publish-review-title">
+            <div className="flex items-center justify-between mb-3">
+              <h2 id="publish-review-title" className="text-lg font-medium">Review before publishing</h2>
+              <button type="button" onClick={() => setShowPublishReview(false)} aria-label="Close publish review" className="p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex gap-3 mb-4">
+              {photos[0]?.previewUrl && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={photos[0].previewUrl} alt="" className="w-20 h-20 rounded-lg object-cover" />
+              )}
+              <div className="min-w-0">
+                <p className="font-medium truncate">{title || "Untitled listing"}</p>
+                <p className="text-sm text-[var(--text-secondary)]">{photos.length} photo{photos.length === 1 ? "" : "s"}</p>
+                <p className="text-sm font-medium">${result?.suggestedPrice == null && !customPrice ? "No price" : (result?.suggestedPrice ?? Number(customPrice)).toFixed(2)}</p>
+              </div>
+            </div>
+            <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "var(--glass)" }}>
+              <p><strong>Condition:</strong> {condition || "Not set"}</p>
+              <p><strong>Shipping:</strong> {shippingMode === "free" ? "Free shipping" : shippingMode === "calculated" ? "Calculated shipping" : `Buyer pays${shippingCost ? ` ($${Number(shippingCost).toFixed(2)})` : ""}`}</p>
+              {cost && <p><strong>Cost basis:</strong> ${Number(cost).toFixed(2)}</p>}
+              {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowPublishReview(false)} className="btn flex-1">Back to edit</button>
+              <button type="button" onClick={() => void handlePublish()} disabled={listStatus === "listing"} className="btn btn-primary flex-1">
+                {listStatus === "listing" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {listStatus === "listing" ? "Publishing..." : "Publish on eBay"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
