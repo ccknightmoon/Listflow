@@ -82,8 +82,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [photoUndo, setPhotoUndo] = useState<string[] | null>(null);
-  const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [dropIdx, setDropIdx] = useState<number | null>(null);
   const [zoomedPhoto, setZoomedPhoto] = useState<string | null>(null);
   const [refreshingPrice, setRefreshingPrice] = useState(false);
   const [missingAspectsWarning, setMissingAspectsWarning] = useState<string[] | null>(null);
@@ -105,8 +103,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [suggestingStoreCategory, setSuggestingStoreCategory] = useState(false);
   const autoSuggestedStoreCategoryRef = useRef(false);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
-  const dragIdxRef = useRef<number | null>(null);
-  const photoRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   const [title, setTitle] = useState("");
   const [brand, setBrand] = useState("");
@@ -584,44 +580,16 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  function onPhotoPDown(e: React.PointerEvent, idx: number) {
+  function onPhotoPDown(e: React.PointerEvent) {
     pointerStart.current = { x: e.clientX, y: e.clientY };
-    dragIdxRef.current = idx;
-    setDragIdx(idx);
-    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
   }
 
-  function onPhotoPMove(e: React.PointerEvent) {
-    if (dragIdxRef.current === null) return;
-    e.preventDefault();
-    for (let i = 0; i < photoRefs.current.length; i++) {
-      const el = photoRefs.current[i];
-      if (!el) continue;
-      const rect = el.getBoundingClientRect();
-      if (e.clientX >= rect.left && e.clientX <= rect.right) {
-        setDropIdx(i);
-        return;
-      }
-    }
-  }
-
-  async function onPhotoPUp(e: React.PointerEvent, url: string) {
+  function onPhotoPUp(e: React.PointerEvent, url: string) {
     const start = pointerStart.current;
     const moved = start && (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8);
-    const currentDrag = dragIdxRef.current;
-    dragIdxRef.current = null;
-
-    if (!moved) {
-      setZoomedPhoto(url);
-    } else if (currentDrag !== null && dropIdx !== null && currentDrag !== dropIdx) {
-      const next = [...photoUrls];
-      const [item] = next.splice(currentDrag, 1);
-      next.splice(dropIdx, 0, item);
-      await savePhotoUrls(next, photoUrls);
-    }
-
-    setDragIdx(null);
-    setDropIdx(null);
+    // Let the horizontal scroller handle swipes. Only a stationary tap opens
+    // the larger preview, so browsing photos never accidentally activates it.
+    if (!moved) setZoomedPhoto(url);
     pointerStart.current = null;
   }
 
@@ -779,15 +747,13 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               </button>
             )}
           </div>
-          <div className="flex gap-2 overflow-x-auto pb-2 -mx-5 px-5 snap-x snap-mandatory">
+          <div className="flex gap-2 overflow-x-auto overscroll-x-contain pb-2 -mx-5 px-5 snap-x snap-mandatory">
           {photoUrls.map((url, i) => (
             <div
               key={i}
-              ref={(el) => { photoRefs.current[i] = el; }}
-              className={`relative flex-shrink-0 rounded-xl overflow-hidden cursor-grab select-none transition-all snap-start${dragIdx === i ? " opacity-40 scale-95" : ""}${dropIdx === i && dragIdx !== i ? " ring-2 ring-[var(--accent)]" : ""}`}
-              style={{ width: 184, height: 184, touchAction: "none" }}
-              onPointerDown={(e) => onPhotoPDown(e, i)}
-              onPointerMove={onPhotoPMove}
+              className="relative flex-shrink-0 rounded-xl overflow-hidden cursor-pointer select-none snap-start"
+              style={{ width: 184, height: 184, touchAction: "pan-x" }}
+              onPointerDown={onPhotoPDown}
               onPointerUp={(e) => onPhotoPUp(e, url)}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
