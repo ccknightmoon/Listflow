@@ -13,6 +13,30 @@ import { setListingStoreCategory } from "@/lib/ebay-store-categories";
 
 export const runtime = "nodejs";
 
+interface EbayApiError {
+  errorId?: number;
+  message?: string;
+  longMessage?: string;
+  parameters?: Array<{ name?: string; value?: string }>;
+}
+
+// Every "why did the listing fail" message in this route ultimately comes
+// from this shape. eBay's `parameters` array is where the ACTUAL rejected
+// field/value shows up -- e.g. for an "Invalid <ShippingPackage>" error
+// this is often the only place that says which package field or value was
+// the problem. Every failRelist(...) call in this route should describe
+// its error through this helper instead of hand-picking longMessage vs
+// message, so nothing here has to be diagnosed blind from a bare error
+// string again.
+function describeEbayError(err: EbayApiError | undefined, fallback: string): string {
+  const base = err?.longMessage ?? err?.message ?? fallback;
+  const params = err?.parameters?.filter((p) => p?.name || p?.value)
+    .map((p) => `${p.name ?? "?"}=${p.value ?? "?"}`)
+    .join(", ");
+  const idPart = err?.errorId != null ? ` (errorId ${err.errorId})` : "";
+  return params ? `${base}${idPart} [${params}]` : `${base}${idPart}`;
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
@@ -325,8 +349,8 @@ export async function POST(req: NextRequest) {
       publishResult = await publishOffer(offerId);
     }
     if (publishResult.status >= 400) {
-      const publishErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
-      const errMsg = publishErr?.longMessage ?? publishErr?.message ?? "";
+      const publishErr = (publishResult.data as { errors?: EbayApiError[] }).errors?.[0];
+      const errMsg = describeEbayError(publishErr, "");
 
       const errLower = errMsg.toLowerCase();
       const needsCategoryFallback =
@@ -401,10 +425,10 @@ export async function POST(req: NextRequest) {
       }
 
       if (publishResult.status >= 400) {
-        const retryErr = (publishResult.data as { errors?: Array<{ message?: string; longMessage?: string }> }).errors?.[0];
+        const retryErr = (publishResult.data as { errors?: EbayApiError[] }).errors?.[0];
         const initialCat = categoryId;
         const safecat = getSafeFallbackCategory(draft.title || "");
-        return failRelist({ error: `${retryErr?.longMessage ?? retryErr?.message ?? "Failed to publish listing"} [initial cat:${initialCat}, safe cat:${safecat}]` }, 400);
+        return failRelist({ error: `${describeEbayError(retryErr, "Failed to publish listing")} [initial cat:${initialCat}, safe cat:${safecat}]` }, 400);
       }
     }
 
