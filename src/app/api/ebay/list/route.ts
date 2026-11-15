@@ -8,7 +8,7 @@ import { invalidateAccessTokenCache } from "@/lib/ebay-oauth";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
-import { parseShippingMode } from "@/lib/shipping";
+import { parseShippingMode, isShippingPackageError, type PackageVariant } from "@/lib/shipping";
 import { setListingStoreCategory } from "@/lib/ebay-store-categories";
 
 export const runtime = "nodejs";
@@ -348,12 +348,31 @@ export async function POST(req: NextRequest) {
       await new Promise((r) => setTimeout(r, 1500));
       publishResult = await publishOffer(offerId);
     }
+    // "Invalid <ShippingPackage>" (errorId 25101): the item's declared
+    // package type isn't one this seller's shipping policy accepts. Re-send
+    // the inventory item with weight + dimensions only (no packageType) and
+    // publish the SAME offer again -- publishOffer reads the inventory item
+    // fresh, so no offer delete/recreate is needed. One retry, no loop.
+    let packageVariant: PackageVariant = "typed";
+    if (publishResult.status >= 400) {
+      const firstErr = (publishResult.data as { errors?: EbayApiError[] }).errors?.[0];
+      if (isShippingPackageError(firstErr)) {
+        const repack = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter, "untyped");
+        if (repack.status < 400) {
+          packageVariant = "untyped";
+          publishResult = await publishOffer(offerId);
+        }
+      }
+    }
     if (publishResult.status >= 400) {
       const publishErr = (publishResult.data as { errors?: EbayApiError[] }).errors?.[0];
       const errMsg = describeEbayError(publishErr, "");
 
       const errLower = errMsg.toLowerCase();
-      const needsCategoryFallback =
+      // Package errors are not category problems -- e.g. "The package weight
+      // is not valid or is missing" contains "missing" and used to send a
+      // shipping problem down the category/condition fallback below.
+      const needsCategoryFallback = !isShippingPackageError(publishErr) && (
         errLower.includes("condition") ||
         errLower.includes("item specific") ||
         errLower.includes("missing") ||
@@ -361,7 +380,7 @@ export async function POST(req: NextRequest) {
         errLower.includes("required") ||
         errLower.includes("not found") ||
         errLower.includes("product not found") ||
-        errLower.includes("cannot publish");
+        errLower.includes("cannot publish"));
 
       if (needsCategoryFallback) {
         // categoryId is immutable on an existing offer — delete and recreate with safe clothing category.
@@ -403,7 +422,7 @@ export async function POST(req: NextRequest) {
         const conditionsToTry = getConditionCandidates(draft.condition, draft.title || "");
 
         for (const tryCondition of conditionsToTry) {
-          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter);
+          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter, packageVariant);
           if (upsertResult.status >= 400) continue;
           missingRequiredAspects = upsertResult.missingRequiredAspects ?? missingRequiredAspects;
           // Same try-then-retry-once-on-failure treatment as the primary

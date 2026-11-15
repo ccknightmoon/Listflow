@@ -33,22 +33,23 @@ const WEIGHT_BANDS: WeightBand[] = [
 // Rough average weight, in pounds, for one of this item at a "Medium" size —
 // deliberately approximate. Order matters: more specific/heavier terms are
 // checked before generic ones so e.g. "denim jacket" matches jacket-weight
-// terms, not jeans.
+// terms, not jeans. Every pattern also accepts a plural ("pants",
+// "boots", "dresses") -- \bpant\b alone never matched "pants".
 const ITEM_TYPE_WEIGHTS: Array<{ re: RegExp; lb: number }> = [
-  { re: /\b(boots?)\b/i, lb: 3.2 },
-  { re: /\b(coat|parka|puffer|overcoat|trench|winter jacket)\b/i, lb: 2.6 },
-  { re: /\b(jacket|blazer|bomber|windbreaker)\b/i, lb: 1.5 },
-  { re: /\b(hoodie|sweatshirt)\b/i, lb: 1.3 },
-  { re: /\b(sweater|cardigan|knit)\b/i, lb: 1.0 },
-  { re: /\b(jeans|denim)\b/i, lb: 1.5 },
-  { re: /\b(pant|trouser|cargo|chino|jogger|sweatpant)\b/i, lb: 1.0 },
-  { re: /\b(shoe|sneaker|loafer|heel|flat|sandal)\b/i, lb: 1.8 },
-  { re: /\b(handbag|purse|tote|backpack|satchel|crossbody)\b/i, lb: 1.2 },
-  { re: /\b(dress|gown|sundress)\b/i, lb: 0.8 },
-  { re: /\b(skirt)\b/i, lb: 0.5 },
-  { re: /\b(shorts)\b/i, lb: 0.6 },
-  { re: /\b(polo|blouse|button-up|button-down|henley)\b/i, lb: 0.5 },
-  { re: /\b(shirt|tee|t-shirt|top)\b/i, lb: 0.4 },
+  { re: /\b(boots?)(?:e?s)?\b/i, lb: 3.2 },
+  { re: /\b(coat|parka|puffer|overcoat|trench|winter jacket)(?:e?s)?\b/i, lb: 2.6 },
+  { re: /\b(jacket|blazer|bomber|windbreaker)(?:e?s)?\b/i, lb: 1.5 },
+  { re: /\b(hoodie|sweatshirt)(?:e?s)?\b/i, lb: 1.3 },
+  { re: /\b(sweater|cardigan|knit)(?:e?s)?\b/i, lb: 1.0 },
+  { re: /\b(jeans|denim)(?:e?s)?\b/i, lb: 1.5 },
+  { re: /\b(pant|trouser|cargo|chino|jogger|sweatpant)(?:e?s)?\b/i, lb: 1.0 },
+  { re: /\b(shoe|sneaker|loafer|heel|flat|sandal)(?:e?s)?\b/i, lb: 1.8 },
+  { re: /\b(handbag|purse|tote|backpack|satchel|crossbody)(?:e?s)?\b/i, lb: 1.2 },
+  { re: /\b(dress|gown|sundress)(?:e?s)?\b/i, lb: 0.8 },
+  { re: /\b(skirt)(?:e?s)?\b/i, lb: 0.5 },
+  { re: /\b(shorts)(?:e?s)?\b/i, lb: 0.6 },
+  { re: /\b(polo|blouse|button-up|button-down|henley)(?:e?s)?\b/i, lb: 0.5 },
+  { re: /\b(shirt|tee|t-shirt|top)(?:e?s)?\b/i, lb: 0.4 },
 ];
 const DEFAULT_ITEM_LB = 0.8; // unknown item type — a middling clothing guess
 const PACKAGING_LB = 0.3; // mailer/box + label, added to every estimate
@@ -154,4 +155,68 @@ export function estimateIsHeavy(itemType?: string | null, material?: string | nu
 
 export function estimateShippingCost(isHeavy: boolean): number {
   return isHeavy ? 14 : 6.5;
+}
+
+// --- eBay inventory-item package details -----------------------------------
+//
+// Why this exists: eBay rejects publishOffer with errorId 25101
+// "Invalid <ShippingPackage>." (or "The package weight is not valid or is
+// missing") whenever the listing's fulfillment policy prices any service by
+// carrier rate -- and that includes "free shipping" policies created in
+// Seller Hub as calculated policies with a free first service. The app used
+// to attach package details ONLY in its own "calculated" mode, so a draft in
+// "free" mode on a calculated-type policy had no package at all (this is the
+// Sept 12 "BDG Pants" failure). Package details are harmless on flat-rate
+// policies, so they are now always sent.
+//
+// Two variants, tried in order by the publish route:
+//  - "typed": weight + dimensions + an eBay PackageTypeEnum value.
+//  - "untyped": weight + dimensions only. eBay forum reports show 25101 is
+//    also raised when the packageType isn't one the policy's shipping
+//    services accept, and that omitting packageType clears it. Used as the
+//    one automatic retry when the typed attempt is rejected.
+export type PackageVariant = "typed" | "untyped";
+
+export interface EbayPackageWeightAndSize {
+  packageType?: string;
+  weight: { value: number; unit: "OUNCE" };
+  dimensions: { length: number; width: number; height: number; unit: "INCH" };
+}
+
+// Whole ounces, rounded UP (never under-declare postage), minimum 1 oz.
+// Ounces instead of fractional pounds so eBay's pounds+ounces conversion
+// never sees a value like 0.74 lb.
+export function weightOunces(weightLb: number): number {
+  if (!Number.isFinite(weightLb) || weightLb <= 0) return 1;
+  return Math.max(1, Math.ceil(Math.round(weightLb * 16 * 1000) / 1000));
+}
+
+export function buildPackageWeightAndSize(
+  itemType?: string | null,
+  size?: string | null,
+  material?: string | null,
+  variant: PackageVariant = "typed",
+): EbayPackageWeightAndSize {
+  const weightLb = estimateWeightLb(itemType, size, material);
+  const pkg = estimatePackage(weightLb);
+  const dims = {
+    length: Math.max(1, Math.round(pkg.lengthIn)),
+    width: Math.max(1, Math.round(pkg.widthIn)),
+    height: Math.max(1, Math.round(pkg.heightIn)),
+    unit: "INCH" as const,
+  };
+  return {
+    ...(variant === "typed" ? { packageType: pkg.packageType } : {}),
+    weight: { value: weightOunces(weightLb), unit: "OUNCE" },
+    dimensions: dims,
+  };
+}
+
+// True when an eBay error is about the package declaration (type, weight
+// or size), i.e. the kind of rejection the "untyped" retry can fix.
+export function isShippingPackageError(err: { errorId?: number; message?: string; longMessage?: string } | undefined): boolean {
+  if (!err) return false;
+  if (err.errorId === 25101) return true;
+  const text = `${err.message ?? ""} ${err.longMessage ?? ""}`.toLowerCase();
+  return text.includes("shippingpackage") || text.includes("package weight") || text.includes("package dimension");
 }

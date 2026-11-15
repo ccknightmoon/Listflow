@@ -1,7 +1,7 @@
 import https from "node:https";
 import { getAccessToken } from "./ebay-oauth";
 import { getEbayContext } from "./ebay-request-context";
-import { estimateShipping, type ShippingMode } from "./shipping";
+import { buildPackageWeightAndSize, type PackageVariant, type ShippingMode } from "./shipping";
 
 export const CONDITION_MAP: Record<string, string> = {
   "New with tags": "NEW",
@@ -370,7 +370,14 @@ export async function upsertInventoryItem(sku: string, draft: {
   character_family?: string | null;
   year_manufactured?: string | null;
   season?: string | null;
-}, categoryId = "1059", conditionOverride?: string, shippingMode: ShippingMode = "free", storeFooter?: string | null) {
+}, categoryId = "1059", conditionOverride?: string,
+  // Kept for call-site compatibility; package details no longer depend on
+  // the shipping mode (see the packageWeightAndSize note below).
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _shippingMode: ShippingMode = "free",
+  storeFooter?: string | null,
+  packageVariant: PackageVariant = "typed",
+) {
   const aspects: Record<string, string[]> = {};
   aspects["Department"] = [getDepartment(draft.title || "")];
   // Derived from the actual size tag/title (see detectSizeType) rather than
@@ -494,24 +501,13 @@ export async function upsertInventoryItem(sku: string, draft: {
     body.conditionDescription = draft.flaws.slice(0, 1000);
   }
 
-  // "Calculated" shipping needs the item's declared weight + package
-  // dimensions on the inventory item itself — that's what eBay uses to quote
-  // each buyer a real per-order rate. Free/buyer-pays listings don't need
-  // this (their cost is fixed by the policy or the per-offer override), so
-  // it's only attached when it actually matters.
-  if (shippingMode === "calculated") {
-    const est = estimateShipping(draft.item_type, draft.size, draft.material);
-    body.packageWeightAndSize = {
-      packageType: est.package.packageType,
-      weight: { value: est.weightLb, unit: "POUND" },
-      dimensions: {
-        length: est.package.lengthIn,
-        width: est.package.widthIn,
-        height: est.package.heightIn,
-        unit: "INCH",
-      },
-    };
-  }
+  // Package weight/size is attached in EVERY shipping mode, not just the
+  // app's own "calculated" mode: a seller's "free shipping" policy in Seller
+  // Hub is often a calculated-type policy, and eBay then rejects publish with
+  // "Invalid <ShippingPackage>" if the item has no package declared. On
+  // flat-rate policies these fields are simply unused. See
+  // buildPackageWeightAndSize in src/lib/shipping.ts.
+  body.packageWeightAndSize = buildPackageWeightAndSize(draft.item_type, draft.size, draft.material, packageVariant);
 
   const result = await inventoryRequest("PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, body);
   return { ...result, missingRequiredAspects };
