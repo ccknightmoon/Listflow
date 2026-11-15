@@ -10,6 +10,7 @@ import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { parseShippingMode, isShippingPackageError, type PackageVariant } from "@/lib/shipping";
 import { setListingStoreCategory } from "@/lib/ebay-store-categories";
+import { assignSequentialSku } from "@/lib/sku-assign";
 
 export const runtime = "nodejs";
 
@@ -189,46 +190,44 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
-    // Auto-assign next sequential SKU if none set. The conditional update and
-    // unique constraint make concurrent assignments retry safely.
+    // Auto-assign the next sequential SKU if none is set. Safe under batch
+    // "List all": the DB's UNIQUE (user_id, custom_sku) decides who wins a
+    // number, losers back off and retry (see src/lib/sku-assign.ts).
     let assignedSku = (typeof requestCustomSku === "string" ? requestCustomSku.trim() : "") || (draft.custom_sku as string | null);
     if (!assignedSku) {
-      for (let attempt = 0; attempt < 5; attempt++) {
-        // Scans every one of this user's non-null SKUs (RLS already scopes
-        // this to one user, so the row count stays small) instead of
-        // sorting by custom_sku and taking the top 50 -- custom_sku is
-        // stored as text, so a DB-side text sort ranks "9" above "100",
-        // which could hand back a SKU that is already used, or lower than
-        // the real max, once a seller passes roughly 50-100 listings.
-        // Parsing every row as a number and taking the max in JS avoids
-        // the text-sort problem entirely.
-        const { data: maxRow } = await supabase
-          .from("drafts")
-          .select("custom_sku")
-          .not("custom_sku", "is", null);
-        const maxNum = (maxRow ?? [])
-          .map((r) => parseInt(r.custom_sku as string, 10))
-          .filter((n) => !isNaN(n))
-          .reduce((max, n) => (n > max ? n : max), 0);
-        const candidate = String(maxNum + 1 + attempt);
-        const { data: skuRow, error: skuError } = await supabase
-          .from("drafts")
-          .update({ custom_sku: candidate })
-          .eq("id", draftId)
-          .eq("user_id", auth.user.id)
-          .is("custom_sku", null)
-          .select("id")
-          .maybeSingle();
-        if (!skuError && skuRow) {
-          assignedSku = candidate;
-          break;
-        }
-        if (!skuError) continue;
-        if (skuError.code !== "23505") {
-          return NextResponse.json({ error: "Could not assign a SKU safely. Please try again." }, { status: 500 });
-        }
+      const userId = auth.user.id;
+      const skuOutcome = await assignSequentialSku({
+        // RLS scopes this to the signed-in user; the row count stays small.
+        // Parsed numerically in JS because custom_sku is text ("9" > "100").
+        readSkus: async () => {
+          const { data } = await supabase.from("drafts").select("custom_sku").not("custom_sku", "is", null);
+          return (data ?? []).map((r) => r.custom_sku as string | null);
+        },
+        tryClaim: async (candidate) => {
+          const { data: skuRow, error: skuError } = await supabase
+            .from("drafts")
+            .update({ custom_sku: candidate })
+            .eq("id", draftId)
+            .eq("user_id", userId)
+            .is("custom_sku", null)
+            .select("id")
+            .maybeSingle();
+          if (skuError) {
+            return skuError.code === "23505" ? { kind: "conflict" } : { kind: "error", message: skuError.message };
+          }
+          return skuRow ? { kind: "claimed" } : { kind: "already_set" };
+        },
+        readCurrent: async () => {
+          const { data } = await supabase.from("drafts").select("custom_sku").eq("id", draftId).eq("user_id", userId).maybeSingle();
+          return (data?.custom_sku as string | null) ?? null;
+        },
+      });
+      if (!skuOutcome.ok) {
+        return skuOutcome.reason === "error"
+          ? NextResponse.json({ error: "Could not assign a SKU safely. Please try again." }, { status: 500 })
+          : NextResponse.json({ error: skuOutcome.message }, { status: 409 });
       }
-      if (!assignedSku) return NextResponse.json({ error: "Could not assign a unique SKU. Please try again." }, { status: 409 });
+      assignedSku = skuOutcome.sku;
     }
     const autoSku = String(parseInt(draftId.replace(/-/g, "").slice(0, 8), 16) % 1000000);
     const sku = assignedSku;
