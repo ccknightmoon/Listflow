@@ -82,7 +82,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [reanalyzing, setReanalyzing] = useState(false);
   const [isHeavy, setIsHeavy] = useState(false);
   const [shippingCost, setShippingCost] = useState("");
-  const [shippingMode, setShippingMode] = useState<ShippingMode>("free");
+  const [shippingMode, setShippingMode] = useState<ShippingMode>("calculated");
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
   const [photoEditorLayout, setPhotoEditorLayout] = useState<"carousel" | "grid">("carousel");
   const photoScrollerRef = useRef<HTMLDivElement | null>(null);
@@ -170,7 +170,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         // ever needed for a draft not yet touched under the new behavior.
         const savedHeavy = localStorage.getItem(`heavy-${id}`);
         const savedShippingCost = localStorage.getItem(`shippingCost-${id}`);
-        const savedShippingMode = localStorage.getItem(`shippingMode-${id}`);
+        localStorage.removeItem(`shippingMode-${id}`); // pre-calculated-only leftover
         if (savedHeavy) {
           setIsHeavy(JSON.parse(savedHeavy));
         } else if (d.is_heavy != null) {
@@ -190,9 +190,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         } else if (d.shipping_cost != null) {
           setShippingCost(String(d.shipping_cost));
         }
-        setShippingMode(savedShippingMode === "calculated" || savedShippingMode === "buyer_pays" || savedShippingMode === "free"
-          ? savedShippingMode
-          : d.shipping_mode === "calculated" || d.shipping_mode === "buyer_pays" ? d.shipping_mode : (d.is_heavy ? "buyer_pays" : "free"));
+        // Calculated shipping only (Nov 15, 2026): older drafts saved as
+        // "free"/"buyer_pays" are shown -- and published -- as calculated.
+        setShippingMode("calculated");
         setTitle(str(d.title));
         setBrand(str(d.brand));
         setColor(str(d.color));
@@ -1007,7 +1007,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             </div>
             <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "var(--glass)" }}>
               <p><strong>Condition:</strong> {condition || "Not set"}</p>
-              <p><strong>Shipping:</strong> {shippingMode === "free" ? "Free shipping" : shippingMode === "calculated" ? "Calculated shipping" : `Buyer pays${shippingCost ? ` ($${Number(shippingCost).toFixed(2)})` : ""}`}</p>
+              <p><strong>Shipping:</strong> Calculated (buyer pays by location)</p>
               {cost && <p><strong>Cost basis:</strong> ${Number(cost).toFixed(2)}</p>}
               {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
             </div>
@@ -1366,38 +1366,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         </div>
         <div className="py-1">
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Shipping</label>
-          <select
-            className="input w-full"
-            value={shippingMode}
-            onChange={(e) => {
-              const mode = e.target.value as ShippingMode;
-              setShippingMode(mode);
-              setIsHeavy(mode === "buyer_pays");
-              localStorage.setItem(`shippingMode-${id}`, mode);
-              if (mode !== "buyer_pays") {
-                setShippingCost("");
-                localStorage.removeItem(`shippingCost-${id}`);
-              }
-            }}
-          >
-            <option value="free">Free shipping (you pay)</option>
-            <option value="calculated">Calculated shipping (buyer pays based on location)</option>
-            <option value="buyer_pays">Flat-rate shipping (legacy heavy-item option)</option>
-          </select>
-          {shippingMode === "buyer_pays" && (
-            <div className="flex items-center gap-1 ml-1">
-              <span className="text-sm text-[var(--text-secondary)]">— shipping $</span>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="0.00"
-                value={shippingCost}
-                onChange={(e) => { setShippingCost(e.target.value); localStorage.setItem(`shippingCost-${id}`, e.target.value); }}
-                className="input w-20 text-sm py-0.5 px-1.5"
-              />
-            </div>
-          )}
+          <p className="input w-full bg-transparent">
+            Calculated shipping — buyer pays the real rate for their location
+          </p>
         </div>
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Flaws</label>

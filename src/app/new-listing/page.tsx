@@ -119,7 +119,9 @@ export default function NewListingPage() {
   const [needsReconnect, setNeedsReconnect] = useState(false);
   const [isHeavy, setIsHeavy] = useState(false);
   const [shippingCost, setShippingCost] = useState("");
-  const [shippingMode, setShippingMode] = useState<ShippingMode>("free");
+  // Calculated shipping only (Nov 15, 2026) -- kept as state so the existing
+  // autosave/publish payloads don't change shape.
+  const [shippingMode, setShippingMode] = useState<ShippingMode>("calculated");
   const [customPrice, setCustomPrice] = useState("");
   // Cost basis -- what the seller paid to acquire this item. Purely
   // manual (nothing in the app can infer it), optional, used only by the
@@ -657,7 +659,7 @@ export default function NewListingPage() {
     setNeedsReconnect(false);
     setIsHeavy(false);
     setShippingCost("");
-    setShippingMode("free");
+    setShippingMode("calculated");
     setCustomPrice("");
     setCost("");
     setBrand("");
@@ -768,20 +770,9 @@ export default function NewListingPage() {
 
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Shipping</label>
-          <select
-            className="input w-full"
-            value={shippingMode}
-            onChange={(e) => {
-              const mode = e.target.value as ShippingMode;
-              setShippingMode(mode);
-              setIsHeavy(mode === "buyer_pays");
-              if (mode !== "buyer_pays") setShippingCost("");
-            }}
-          >
-            <option value="free">Free shipping (you pay)</option>
-            <option value="calculated">Calculated shipping (buyer pays based on location)</option>
-            <option value="buyer_pays">Flat-rate shipping (legacy heavy-item option)</option>
-          </select>
+          <p className="input w-full bg-transparent" aria-live="polite">
+            Calculated shipping — buyer pays the real rate for their location
+          </p>
         </div>
 
         <textarea
@@ -834,7 +825,7 @@ export default function NewListingPage() {
             </div>
             <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "var(--glass)" }}>
               <p><strong>Condition:</strong> {condition || "Not set"}</p>
-              <p><strong>Shipping:</strong> {shippingMode === "free" ? "Free shipping" : shippingMode === "calculated" ? "Calculated shipping" : `Buyer pays${shippingCost ? ` ($${Number(shippingCost).toFixed(2)})` : ""}`}</p>
+              <p><strong>Shipping:</strong> Calculated (buyer pays by location)</p>
               {cost && <p><strong>Cost basis:</strong> ${Number(cost).toFixed(2)}</p>}
               {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
             </div>

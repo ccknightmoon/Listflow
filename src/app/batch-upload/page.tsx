@@ -260,8 +260,10 @@ export default function BatchUploadPage() {
   const [customSkus, setCustomSkus] = useState<Record<number, string>>({});
   const [heavyItems, setHeavyItems] = useState<Record<number, boolean>>({});
   const [shippingCosts, setShippingCosts] = useState<Record<number, string>>({});
-  const [shippingModes, setShippingModes] = useState<Record<number, ShippingMode>>({});
-  const [defaultShippingMode, setDefaultShippingMode] = useState<ShippingMode>("free");
+  const [shippingModes] = useState<Record<number, ShippingMode>>({});
+  // Calculated shipping only (Nov 15, 2026). shippingModes stays empty now
+  // that the per-item picker is gone, so every item resolves to this.
+  const [defaultShippingMode, setDefaultShippingMode] = useState<ShippingMode>("calculated");
   const [listingAll, setListingAll] = useState(false);
   const [batchPaused, setBatchPaused] = useState(false);
   const [batchCancelled, setBatchCancelled] = useState(false);
@@ -378,7 +380,7 @@ export default function BatchUploadPage() {
         setDraftIds(snapshot.draftIds);
         if (snapshot.heavyItems) setHeavyItems(snapshot.heavyItems);
         if (snapshot.shippingCosts) setShippingCosts(snapshot.shippingCosts);
-        if (snapshot.shippingModes) setShippingModes(snapshot.shippingModes as Record<number, ShippingMode>);
+        // Recovered per-item shipping modes are ignored: calculated-only.
         if (snapshot.storeCategoryChoice) setStoreCategoryChoice(snapshot.storeCategoryChoice);
         setRecoveredBatch(true);
       }
@@ -2703,37 +2705,12 @@ export default function BatchUploadPage() {
                       >
                         {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <select
-                        className="tap text-xs font-semibold rounded-full px-3 py-1.5 border"
+                      <span
+                        className="text-xs font-semibold rounded-full px-3 py-1.5 border"
                         style={{ background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-secondary)" }}
-                        value={shippingModes[i] ?? defaultShippingMode}
-                        disabled={saveStatus[i] === "saved"}
-                        onChange={(e) => {
-                          const mode = e.target.value as ShippingMode;
-                          setShippingModes((prev) => ({ ...prev, [i]: mode }));
-                          setHeavyItems((prev) => ({ ...prev, [i]: mode === "buyer_pays" }));
-                          if (mode !== "buyer_pays") setShippingCosts((prev) => { const n = { ...prev }; delete n[i]; return n; });
-                        }}
                       >
-                        <option value="free">Free shipping</option>
-                        <option value="calculated">Calculated shipping</option>
-                        <option value="buyer_pays">Flat-rate shipping</option>
-                      </select>
-                      {(shippingModes[i] ?? defaultShippingMode) === "buyer_pays" && (
-                        <div className="relative">
-                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs" style={{ color: "var(--text-tertiary)" }}>$</span>
-                          <input
-                            type="number"
-                            min="0"
-                            step="0.01"
-                            placeholder="Shipping"
-                            value={shippingCosts[i] ?? ""}
-                            disabled={saveStatus[i] === "saved"}
-                            onChange={(e) => setShippingCosts((prev) => ({ ...prev, [i]: e.target.value }))}
-                            className="input w-24 text-xs py-1.5 pl-5 pr-2 rounded-full"
-                          />
-                        </div>
-                      )}
+                        Calculated shipping
+                      </span>
                     </div>
                     <div className="grid grid-cols-3 gap-1 mt-2">
                       <div>

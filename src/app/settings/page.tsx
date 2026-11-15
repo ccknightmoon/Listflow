@@ -8,7 +8,6 @@ import {
   Check,
   Loader2,
   PackageCheck,
-  Gift,
   Sun,
   Moon,
   MonitorSmartphone,
@@ -29,8 +28,6 @@ import {
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
 import { EBAY_STANDARD_FEE_PERCENT } from "@/lib/ebay-fees";
-
-type DefaultShippingMode = "free" | "calculated";
 
 // Converts between the server's stored UTC hour (app_settings.
 // notification_email_hour_utc, an integer 0-23) and an <input type="time">
@@ -59,10 +56,7 @@ interface EbayPolicy {
 }
 
 export default function SettingsPage() {
-  const [mode, setMode] = useState<DefaultShippingMode | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Store description footer — appended automatically to every listing's
@@ -152,7 +146,6 @@ export default function SettingsPage() {
     fetch("/api/settings")
       .then((r) => r.json())
       .then((data) => {
-        setMode(data.defaultShippingMode === "calculated" ? "calculated" : "free");
         const f = data.storeDescriptionFooter ?? "";
         setFooter(f);
         setSavedFooter(f);
@@ -402,30 +395,6 @@ export default function SettingsPage() {
     }
   }
 
-  async function handleSelect(next: DefaultShippingMode) {
-    if (next === mode || saving) return;
-    const prev = mode;
-    setMode(next);
-    setSaving(true);
-    setSaved(false);
-    setError(null);
-    try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ defaultShippingMode: next }),
-      });
-      if (!res.ok) throw new Error("Failed to save");
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch {
-      setMode(prev);
-      setError("Could not save — try again.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
   function handleThemeSelect(next: Theme) {
     if (next === theme) return;
     setTheme(next);
@@ -613,8 +582,8 @@ export default function SettingsPage() {
 
       <SettingsSection
         delay="d2"
-        title="Default shipping"
-        description="Every new listing (New Listing, Batch Upload, Drafts) starts with this choice automatically, so you don&apos;t have to set it item by item. You can still switch an individual item on its own screen — this just sets what it starts as."
+        title="Shipping"
+        description="Every listing (New Listing, Batch Upload, Drafts) uses calculated shipping — the buyer pays the real rate for their location."
         icon={Truck}
       >
         {loading ? (
@@ -624,46 +593,30 @@ export default function SettingsPage() {
         ) : (
           <div className="flex flex-col gap-3">
             <OptionCard
-              icon={Gift}
-              title="Free shipping"
-              description="Shipping cost is estimated from the item and baked into the price. Buyer sees $0 shipping."
-              selected={mode === "free"}
-              onClick={() => handleSelect("free")}
-            />
-            <OptionCard
               icon={PackageCheck}
               title="Calculated shipping"
-              description="eBay quotes each buyer their own real shipping rate at checkout, based on the item's estimated weight/package size and the buyer's zip code — not a fixed amount."
-              selected={mode === "calculated"}
-              onClick={() => handleSelect("calculated")}
+              description="eBay quotes each buyer their own real shipping rate at checkout, based on the item's package weight/size and the buyer's zip code. This is the only shipping option Listflow uses."
+              selected
+              onClick={() => {}}
             />
           </div>
         )}
 
-        {mode === "calculated" && !loading && (
+        {!loading && (
           <div
             className="card p-3 mt-3 text-xs text-[var(--text-secondary)]"
             style={{ background: "var(--warning-bg)", borderColor: "var(--warning-border)" }}
           >
-            Calculated shipping needs a &quot;Calculated: cost varies by buyer
-            location&quot; shipping policy set up in eBay Seller Hub, picked below
-            under eBay Connection. If that hasn&apos;t been set up yet, listings
-            will show an error when you try to list until it is.
+            Needs a &quot;Calculated: cost varies by buyer location&quot; shipping
+            policy in eBay Seller Hub (Account → Business policies). Listflow picks
+            it automatically when you list (your choice under eBay Connection below
+            wins if you set one). If none exists, listing stops with an error
+            explaining how to create it.
           </div>
         )}
 
         {error && (
           <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{error}</p>
-        )}
-        {saving && (
-          <p className="text-xs text-[var(--text-secondary)] flex items-center gap-1 mt-2">
-            <Loader2 className="w-3 h-3 animate-spin" /> Saving...
-          </p>
-        )}
-        {saved && (
-          <p className="text-xs flex items-center gap-1 mt-2" style={{ color: "var(--success)" }}>
-            <Check className="w-3 h-3" /> Saved
-          </p>
         )}
       </SettingsSection>
 
@@ -793,35 +746,21 @@ export default function SettingsPage() {
             ) : (
               <>
                 <PolicyPicker
-                  label="Free shipping policy"
-                  value={shippingFreeId}
-                  options={fulfillmentPolicies}
-                  expectedCostType="FLAT_RATE"
-                  onChange={(v) => { setShippingFreeId(v); savePolicies({ shippingFreeId: v }); }}
-                />
-                <PolicyPicker
-                  label="Buyer-pays shipping policy"
-                  value={shippingHeavyId}
-                  options={fulfillmentPolicies}
-                  expectedCostType="FLAT_RATE"
-                  onChange={(v) => { setShippingHeavyId(v); savePolicies({ shippingHeavyId: v }); }}
-                />
-                <PolicyPicker
                   label="Calculated shipping policy"
                   value={shippingCalculatedId}
                   options={fulfillmentPolicies}
                   expectedCostType="CALCULATED"
                   onChange={(v) => { setShippingCalculatedId(v); savePolicies({ shippingCalculatedId: v }); }}
                 />
-                {shippingCalculatedId && (shippingCalculatedId === shippingHeavyId || shippingCalculatedId === shippingFreeId) && (
+                {fulfillmentPolicies.length > 0 && !fulfillmentPolicies.some((p) => (p.costType ?? "").toUpperCase() === "CALCULATED") && (
                   <div
                     className="card p-3 text-xs"
                     style={{ background: "var(--warning-bg)", borderColor: "var(--warning-border)" }}
                   >
-                    Your Calculated shipping policy is set to the exact same eBay policy as another
-                    slot above. eBay listings with Calculated shipping need a real &ldquo;cost varies
-                    by buyer location&rdquo; policy — if you don&apos;t have one yet, create it in eBay
-                    Seller Hub (Account &rarr; Business Policies &rarr; Shipping), then pick it here.
+                    None of your eBay shipping policies use calculated shipping, so listing will fail.
+                    In eBay Seller Hub go to Account &rarr; Business policies &rarr; Create policy &rarr;
+                    Shipping, choose &ldquo;Calculated: cost varies by buyer location&rdquo;, tick
+                    &ldquo;Set as default&rdquo;, and save. Then reload this page.
                   </div>
                 )}
                 <PolicyPicker

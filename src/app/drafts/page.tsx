@@ -351,7 +351,7 @@ export default function DraftsPage() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               draftId: id,
-              shippingMode: draftInfo?.shipping_mode ?? (isHeavyItem ? "buyer_pays" : "free"),
+              shippingMode: "calculated", // calculated-only; the server enforces this too
               isHeavy: isHeavyItem,
               shippingCost: resolveShippingCost(id, draftInfo),
             }),
