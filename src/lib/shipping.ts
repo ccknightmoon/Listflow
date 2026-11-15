@@ -33,24 +33,59 @@ const WEIGHT_BANDS: WeightBand[] = [
 // Rough average weight, in pounds, for one of this item at a "Medium" size —
 // deliberately approximate. Order matters: more specific/heavier terms are
 // checked before generic ones so e.g. "denim jacket" matches jacket-weight
-// terms, not jeans. Every pattern also accepts a plural ("pants",
-// "boots", "dresses") -- \bpant\b alone never matched "pants".
-const ITEM_TYPE_WEIGHTS: Array<{ re: RegExp; lb: number }> = [
-  { re: /\b(boots?)(?:e?s)?\b/i, lb: 3.2 },
-  { re: /\b(coat|parka|puffer|overcoat|trench|winter jacket)(?:e?s)?\b/i, lb: 2.6 },
-  { re: /\b(jacket|blazer|bomber|windbreaker)(?:e?s)?\b/i, lb: 1.5 },
-  { re: /\b(hoodie|sweatshirt)(?:e?s)?\b/i, lb: 1.3 },
-  { re: /\b(sweater|cardigan|knit)(?:e?s)?\b/i, lb: 1.0 },
-  { re: /\b(jeans|denim)(?:e?s)?\b/i, lb: 1.5 },
-  { re: /\b(pant|trouser|cargo|chino|jogger|sweatpant)(?:e?s)?\b/i, lb: 1.0 },
-  { re: /\b(shoe|sneaker|loafer|heel|flat|sandal)(?:e?s)?\b/i, lb: 1.8 },
-  { re: /\b(handbag|purse|tote|backpack|satchel|crossbody)(?:e?s)?\b/i, lb: 1.2 },
-  { re: /\b(dress|gown|sundress)(?:e?s)?\b/i, lb: 0.8 },
-  { re: /\b(skirt)(?:e?s)?\b/i, lb: 0.5 },
-  { re: /\b(shorts)(?:e?s)?\b/i, lb: 0.6 },
-  { re: /\b(polo|blouse|button-up|button-down|henley)(?:e?s)?\b/i, lb: 0.5 },
-  { re: /\b(shirt|tee|t-shirt|top)(?:e?s)?\b/i, lb: 0.4 },
+// terms, not jeans. Every term also matches its plural ("pants", "boots",
+// "dresses"). Accessories were added Nov 2026 at the END of the list so
+// they never change how an existing clothing term matches.
+export const ITEM_TYPE_WEIGHT_TABLE: ReadonlyArray<{ terms: readonly string[]; lb: number }> = [
+  { terms: ["boot"], lb: 3.2 },
+  { terms: ["coat", "parka", "puffer", "overcoat", "trench", "winter jacket"], lb: 2.6 },
+  { terms: ["jacket", "blazer", "bomber", "windbreaker"], lb: 1.5 },
+  { terms: ["hoodie", "sweatshirt"], lb: 1.3 },
+  { terms: ["sweater", "cardigan", "knit"], lb: 1.0 },
+  { terms: ["jeans", "denim"], lb: 1.5 },
+  { terms: ["pant", "trouser", "cargo", "chino", "jogger", "sweatpant"], lb: 1.0 },
+  { terms: ["shoe", "sneaker", "loafer", "heel", "flat", "sandal"], lb: 1.8 },
+  { terms: ["handbag", "purse", "tote", "backpack", "satchel", "crossbody"], lb: 1.2 },
+  { terms: ["dress", "gown", "sundress"], lb: 0.8 },
+  { terms: ["skirt"], lb: 0.5 },
+  { terms: ["shorts"], lb: 0.6 },
+  { terms: ["polo", "blouse", "button-up", "button-down", "henley"], lb: 0.5 },
+  { terms: ["shirt", "tee", "t-shirt", "top"], lb: 0.4 },
+  // Accessories / other common resale items.
+  { terms: ["jumpsuit", "romper", "overall"], lb: 1.0 },
+  { terms: ["vest"], lb: 0.8 },
+  { terms: ["pajama", "pyjama", "robe"], lb: 0.7 },
+  { terms: ["legging", "swimsuit", "bikini", "swim trunk"], lb: 0.4 },
+  { terms: ["hat", "cap", "beanie", "scarf", "scarves", "glove", "mitten"], lb: 0.3 },
+  { terms: ["belt", "wallet", "sunglass", "watch"], lb: 0.4 },
+  { terms: ["sock", "tie", "bandana", "jewelry", "necklace", "bracelet", "earring", "ring"], lb: 0.2 },
 ];
+
+function escapeRe(t: string): string {
+  return t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+const ITEM_TYPE_WEIGHTS: Array<{ re: RegExp; lb: number }> = ITEM_TYPE_WEIGHT_TABLE.map((row) => ({
+  re: new RegExp(`\\b(${row.terms.map(escapeRe).join("|")})(?:e?s)?\\b`, "i"),
+  lb: row.lb,
+}));
+
+/** True when the text names an item type the weight table knows. */
+export function isKnownItemType(text?: string | null): boolean {
+  return Boolean(text && ITEM_TYPE_WEIGHTS.some((w) => w.re.test(text)));
+}
+
+/**
+ * Which text to estimate weight from: the AI's item type when it's one we
+ * recognize, otherwise the listing title (e.g. item type "Bottoms" but
+ * title "Levi's 501 Jeans"), otherwise null (= unknown item).
+ */
+export function resolveWeightItemType(itemType?: string | null, title?: string | null): string | null {
+  if (isKnownItemType(itemType)) return itemType ?? null;
+  if (isKnownItemType(title)) return title ?? null;
+  return null;
+}
+
 const DEFAULT_ITEM_LB = 0.8; // unknown item type — a middling clothing guess
 const PACKAGING_LB = 0.3; // mailer/box + label, added to every estimate
 
@@ -129,11 +164,17 @@ export interface ShippingEstimate {
 // figures) — it just no longer decides which mode is used on its own.
 export type ShippingMode = "free" | "buyer_pays" | "calculated";
 
-// Narrows arbitrary request-body input to a real ShippingMode, defaulting to
-// "free" for anything unrecognized — the one place this parsing happens so
-// every API route treats an invalid/missing mode the same way.
-export function parseShippingMode(v: unknown): ShippingMode {
-  return v === "buyer_pays" || v === "calculated" ? v : "free";
+// Calculated shipping is the ONLY mode listings use (Sel's decision, Nov 15
+// 2026: no more free or flat-rate shipping). Every API route funnels any
+// incoming/stored mode through here, so old drafts saved as "free" or
+// "buyer_pays" -- and any stale client still sending them -- are published
+// with calculated shipping. The ShippingMode type keeps the old values only
+// so existing database rows still type-check.
+export const LISTING_SHIPPING_MODE = "calculated" as const;
+
+export function parseShippingMode(_v?: unknown): ShippingMode {
+  void _v;
+  return LISTING_SHIPPING_MODE;
 }
 
 // The one function that matters — everything else here supports it.
@@ -191,14 +232,36 @@ export function weightOunces(weightLb: number): number {
   return Math.max(1, Math.ceil(Math.round(weightLb * 16 * 1000) / 1000));
 }
 
+// Hard limits, so a bad estimate can never produce a declaration eBay or
+// USPS/UPS refuses: 70 lb is the USPS/UPS ground maximum.
+export const MAX_PACKAGE_OZ = 70 * 16;
+// Unknown / unrecognized item: declare a conservative 2 lb in a small box
+// rather than guessing low -- an under-declared weight means the buyer is
+// undercharged and Sel pays the difference on the label.
+export const UNKNOWN_ITEM_PACKAGE_LB = 2;
+const UNKNOWN_ITEM_BOX = { packageType: "MAILING_BOX", lengthIn: 14, widthIn: 10, heightIn: 4 };
+
+// The package types this app ever sends. All are standard eBay
+// PackageTypeEnum values used for USPS/UPS calculated domestic rates.
+export const CALCULATED_PACKAGE_TYPES = ["PACKAGE_THICK_ENVELOPE", "PARCEL_OR_PADDED_ENVELOPE", "MAILING_BOX"] as const;
+
 export function buildPackageWeightAndSize(
   itemType?: string | null,
   size?: string | null,
   material?: string | null,
   variant: PackageVariant = "typed",
+  title?: string | null,
 ): EbayPackageWeightAndSize {
-  const weightLb = estimateWeightLb(itemType, size, material);
-  const pkg = estimatePackage(weightLb);
+  const weightType = resolveWeightItemType(itemType, title);
+  let weightLb: number;
+  let pkg: PackageEstimate;
+  if (weightType) {
+    weightLb = estimateWeightLb(weightType, size, material);
+    pkg = estimatePackage(weightLb);
+  } else {
+    weightLb = Math.max(UNKNOWN_ITEM_PACKAGE_LB, estimateWeightLb(null, size, material));
+    pkg = UNKNOWN_ITEM_BOX;
+  }
   const dims = {
     length: Math.max(1, Math.round(pkg.lengthIn)),
     width: Math.max(1, Math.round(pkg.widthIn)),
@@ -207,7 +270,7 @@ export function buildPackageWeightAndSize(
   };
   return {
     ...(variant === "typed" ? { packageType: pkg.packageType } : {}),
-    weight: { value: weightOunces(weightLb), unit: "OUNCE" },
+    weight: { value: Math.min(MAX_PACKAGE_OZ, weightOunces(weightLb)), unit: "OUNCE" },
     dimensions: dims,
   };
 }

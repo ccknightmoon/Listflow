@@ -27,7 +27,7 @@ export async function GET() {
     // No row yet for this user (never saved Settings before) — fall back
     // to "free"/no footer/indigo/off rather than failing the page.
     return NextResponse.json({
-      defaultShippingMode: "free",
+      defaultShippingMode: "calculated",
       storeDescriptionFooter: "",
       accentColor: "indigo",
       autoDetectItemDividers: false,
@@ -39,7 +39,7 @@ export async function GET() {
     });
   }
   return NextResponse.json({
-    defaultShippingMode: data.default_shipping_mode,
+    defaultShippingMode: "calculated", // calculated-only since Nov 15, 2026
     storeDescriptionFooter: data.store_description_footer ?? "",
     accentColor: data.accent_color ?? "indigo",
     autoDetectItemDividers: data.auto_detect_item_dividers ?? false,
@@ -100,7 +100,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   const payload: Record<string, unknown> = { user_id: user.id, updated_at: new Date().toISOString() };
-  if (defaultShippingMode !== undefined) payload.default_shipping_mode = defaultShippingMode;
+  if (defaultShippingMode !== undefined) payload.default_shipping_mode = "calculated";
   if (storeDescriptionFooter !== undefined) payload.store_description_footer = storeDescriptionFooter;
   if (accentColor !== undefined) payload.accent_color = accentColor;
   if (autoDetectItemDividers !== undefined) payload.auto_detect_item_dividers = autoDetectItemDividers;
@@ -115,5 +115,5 @@ export async function PATCH(req: NextRequest) {
     .upsert(payload, { onConflict: "user_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc, photoEditorLayout });
+  return NextResponse.json({ success: true, defaultShippingMode: defaultShippingMode === undefined ? undefined : "calculated", storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc, photoEditorLayout });
 }

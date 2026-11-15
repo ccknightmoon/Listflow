@@ -114,7 +114,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.costBasis !== undefined && { cost_basis: body.costBasis }),
       ...(body.isHeavy !== undefined && { is_heavy: body.isHeavy }),
       ...(body.shippingCost !== undefined && { shipping_cost: body.shippingCost }),
-      ...(body.shippingMode !== undefined && { shipping_mode: body.shippingMode }),
+      ...(body.shippingMode !== undefined && { shipping_mode: "calculated" }), // calculated-only
     })
     .eq("id", id)
     .eq("user_id", auth.user.id);

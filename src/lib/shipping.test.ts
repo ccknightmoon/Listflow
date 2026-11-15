@@ -58,16 +58,9 @@ describe("estimateShipping", () => {
 });
 
 describe("parseShippingMode", () => {
-  it("recognizes the two non-default modes", () => {
-    expect(parseShippingMode("buyer_pays")).toBe("buyer_pays");
-    expect(parseShippingMode("calculated")).toBe("calculated");
-  });
-
-  it("defaults anything else to 'free'", () => {
-    expect(parseShippingMode("free")).toBe("free");
-    expect(parseShippingMode(undefined)).toBe("free");
-    expect(parseShippingMode(null)).toBe("free");
-    expect(parseShippingMode("nonsense")).toBe("free");
-    expect(parseShippingMode(123)).toBe("free");
+  it("always returns calculated -- the only shipping mode listings use", () => {
+    for (const v of ["free", "buyer_pays", "calculated", undefined, null, "nonsense", 123]) {
+      expect(parseShippingMode(v)).toBe("calculated");
+    }
   });
 });

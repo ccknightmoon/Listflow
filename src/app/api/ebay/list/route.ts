@@ -2,13 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import {
   upsertInventoryItem, createOffer, updateOffer, deleteOffer, deleteInventoryItem,
   getOfferBySku, getAllOffers, publishOffer, getCategoryIdForTitle, getSafeFallbackCategory,
-  ensureMerchantLocation, recreateMerchantLocation, CONDITION_MAP, getConditionCandidates,
+  ensureMerchantLocation, recreateMerchantLocation, CONDITION_MAP, getConditionCandidates, inventoryRequest,
 } from "@/lib/ebay-inventory";
 import { invalidateAccessTokenCache } from "@/lib/ebay-oauth";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
-import { parseShippingMode, isShippingPackageError, type PackageVariant } from "@/lib/shipping";
+import { LISTING_SHIPPING_MODE, isShippingPackageError, type PackageVariant } from "@/lib/shipping";
+import { chooseCalculatedPolicy, summarizeFulfillmentPolicies, type FulfillmentPolicySummary, type RawFulfillmentPolicy } from "@/lib/calculated-policy";
+import { createTtlDedupeCache } from "@/lib/ttl-cache";
 import { setListingStoreCategory } from "@/lib/ebay-store-categories";
 import { assignSequentialSku } from "@/lib/sku-assign";
 
@@ -38,6 +40,28 @@ function describeEbayError(err: EbayApiError | undefined, fallback: string): str
   return params ? `${base}${idPart} [${params}]` : `${base}${idPart}`;
 }
 
+// The seller's fulfillment policies, cached briefly per user so a batch
+// "List all" checks eBay once, not once per item. Failed fetches aren't
+// cached (null).
+const policyCache = createTtlDedupeCache<FulfillmentPolicySummary[] | null>();
+async function loadFulfillmentPolicies(userId: string): Promise<FulfillmentPolicySummary[] | null> {
+  return policyCache.get(
+    userId,
+    5 * 60_000,
+    async () => {
+      try {
+        const res = await inventoryRequest("GET", "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US");
+        if (res.status >= 400) return null;
+        const raw = (res.data as { fulfillmentPolicies?: RawFulfillmentPolicy[] }).fulfillmentPolicies ?? [];
+        return summarizeFulfillmentPolicies(raw);
+      } catch {
+        return null;
+      }
+    },
+    (v) => v !== null,
+  );
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
@@ -56,40 +80,21 @@ export async function POST(req: NextRequest) {
   // and any lost-response retry of those) never legitimately wants to
   // blow away an already-successful listing, so it stays false by default.
   const allowRelist = rawAllowRelist === true;
-  const shippingCost = typeof rawShippingCost === "number" && rawShippingCost > 0 ? rawShippingCost : undefined;
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
 
-  // Neither listing screen (new-listing, batch-upload) has ever sent an
-  // explicit shippingMode — they only send the "Heavy item" checkbox as
-  // `isHeavy` plus its dollar amount as `shippingCost`. That meant every
-  // listing silently used the default "free" shipping policy no matter
-  // what the seller picked as their Default Shipping Mode in Settings
-  // (app_settings.default_shipping_mode), and the "Heavy item" checkbox
-  // never actually applied the flat-rate "buyer pays" policy or shipping
-  // cost override on the real eBay listing — it only nudged the suggested
-  // price. Fixed by deriving the real mode server-side when the caller
-  // doesn't pass one explicitly: a checked "Heavy item" always means
-  // "buyer_pays" (the flat-rate policy this checkbox has always been
-  // paired with), otherwise fall back to the seller's own saved default.
-  // One settings lookup covers both the shipping-mode fallback (only
-  // needed when the caller didn't say and the item isn't flagged heavy)
-  // and the store description footer (always needed — see
-  // upsertInventoryItem in ebay-inventory.ts, the one place it's applied).
+  // Calculated shipping is the only mode (Nov 15, 2026). Whatever the
+  // client sends (shippingMode/isHeavy/shippingCost) or the draft has saved
+  // ("free", "buyer_pays") is ignored; eBay quotes each buyer a real rate
+  // from the package weight/size declared on the inventory item.
+  void rawShippingMode; void rawIsHeavy; void rawShippingCost;
+  const shippingMode = LISTING_SHIPPING_MODE;
+  const shippingCost: number | undefined = undefined;
   const { data: settingsRow } = await supabase
     .from("app_settings")
-    .select("default_shipping_mode, store_description_footer")
+    .select("store_description_footer")
     .eq("user_id", auth.user.id)
     .maybeSingle();
   const storeFooter = settingsRow?.store_description_footer || null;
-
-  let shippingMode = parseShippingMode(rawShippingMode);
-  if (rawShippingMode === undefined) {
-    if (rawIsHeavy === true) {
-      shippingMode = "buyer_pays";
-    } else {
-      shippingMode = settingsRow?.default_shipping_mode === "calculated" ? "calculated" : "free";
-    }
-  }
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {
@@ -177,18 +182,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Choose a valid item condition before listing." }, { status: 400 });
     }
 
-    const draftShippingMode = (draft.shipping_mode === "calculated" || draft.shipping_mode === "buyer_pays") ? draft.shipping_mode : "free";
-    if (rawShippingMode === undefined && draft.shipping_mode) shippingMode = draftShippingMode;
-    if (shippingMode === "calculated" && !connection.policies.shippingCalculatedId) {
-      return NextResponse.json({
-        error: "Calculated shipping isn't set up yet — pick your Calculated shipping policy in Settings → eBay Connection (create a calculated shipping policy in eBay Seller Hub first if you haven't).",
-      }, { status: 400 });
+    // Pick a CALCULATED shipping policy from the seller's real eBay
+    // policies (saved Settings choice first, then eBay's default, then the
+    // only/first one). Fails with a step-by-step message if none exists.
+    const policyChoice = chooseCalculatedPolicy(
+      await loadFulfillmentPolicies(auth.user.id),
+      connection.policies.shippingCalculatedId,
+    );
+    if (!policyChoice.ok) {
+      return NextResponse.json({ error: policyChoice.error, needsCalculatedPolicy: true }, { status: 400 });
     }
-    if (shippingMode === "buyer_pays" && !connection.policies.shippingHeavyId) {
-      return NextResponse.json({
-        error: "Flat-rate shipping isn't set up yet — pick a flat-rate shipping policy in Settings → eBay Connection.",
-      }, { status: 400 });
+    if (policyChoice.policyId !== connection.policies.shippingCalculatedId) {
+      // Remember the auto-picked policy so Settings shows it (best-effort).
+      await supabase
+        .from("ebay_connections")
+        .update({ shipping_calculated_policy_id: policyChoice.policyId, updated_at: new Date().toISOString() })
+        .eq("user_id", auth.user.id);
     }
+    // buildListingPolicies() reads this from the request context.
+    connection.policies.shippingCalculatedId = policyChoice.policyId;
 
     // Auto-assign the next sequential SKU if none is set. Safe under batch
     // "List all": the DB's UNIQUE (user_id, custom_sku) decides who wins a
@@ -453,7 +465,9 @@ export async function POST(req: NextRequest) {
     const rawListingId = (publishResult.data as { listingId?: string | number }).listingId;
     const listingId = rawListingId != null ? String(rawListingId) : undefined;
     if (listingId) {
-      await supabase.from("drafts").update({ ebay_listing_id: listingId }).eq("id", draftId);
+      // Also records that it went out with calculated shipping (old drafts
+      // were saved as "free"/"buyer_pays").
+      await supabase.from("drafts").update({ ebay_listing_id: listingId, shipping_mode: LISTING_SHIPPING_MODE }).eq("id", draftId);
     }
 
     // Store category isn't settable through the REST Inventory API's

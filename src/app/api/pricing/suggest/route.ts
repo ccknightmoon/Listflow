@@ -194,9 +194,9 @@ export async function POST(req: NextRequest) {
     size?: string;
     shippingMode?: unknown;
   };
-  const shippingMode = rawShippingMode === undefined
-    ? (isHeavy ? "buyer_pays" : "free")
-    : parseShippingMode(rawShippingMode);
+  // Calculated-only: the buyer pays shipping at checkout, so it is never
+  // folded into the item price.
+  const shippingMode = parseShippingMode(rawShippingMode);
 
   if (!process.env.EBAY_CLIENT_ID || !process.env.EBAY_CLIENT_SECRET) {
     return NextResponse.json({ error: "eBay credentials not configured" }, { status: 500 });

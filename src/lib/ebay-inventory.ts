@@ -507,7 +507,7 @@ export async function upsertInventoryItem(sku: string, draft: {
   // "Invalid <ShippingPackage>" if the item has no package declared. On
   // flat-rate policies these fields are simply unused. See
   // buildPackageWeightAndSize in src/lib/shipping.ts.
-  body.packageWeightAndSize = buildPackageWeightAndSize(draft.item_type, draft.size, draft.material, packageVariant);
+  body.packageWeightAndSize = buildPackageWeightAndSize(draft.item_type, draft.size, draft.material, packageVariant, draft.title);
 
   const result = await inventoryRequest("PUT", `/sell/inventory/v1/inventory_item/${encodeURIComponent(sku)}`, body);
   return { ...result, missingRequiredAspects };
@@ -574,19 +574,19 @@ export async function recreateMerchantLocation() {
 // request's eBay connection context (set up by requireEbayConnection() +
 // ebayContext.run() in the calling route), populated via Settings' policy
 // pickers (/api/ebay/policies).
-function buildListingPolicies(shippingMode: ShippingMode, shippingCost?: number) {
+function buildListingPolicies(_shippingMode: ShippingMode, _shippingCost?: number) {
+  // Calculated shipping only (Nov 15, 2026). The calling route resolves
+  // which of the seller's real eBay policies is a CALCULATED one (see
+  // src/lib/calculated-policy.ts) and puts it in the request context before
+  // any offer is created; nothing else is ever attached. The parameters are
+  // kept so existing call sites don't change.
+  void _shippingMode;
+  void _shippingCost;
   const { policies } = getEbayContext();
-  const fulfillmentPolicyId =
-    shippingMode === "calculated" ? policies.shippingCalculatedId
-    : shippingMode === "buyer_pays" ? policies.shippingHeavyId
-    : policies.shippingFreeId;
-  const base: Record<string, unknown> = { fulfillmentPolicyId, returnPolicyId: policies.returnPolicyId };
-  if (shippingMode === "buyer_pays" && shippingCost && shippingCost > 0) {
-    base.shippingCostOverrides = [
-      { priority: 1, shippingServiceType: "DOMESTIC", shippingCost: { value: shippingCost.toFixed(2), currency: "USD" } },
-    ];
+  if (!policies.shippingCalculatedId) {
+    throw new Error("No calculated-shipping policy selected for this listing.");
   }
-  return base;
+  return { fulfillmentPolicyId: policies.shippingCalculatedId, returnPolicyId: policies.returnPolicyId };
 }
 
 export async function updateOffer(offerId: string, price: number, categoryId: string, shippingMode: ShippingMode, shippingCost?: number) {

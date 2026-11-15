@@ -63,7 +63,7 @@ export function getPriceSuggestion(
   isHeavy = false,
   itemType?: string | null,
   size?: string | null,
-  shippingMode: ShippingMode = isHeavy ? "buyer_pays" : "free"
+  shippingMode: ShippingMode = "calculated"
 ): PriceSuggestion {
   let base = 35;
 

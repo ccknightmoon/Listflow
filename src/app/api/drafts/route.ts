@@ -152,7 +152,7 @@ export async function GET(req: NextRequest) {
         title: d.title,
         price: d.suggested_price,
         condition: d.condition,
-        shippingMode: d.shipping_mode ?? "free",
+        shippingMode: "calculated", // calculated-only since Nov 15, 2026
       }).ready
     );
     const total = matching.length;
@@ -275,7 +275,7 @@ export async function POST(req: NextRequest) {
         cost_basis: body.costBasis ?? null,
         is_heavy: body.isHeavy ?? false,
         shipping_cost: body.shippingCost ?? null,
-        shipping_mode: body.shippingMode ?? (body.isHeavy ? "buyer_pays" : "free"),
+        shipping_mode: "calculated", // calculated-only; older clients may still send free/buyer_pays
       },
     ])
     .select();
