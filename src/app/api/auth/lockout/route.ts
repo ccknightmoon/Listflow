@@ -35,11 +35,11 @@ function serviceClient() {
 // Supabase's public REST RPC endpoint with no rate limiting at all).
 //
 // This route IS intentionally reachable before sign-in (see
-// middleware.ts's PUBLIC_PREFIXES) — that's the point, since a signed-out
+// proxy.ts's PUBLIC_PREFIXES) — that's the point, since a signed-out
 // visitor is exactly who needs to check/record a login attempt. It's not
 // "public" in the sense of doing anything sensitive: the only thing it
 // touches is the login_attempts bookkeeping table, gated by email-shape
-// validation here and the app's general rate limit in middleware.ts, same
+// validation here and the app's general rate limit in proxy.ts, same
 // as every other endpoint gets.
 export async function POST(req: NextRequest) {
   let body: { action?: string; email?: string };
@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
     supabase = serviceClient();
   } catch (err) {
     // Same "warn, don't block" pattern as Upstash rate limiting elsewhere
-    // in this app (see middleware.ts): fail OPEN rather than let a missing
+    // in this app (see proxy.ts): fail OPEN rather than let a missing
     // secondary-protection secret take down every sign-in. Logged so a
     // missing SUPABASE_SERVICE_ROLE_KEY is visible in Vercel's logs instead
     // of silently disabling lockout protection forever.

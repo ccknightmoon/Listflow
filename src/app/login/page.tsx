@@ -57,7 +57,7 @@ export default function LoginPage() {
   // directly let anyone hit Supabase's public REST RPC endpoint with zero
   // rate limiting, including to lock a real user out by spamming
   // record_failed_login for their email. Routing through the app's own API
-  // instead means every call goes through src/middleware.ts's rate
+  // instead means every call goes through src/proxy.ts's rate
   // limiting like everything else. Fails open on a network/parse error,
   // same as before: an infra hiccup here shouldn't lock a real user out of
   // trying to sign in.

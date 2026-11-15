@@ -96,7 +96,7 @@ const generalRatelimit = redis
   ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(60, "1 m"), analytics: true, prefix: "listflow:rl:general" })
   : null;
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Deliberately runs BEFORE the public-path bypass below: "/api/auth/lockout"

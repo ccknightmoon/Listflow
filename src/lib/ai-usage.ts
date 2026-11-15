@@ -46,7 +46,7 @@ function serviceClient() {
  * hiccup degrades to "no cap enforced this request" rather than taking
  * down every AI feature in the app -- the same fail-open choice already
  * made for rate limiting when Upstash env vars are unset (see
- * src/middleware.ts).
+ * src/proxy.ts).
  */
 export async function checkAndConsumeAiUsage(
   userId: string,

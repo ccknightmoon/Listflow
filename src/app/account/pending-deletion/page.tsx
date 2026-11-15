@@ -12,7 +12,7 @@ interface Status {
 
 // Middleware routes any signed-in user with a pending deletion request to
 // this page and nowhere else in the app (see PENDING_DELETION_ALLOWED_PATHS
-// in middleware.ts) until they either reactivate here or the grace period
+// in proxy.ts) until they either reactivate here or the grace period
 // in src/lib/account-deletion.ts runs out and the daily purge cron deletes
 // the account for good.
 export default function PendingDeletionPage() {
