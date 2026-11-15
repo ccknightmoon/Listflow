@@ -6,7 +6,7 @@ AI-powered eBay listing assistant for resellers. Snap photos of items → AI ide
 
 | Layer | Tech |
 |---|---|
-| Framework | Next.js 16.3.4 (App Router, TypeScript, React 19) |
+| Framework | Next.js 16.4.6 (App Router, TypeScript, React 19) |
 | Styling | Tailwind CSS |
 | Icons | Lucide React |
 | AI | OpenAI GPT-4o-mini (vision) |
@@ -216,6 +216,13 @@ One row per user, added in the Phase 3 spending-safety-net work (`supabase-migra
 
 - **Returns/refunds tracking -- researched, deliberately NOT built Sept 9, 2026.** The natural next item on the same list as the fee/notifications/offers work above, but research surfaced enough real uncertainty that shipping a guess would have been worse than not shipping: eBay manages buyer return requests through the older Post-Order API (`/post-order/v2/return/search`, `/return/{id}/decide`, `/return/{id}/issue_refund`), which (a) uses a non-standard `Authorization: IAF <token>` header instead of the `Bearer <token>` scheme every other REST call in this app uses, and (b) has a required OAuth scope that even eBay's own developer community forum threads disagree about / couldn't confirm -- unlike `sell.finances` above, no authoritative single source (an OpenAPI spec, a clean scope-list table) could be found to verify it against. Given this deals with real buyer disputes and refund actions on Sel's actual eBay account, and there's no live account to test against from here either way, building it on an unconfirmed scope and an unconfirmed auth header would risk either breaking the eBay OAuth consent flow outright or silently shipping a broken/incomplete view of open returns. Left for a future session where either eBay's docs render more completely or it can be built and tested against a real connected account directly.
 
+### Nov 15, 2026 fixes (branch `fix/publish-and-hardening`)
+
+- **eBay "Invalid <ShippingPackage>" (errorId 25101) on publish -- fixed.** Root cause: `packageWeightAndSize` was only sent in the app's own "calculated" mode, but a seller's "free shipping" policy is often a calculated-type policy in Seller Hub, which needs a declared package. It's now always sent (`buildPackageWeightAndSize` in `src/lib/shipping.ts`), weight in whole ounces (rounded up), integer inch dimensions. If eBay still rejects the package, `/api/ebay/list` re-sends the item without `packageType` and republishes the same offer once. Package errors no longer trigger the category/condition fallback. Item-type weight patterns now match plurals ("Pants").
+- **`src/middleware.ts` renamed to `src/proxy.ts`** (Next 16 convention). Runs on the Node.js runtime now.
+- **Security updates:** next 16.4.6, @sentry/nextjs 10.78, patch bumps. Remaining `npm audit --omit=dev`: 5 moderate glob/minimatch inside Sentry's build-time bundler plugin (needs Sentry 11, a major) -- deferred.
+- **Unapplied migration `024_set_updated_at_search_path.sql`** for the Supabase advisor warning -- needs approval before applying.
+
 ## Deferred
 
 | Feature | Notes |
@@ -232,5 +239,5 @@ One row per user, added in the Phase 3 spending-safety-net work (`supabase-migra
 | ~~**Automated tests**~~ | Done -- Vitest added Sept 9, 2026 (see above), 46 tests covering the money/matching-logic libs, wired into CI. Component/e2e tests (Playwright etc.) remain a reasonable later addition, not attempted here. |
 | ~~**COGS (cost-of-goods) tracking**~~ | Done -- shipped Sept 9, 2026 (see above), same day the gap was flagged. |
 | **`batch-upload/page.tsx` refactor** | Flagged Sept 9, 2026 during the workflow review -- 2,499 lines, 11 `useState`s, ~34 handlers, the largest file in the app by a wide margin. Real maintenance cost, but splitting it is a meaningful, risky refactor with no direct user-facing benefit -- not attempted alongside this round's user-facing work. Technical debt only, not added to `BACKLOG.md` (nothing here needs Sel's input). |
-| **SKU auto-assign race on bulk "List all"** | Flagged Sept 9, 2026. Already fails loudly via the DB's unique constraint on `custom_sku` rather than silently double-assigning -- just isn't auto-retried after a collision. Minor, already documented in the code's own comments. |
+| ~~**SKU auto-assign race on bulk "List all"**~~ | Done Nov 15, 2026 -- logic moved to `src/lib/sku-assign.ts` (re-read max, claim max+1, DB unique constraint referees, up to 8 attempts with randomized backoff, "already set by a parallel request" returns that SKU). Covered by `sku-assign.test.ts`. |
 | **Scattered `react-hooks/set-state-in-effect` lint warnings** | Flagged Sept 9, 2026. Beyond the three already-known instances (`Toast.tsx`, `account/pending-deletion`, `drafts/[id]`, `settings`), a few more exist app-wide (e.g. `dashboard/page.tsx`, `store/page.tsx`, confirmed still present after this round's own edits). Pre-existing pattern, not a correctness bug -- a real cleanup pass is bigger than "while we're in the file" scope. |
