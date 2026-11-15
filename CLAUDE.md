@@ -223,6 +223,10 @@ One row per user, added in the Phase 3 spending-safety-net work (`supabase-migra
 - **Security updates:** next 16.4.6, @sentry/nextjs 10.78, patch bumps. Remaining `npm audit --omit=dev`: 5 moderate glob/minimatch inside Sentry's build-time bundler plugin (needs Sentry 11, a major) -- deferred.
 - **Unapplied migration `024_set_updated_at_search_path.sql`** for the Supabase advisor warning -- needs approval before applying.
 
+### Nov 15, 2026: calculated shipping only
+
+Sel's decision: no free or flat-rate shipping. `parseShippingMode()` always returns "calculated"; every API stores/reports "calculated"; the UI shows a fixed label instead of a picker. `/api/ebay/list` picks the fulfillment policy with `chooseCalculatedPolicy` (`src/lib/calculated-policy.ts`): the Settings choice if it's really CALCULATED, else eBay's default calculated policy, else the only/first one; no calculated policy = clear error with Seller Hub steps. Every inventory item declares a package (`buildPackageWeightAndSize`): known item types from `ITEM_TYPE_WEIGHT_TABLE`, else the title, else a conservative 2 lb 14x10x4 MAILING_BOX. Covered by `calculated-shipping.test.ts`. Note: drafts priced before this change had estimated shipping folded into their price.
+
 ## Deferred
 
 | Feature | Notes |
