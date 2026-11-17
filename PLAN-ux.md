@@ -1,6 +1,6 @@
 # Listflow — whole-app UX & speed plan (Nov 18, 2026)
 
-**Status: plan only — waiting for Sel's go-ahead.** Nothing here is built yet.
+**Status:** Phase 1 built on branch `feat/phase1-speed` (Nov 18). Phases 2–3 not started.
 
 **Goal:** post more listings, faster, from a phone, in an app that looks and feels as polished everywhere as the Sales page.
 
@@ -10,7 +10,19 @@
 
 ---
 
-## Phase 1: Faster listing, plus a consistent look (biggest wins, low risk)
+## Phase 1: Faster listing, plus a consistent look (biggest wins, low risk) — ✅ built
+
+**What was built:**
+- 1.1 "+" in the nav with a camera / batch / drafts sheet. Nav added to 6 more pages.
+- 1.2 "Analyze & list", plus "List it & snap the next item".
+- 1.3 Background publishing with a tray on every page.
+  - **Built differently from the plan:** it runs in the app, not on the server. Vercel Hobby limits long server jobs, and every item is a saved draft first, so nothing is lost if the app closes.
+  - **Still to do:** move the batch "List all" onto it, and move it server-side.
+- 1.4 Shared skeleton/empty-state components.
+- 1.5 Glow-layering fix app-wide.
+- 1.6 Skeletons on 5 list pages.
+- 1.7 Styled confirms replacing all 10 browser pop-ups.
+- 1.8 Manifest and icons.
 
 | # | Item | What changes and why it matters for Sel | Effort | Risk | How it's verified |
 |---|---|---|---|---|---|
