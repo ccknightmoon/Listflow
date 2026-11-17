@@ -189,6 +189,11 @@ export interface EbaySummary {
   onHoldCents?: Cents;
 }
 
+/** eBay's summary per transactionStatus (only statuses eBay answered for). */
+export interface EbaySummaryByStatus {
+  byStatus: Record<string, EbaySummary>;
+}
+
 export interface Check {
   label: string;
   ours: Cents;
@@ -196,21 +201,35 @@ export interface Check {
   diff: Cents; // ebay - ours
 }
 
-/** Compare our per-line totals with eBay's own summary (absolute values, eBay reports magnitudes). */
-export function compareWithSummary(all: LedgerTx[], p: PeriodRange, s: EbaySummary | null): Check[] {
+/**
+ * Compare our per-line totals with eBay's own summary. eBay reports each
+ * transaction status separately, so each status's totals are compared
+ * with OUR transactions in that same status only, then added up -- exact,
+ * and a status eBay didn't answer for is simply not part of the check.
+ * (eBay reports magnitudes; we compare absolute values.)
+ */
+export function compareWithSummary(all: LedgerTx[], p: PeriodRange, s: EbaySummaryByStatus | EbaySummary | null): Check[] {
   if (!s) return [];
-  const sum = (pred: (t: LedgerTx) => boolean) =>
-    Math.abs(all.filter((t) => inRange(t, p) && pred(t)).reduce((a, t) => a + t.amountCents, 0));
+  const byStatus: Record<string, EbaySummary> = "byStatus" in s ? s.byStatus : { "*": s };
+  const lines: Array<[string, (t: LedgerTx) => boolean, keyof EbaySummary]> = [
+    ["Sales & credits", (t) => (t.type === "SALE" || t.type === "CREDIT") && t.amountCents > 0, "creditCents"],
+    ["Refunds", (t) => t.type === "REFUND", "refundCents"],
+    ["Shipping labels", (t) => t.type === "SHIPPING_LABEL", "shippingLabelCents"],
+    ["Other charges & ads", (t) => t.type === "NON_SALE_CHARGE", "nonSaleChargeCents"],
+    ["Disputes", (t) => t.type === "DISPUTE", "disputeCents"],
+  ];
   const checks: Check[] = [];
-  const push = (label: string, ours: Cents, ebay: Cents | undefined) => {
-    if (ebay == null) return;
-    checks.push({ label, ours, ebay: Math.abs(ebay), diff: Math.abs(ebay) - ours });
-  };
-  push("Sales & credits", sum((t) => (t.type === "SALE" || t.type === "CREDIT") && t.amountCents > 0), s.creditCents);
-  push("Refunds", sum((t) => t.type === "REFUND"), s.refundCents);
-  push("Shipping labels", sum((t) => t.type === "SHIPPING_LABEL"), s.shippingLabelCents);
-  push("Other charges & ads", sum((t) => t.type === "NON_SALE_CHARGE"), s.nonSaleChargeCents);
-  push("Disputes", sum((t) => t.type === "DISPUTE"), s.disputeCents);
+  for (const [label, pred, field] of lines) {
+    let ours = 0, ebay = 0, any = false;
+    for (const [status, sum] of Object.entries(byStatus)) {
+      const v = sum[field];
+      if (v == null) continue;
+      any = true;
+      ebay += Math.abs(v);
+      ours += Math.abs(all.filter((t) => inRange(t, p) && pred(t) && (status === "*" || t.status === status)).reduce((a, t) => a + t.amountCents, 0));
+    }
+    if (any) checks.push({ label, ours, ebay, diff: ebay - ours });
+  }
   return checks;
 }
 

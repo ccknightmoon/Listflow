@@ -1,7 +1,7 @@
 import https from "node:https";
 import { getAccessToken } from "./ebay-oauth";
 import type { FinanceTx } from "./finance-match";
-import { parseLedgerTx, toCents, type EbaySummary, type LedgerTx, type Payout, type RawLedgerTx } from "./ledger";
+import { parseLedgerTx, toCents, type EbaySummary, type EbaySummaryByStatus, type LedgerTx, type Payout, type RawLedgerTx } from "./ledger";
 
 // eBay's Sell Finances API -- unlike every other REST call in this app
 // (ebay-inventory.ts's inventoryRequest, which hits api.ebay.com), this API
@@ -220,22 +220,33 @@ export async function fetchPayouts(startMs: number, endMs: number): Promise<Payo
   }
 }
 
-/** eBay's own totals for a date range, used to cross-check the ledger. */
-export async function fetchTransactionSummary(fromIso: string, toIso: string): Promise<EbaySummary | null> {
+// eBay requires a transactionStatus filter on transaction_summary (error
+// 135011 without it), so the summary is fetched once per status and the
+// page compares each status's totals with our ledger for that status.
+export const SUMMARY_STATUSES = ["PAYOUT", "FUNDS_PROCESSING", "FUNDS_AVAILABLE_FOR_PAYOUT", "FUNDS_ON_HOLD", "COMPLETED"] as const;
+
+/** eBay's own totals per transaction status, used to cross-check the ledger. Statuses eBay rejects are simply left out. */
+export async function fetchTransactionSummary(fromIso: string, toIso: string): Promise<EbaySummaryByStatus | null> {
   try {
-    const filter = encodeURIComponent(`transactionDate:[${fromIso}..${toIso}]`);
-    const { status, data } = await financesRequest(`/sell/finances/v1/transaction_summary?filter=${filter}`);
-    if (status >= 400) return null;
-    const d = data as Record<string, { value?: string } | undefined>;
-    const c = (k: string) => (d[k]?.value != null ? Math.abs(toCents(d[k]?.value)) : undefined);
-    return {
-      creditCents: c("creditAmount"),
-      refundCents: c("refundAmount"),
-      shippingLabelCents: c("shippingLabelAmount"),
-      nonSaleChargeCents: c("nonSaleChargeAmount"),
-      disputeCents: c("disputeAmount"),
-      onHoldCents: c("onHoldAmount"),
-    };
+    const results = await Promise.all(SUMMARY_STATUSES.map(async (st) => {
+      const filter = encodeURIComponent(`transactionDate:[${fromIso}..${toIso}],transactionStatus:{${st}}`);
+      const { status, data } = await financesRequest(`/sell/finances/v1/transaction_summary?filter=${filter}`);
+      if (status >= 400) return null;
+      const d = data as Record<string, { value?: string } | undefined>;
+      const c = (k: string) => (d[k]?.value != null ? Math.abs(toCents(d[k]?.value)) : undefined);
+      const summary: EbaySummary = {
+        creditCents: c("creditAmount"),
+        refundCents: c("refundAmount"),
+        shippingLabelCents: c("shippingLabelAmount"),
+        nonSaleChargeCents: c("nonSaleChargeAmount"),
+        disputeCents: c("disputeAmount"),
+        onHoldCents: c("onHoldAmount"),
+      };
+      return [st, summary] as const;
+    }));
+    const ok = results.filter((r): r is readonly [typeof SUMMARY_STATUSES[number], EbaySummary] => r !== null);
+    if (ok.length === 0) return null;
+    return { byStatus: Object.fromEntries(ok) };
   } catch {
     return null;
   }

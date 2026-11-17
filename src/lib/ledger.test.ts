@@ -85,6 +85,25 @@ describe("compareWithSummary", () => {
   });
 });
 
+describe("compareWithSummary per transaction status (eBay requires a status filter)", () => {
+  const txs = [
+    raw({ amt: "30.00", fee: "4", transactionStatus: "PAYOUT" }),
+    raw({ amt: "12.00", fee: "2", transactionStatus: "FUNDS_ON_HOLD" }),
+    raw({ transactionType: "REFUND", amt: "5.00", entry: "DEBIT", transactionStatus: "PAYOUT" }),
+  ];
+  it("compares each status with our transactions in that status only, then adds up", () => {
+    const c = compareWithSummary(txs, P, { byStatus: { PAYOUT: { creditCents: 3000, refundCents: 500 }, FUNDS_ON_HOLD: { creditCents: 1200, refundCents: 0 } } });
+    expect(c).toEqual([
+      { label: "Sales & credits", ours: 4200, ebay: 4200, diff: 0 },
+      { label: "Refunds", ours: 500, ebay: 500, diff: 0 },
+    ]);
+  });
+  it("a status eBay didn't answer for is left out instead of showing a false gap", () => {
+    const c = compareWithSummary(txs, P, { byStatus: { PAYOUT: { creditCents: 3000 } } });
+    expect(c).toEqual([{ label: "Sales & credits", ours: 3000, ebay: 3000, diff: 0 }]);
+  });
+});
+
 describe("payoutBridge", () => {
   it("net - payouts sent = not yet paid - from earlier, exactly", () => {
     const txs = [

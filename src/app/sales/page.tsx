@@ -15,7 +15,7 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
-import { buildLedger, compareWithSummary, payoutBridge, salesBreakdown, displayLines, LINE_LABELS, type EbaySummary, type LedgerTx, type Payout, type PeriodRange } from "@/lib/ledger";
+import { buildLedger, compareWithSummary, payoutBridge, salesBreakdown, displayLines, LINE_LABELS, type EbaySummaryByStatus, type LedgerTx, type Payout, type PeriodRange } from "@/lib/ledger";
 import { saleEconomics, shippingSplit, categoryProfit, bestAndWorst, staleListings, storeTips, activeCountAt, exactSellThroughTrend, type Snapshot } from "@/lib/store-insights";
 import {
   deriveView, chooseFee, resolveCategory, toC, percentChange, type AnalyticsSale, type ActiveListing, type Change, type DatedAmount, type DayRange,
@@ -146,7 +146,7 @@ export default function SalesPage() {
   const [costNotice, setCostNotice] = useState<string | null>(null);
   const [openLine, setOpenLine] = useState<string | null>(null);
   const [showRecon, setShowRecon] = useState(false);
-  const [summaries, setSummaries] = useState<Record<string, EbaySummary | null | "loading">>({});
+  const [summaries, setSummaries] = useState<Record<string, EbaySummaryByStatus | null | "loading">>({});
 
   const load = useCallback(async (refresh: boolean) => {
     if (refresh) setRefreshing(true);
@@ -263,7 +263,7 @@ export default function SalesPage() {
     const to = new Date(view.period.end).toISOString();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- marks the request in flight
     setSummaries((p) => ({ ...p, [periodKey]: "loading" }));
-    apiFetch<{ summary?: EbaySummary | null }>(`/api/ebay/finances/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+    apiFetch<{ summary?: EbaySummaryByStatus | null }>(`/api/ebay/finances/summary?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
       .then((r) => setSummaries((p) => ({ ...p, [periodKey]: r.summary ?? null })))
       .catch(() => setSummaries((p) => ({ ...p, [periodKey]: null })));
   }, [view, fin?.hasLedger, periodKey, summaries]);
