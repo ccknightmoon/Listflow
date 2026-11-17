@@ -1,5 +1,7 @@
 "use client";
 
+import { ListSkeleton } from "@/components/ui";
+import { confirmAction } from "@/lib/confirm";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -316,7 +318,7 @@ export default function DraftsPage() {
     // page isn't the one currently loaded into `drafts`.
     const noPriceCount = ids.filter((id) => !draftsByIdRef.current[id]?.suggested_price).length;
     if (noPriceCount > 0) {
-      if (!confirm(`${noPriceCount} item${noPriceCount !== 1 ? "s" : ""} have no price set. List anyway?`)) return;
+      if (!(await confirmAction({ title: `${noPriceCount} item${noPriceCount !== 1 ? "s have" : " has"} no price`, message: "eBay will reject listings without a price. List the rest anyway?", confirmLabel: "List anyway" }))) return;
     }
 
     setListStatus("listing");
@@ -490,12 +492,7 @@ export default function DraftsPage() {
         onClose={() => setError(null)}
       />
 
-      {loading && (
-        <div className="card p-8 text-center">
-          <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)]">Loading drafts...</p>
-        </div>
-      )}
+      {loading && <ListSkeleton label="Loading drafts…" />}
 
       {!loading && noPriceTotal > 0 && (
         <div className="card p-3 mb-4 flex items-center gap-2 text-sm" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)" }}>

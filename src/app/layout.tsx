@@ -1,5 +1,6 @@
 import PublishTray from "@/components/PublishTray";
-import type { Metadata } from "next";
+import ConfirmHost from "@/components/ConfirmHost";
+import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
@@ -26,9 +27,15 @@ export const metadata: Metadata = {
   description: "AI-powered listing assistant for eBay resellers",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    // Black bar with light text: matches the dark app without letting
+    // content slide under the status bar.
+    statusBarStyle: "black",
     title: "Listflow",
   },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#101017",
 };
 
 const ACCENT_VALUES = ["indigo", "sapphire", "emerald", "amber", "rose", "teal"];
@@ -67,6 +74,7 @@ export default async function RootLayout({
       <body>
         {children}
         <PublishTray />
+        <ConfirmHost />
       </body>
     </html>
   );

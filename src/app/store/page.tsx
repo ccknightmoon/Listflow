@@ -1,5 +1,7 @@
 "use client";
 
+import { ListSkeleton } from "@/components/ui";
+import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -152,7 +154,7 @@ export default function StorePage() {
   useEffect(() => { setPageCache(STORE_CACHE_KEY, listings); }, [listings]);
 
   async function handleDelist(listing: StoreListing) {
-    if (!confirm(`End listing "${listing.title}"? This will remove it from eBay.`)) return;
+    if (!(await confirmAction({ title: "End this listing?", message: `"${listing.title}" will be removed from eBay.`, confirmLabel: "End listing", destructive: true }))) return;
     setDeleting((prev) => new Set(prev).add(listing.listingId));
     try {
       const body = listing.draftId
@@ -183,7 +185,7 @@ export default function StorePage() {
   // to it rather than staying under the old (still-ended) one. Like every
   // other irreversible eBay action here, confirmed first.
   async function handleRelist(listing: StoreListing) {
-    if (!confirm(`Relist "${listing.title}" on eBay? This creates a new active listing from the ended one.`)) return;
+    if (!(await confirmAction({ title: "Relist on eBay?", message: `Creates a new active listing for "${listing.title}" from the ended one.`, confirmLabel: "Relist" }))) return;
     setRelisting((prev) => new Set(prev).add(listing.listingId));
     try {
       const data = await apiFetch<{ error?: string; newListingId?: string }>("/api/ebay/relist", {
@@ -491,12 +493,7 @@ export default function StorePage() {
       />
       <Toast type="success" message={bulkSuccessMsg} onClose={() => setBulkSuccessMsg("")} />
 
-      {loading && (
-        <div className="card p-8 text-center">
-          <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)]">Loading store...</p>
-        </div>
-      )}
+      {loading && <ListSkeleton label="Loading your listings…" />}
 
       {!loading && !error && listings.length === 0 && (
         <div className="card p-8 text-center">

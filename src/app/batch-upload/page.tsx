@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmAction } from "@/lib/confirm";
 import { takePendingPhotos } from "@/lib/pending-photos";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -1671,7 +1672,7 @@ export default function BatchUploadPage() {
       .filter((i) => !results[i].error && !results[i].pending && listStatus[i] !== "listed");
 
     if (indices.length === 0) return;
-    if (!window.confirm(`List ${indices.length} item${indices.length === 1 ? "" : "s"} on eBay now?`)) return;
+    if (!(await confirmAction({ title: `List ${indices.length} item${indices.length === 1 ? "" : "s"} on eBay now?`, confirmLabel: "List now" }))) return;
 
     setListingAll(true);
     setBatchCancelled(false);

@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmAction } from "@/lib/confirm";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -441,9 +442,12 @@ export default function SettingsPage() {
   // then shows /account/pending-deletion with a one-click "Reactivate."
   async function handleDeleteAccount() {
     if (deletingAccount) return;
-    const confirmed = window.confirm(
-      "Delete your account? Your drafts, photos, eBay connection, and settings will be permanently deleted in 30 days. You can undo this any time before then by logging back in and choosing \"Reactivate.\""
-    );
+    const confirmed = await confirmAction({
+      title: "Delete your account?",
+      message: "Your drafts, photos, eBay connection and settings will be permanently deleted in 30 days. You can undo this any time before then by logging back in and choosing \"Reactivate\".",
+      confirmLabel: "Delete account",
+      destructive: true,
+    });
     if (!confirmed) return;
 
     setDeletingAccount(true);

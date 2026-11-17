@@ -1,5 +1,7 @@
 "use client";
 
+import { ListSkeleton } from "@/components/ui";
+import { confirmAction } from "@/lib/confirm";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -148,25 +150,25 @@ export default function OffersPage() {
     }
   }
 
-  function handleAccept(offer: PendingOffer) {
+  async function handleAccept(offer: PendingOffer) {
     const amount = offer.offerPrice != null ? `$${offer.offerPrice.toFixed(2)}` : "this offer";
-    if (!confirm(`Accept ${offer.buyerUserId ?? "the buyer"}'s offer of ${amount} for "${offer.title}"? This can't be undone.`)) return;
+    if (!(await confirmAction({ title: `Accept ${amount}?`, message: `${offer.buyerUserId ?? "The buyer"}'s offer for "${offer.title}". This can't be undone.`, confirmLabel: "Accept offer" }))) return;
     respond(offer, "accept");
   }
 
-  function handleDecline(offer: PendingOffer) {
-    if (!confirm(`Decline ${offer.buyerUserId ?? "the buyer"}'s offer on "${offer.title}"? This can't be undone.`)) return;
+  async function handleDecline(offer: PendingOffer) {
+    if (!(await confirmAction({ title: "Decline this offer?", message: `${offer.buyerUserId ?? "The buyer"}'s offer on "${offer.title}". This can't be undone.`, confirmLabel: "Decline", destructive: true }))) return;
     respond(offer, "decline");
   }
 
-  function handleCounterSubmit(offer: PendingOffer) {
+  async function handleCounterSubmit(offer: PendingOffer) {
     const key = offerKey(offer);
     const priceNum = Number(counterPrices[key]);
     if (!counterPrices[key] || !Number.isFinite(priceNum) || priceNum <= 0) {
       setError("Enter a valid counter price.");
       return;
     }
-    if (!confirm(`Send a counter offer of $${priceNum.toFixed(2)} to ${offer.buyerUserId ?? "the buyer"} for "${offer.title}"?`)) return;
+    if (!(await confirmAction({ title: `Counter at $${priceNum.toFixed(2)}?`, message: `Sent to ${offer.buyerUserId ?? "the buyer"} for "${offer.title}".`, confirmLabel: "Send counter" }))) return;
     respond(offer, "counter", priceNum);
   }
 
@@ -235,12 +237,7 @@ export default function OffersPage() {
         </p>
       )}
 
-      {loading && (
-        <div className="card p-8 text-center">
-          <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)]">Checking your active listings for offers...</p>
-        </div>
-      )}
+      {loading && <ListSkeleton label="Checking your active listings for offers…" />}
 
       {!loading && !error && offers.length === 0 && (
         <div className="card p-10 text-center">

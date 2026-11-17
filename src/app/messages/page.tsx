@@ -1,5 +1,7 @@
 "use client";
 
+import { ListSkeleton } from "@/components/ui";
+import { confirmAction } from "@/lib/confirm";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -106,7 +108,7 @@ export default function MessagesPage() {
       setError("Write a reply before sending.");
       return;
     }
-    if (!confirm(`Send this reply to ${q.senderId}? This can't be undone.`)) return;
+    if (!(await confirmAction({ title: "Send this reply?", message: `To ${q.senderId}. This can't be undone.`, confirmLabel: "Send" }))) return;
 
     setReplying((prev) => new Set(prev).add(key));
     setError(null);
@@ -191,12 +193,7 @@ export default function MessagesPage() {
         onClose={() => setError(null)}
       />
 
-      {loading && (
-        <div className="card p-8 text-center">
-          <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)]">Checking for buyer questions...</p>
-        </div>
-      )}
+      {loading && <ListSkeleton label="Checking for buyer questions…" />}
 
       {!loading && !error && questions.length === 0 && (
         <div className="card p-10 text-center">

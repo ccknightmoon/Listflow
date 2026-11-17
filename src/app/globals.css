@@ -295,6 +295,9 @@ img {
      nearby text/controls that clip their overflow. */
   transform: translateZ(0);
   will-change: transform;
+  /* Behind all page content: positioned glows otherwise paint OVER any
+     header/text that isn't itself positioned (the blurred-title bug). */
+  z-index: -1;
 }
 
 /* ---------- Shared component classes ----------

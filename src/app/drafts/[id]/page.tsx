@@ -1,5 +1,6 @@
 "use client";
 
+import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -845,7 +846,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   async function handleDelete() {
-    if (!confirm("Delete this draft?")) return;
+    if (!(await confirmAction({ title: "Delete this draft?", message: "Its photos and details will be removed.", confirmLabel: "Delete", destructive: true }))) return;
     setDeleting(true);
     try {
       await apiFetch(`/api/drafts/${id}`, { method: "DELETE" });

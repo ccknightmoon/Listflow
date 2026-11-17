@@ -1,5 +1,6 @@
 "use client";
 
+import { ListSkeleton } from "@/components/ui";
 import BottomNav from "@/components/BottomNav";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -126,12 +127,7 @@ export default function ShipPage() {
         onClose={() => setError(null)}
       />
 
-      {loading && (
-        <div className="card p-8 text-center">
-          <Loader2 className="w-6 h-6 mx-auto mb-3 animate-spin" />
-          <p className="text-sm text-[var(--text-secondary)]">Loading shipments...</p>
-        </div>
-      )}
+      {loading && <ListSkeleton label="Loading shipments…" />}
 
       {!loading && !error && items.length === 0 && (
         <div className="card p-10 text-center">
