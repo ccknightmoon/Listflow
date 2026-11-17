@@ -1,6 +1,7 @@
 import https from "node:https";
 import { getAccessToken } from "./ebay-oauth";
 import type { FinanceTx } from "./finance-match";
+import { parseLedgerTx, toCents, type EbaySummary, type LedgerTx, type Payout, type RawLedgerTx } from "./ledger";
 
 // eBay's Sell Finances API -- unlike every other REST call in this app
 // (ebay-inventory.ts's inventoryRequest, which hits api.ebay.com), this API
@@ -138,25 +139,22 @@ export async function fetchRealFeesForRange(startISO: string, endISO: string): P
 // available" contract as fetchRealFeesForRange above.
 
 
-interface RawFinanceTx {
-  transactionType?: string;
-  transactionDate?: string;
-  orderId?: string;
-  bookingEntry?: string;
-  amount?: { value?: string };
-  totalFeeAmount?: { value?: string };
-}
 
 const FINANCE_WINDOW_DAYS = 90;
 
-export async function fetchFinanceTransactions(startMs: number, endMs: number): Promise<{ tx: FinanceTx[]; truncated: boolean } | null> {
+/**
+ * Every Finances transaction in the range, parsed exactly (integer cents)
+ * for the Sales ledger. Also returns the simplified FinanceTx view used to
+ * attach real fees to sale lines.
+ */
+export async function fetchFinanceTransactions(startMs: number, endMs: number): Promise<{ tx: FinanceTx[]; ledger: LedgerTx[]; truncated: boolean } | null> {
   try {
     const windows: Array<[number, number]> = [];
     for (let to = endMs; to > startMs; to -= FINANCE_WINDOW_DAYS * 86_400_000) {
       windows.push([Math.max(startMs, to - FINANCE_WINDOW_DAYS * 86_400_000), to]);
     }
     const results = await Promise.all(windows.map(async ([from, to]) => {
-      const out: FinanceTx[] = [];
+      const out: RawLedgerTx[] = [];
       let offset = 0;
       let total = Infinity;
       let page = 0;
@@ -164,28 +162,80 @@ export async function fetchFinanceTransactions(startMs: number, endMs: number): 
         const filter = encodeURIComponent(`transactionDate:[${new Date(from).toISOString()}..${new Date(to).toISOString()}]`);
         const { status, data } = await financesRequest(`/sell/finances/v1/transaction?filter=${filter}&limit=${FINANCES_PAGE_SIZE}&offset=${offset}`);
         if (status >= 400) return null;
-        const body = data as { transactions?: RawFinanceTx[]; total?: number };
+        const body = data as { transactions?: RawLedgerTx[]; total?: number };
         const list = body.transactions ?? [];
-        for (const t of list) {
-          out.push({
-            type: t.transactionType ?? "",
-            orderId: t.orderId ?? null,
-            date: t.transactionDate ?? "",
-            fee: parseFloat(t.totalFeeAmount?.value ?? "0") || 0,
-            amount: parseFloat(t.amount?.value ?? "0") || 0,
-            bookingEntry: t.bookingEntry ?? null,
-          });
-        }
+        out.push(...list);
         total = typeof body.total === "number" ? body.total : list.length;
         if (list.length === 0) break;
         offset += list.length;
         page++;
       }
-      return { tx: out, truncated: offset < total };
+      return { raw: out, truncated: offset < total };
     }));
     if (results.some((r) => r === null)) return null;
-    const ok = results as Array<{ tx: FinanceTx[]; truncated: boolean }>;
-    return { tx: ok.flatMap((r) => r.tx), truncated: ok.some((r) => r.truncated) };
+    const ok = results as Array<{ raw: RawLedgerTx[]; truncated: boolean }>;
+    // Windows share an edge instant; de-duplicate by transaction id.
+    const seen = new Set<string>();
+    const ledger: LedgerTx[] = [];
+    ok.flatMap((r) => r.raw).forEach((r, idx) => {
+      const t = parseLedgerTx(r, idx);
+      if (seen.has(t.id)) return;
+      seen.add(t.id);
+      ledger.push(t);
+    });
+    const tx: FinanceTx[] = ledger.map((t) => ({
+      type: t.type,
+      orderId: t.orderId,
+      date: t.date,
+      fee: t.feeCents / 100,
+      amount: Math.abs(t.amountCents) / 100,
+      bookingEntry: t.amountCents < 0 ? "DEBIT" : "CREDIT",
+    }));
+    return { tx, ledger, truncated: ok.some((r) => r.truncated) };
+  } catch {
+    return null;
+  }
+}
+
+/** Payouts eBay sent to the bank in the range (read-only). */
+export async function fetchPayouts(startMs: number, endMs: number): Promise<Payout[] | null> {
+  try {
+    const filter = encodeURIComponent(`payoutDate:[${new Date(startMs).toISOString()}..${new Date(endMs).toISOString()}]`);
+    const out: Payout[] = [];
+    let offset = 0;
+    for (let page = 0; page < 10; page++) {
+      const { status, data } = await financesRequest(`/sell/finances/v1/payout?filter=${filter}&limit=200&offset=${offset}`);
+      if (status >= 400) return null;
+      const body = data as { payouts?: Array<{ payoutId?: string; payoutDate?: string; payoutStatus?: string; amount?: { value?: string } }>; total?: number };
+      const list = body.payouts ?? [];
+      for (const p of list) {
+        out.push({ id: p.payoutId ?? "", date: p.payoutDate ?? "", amountCents: toCents(p.amount?.value), status: p.payoutStatus ?? "" });
+      }
+      offset += list.length;
+      if (list.length === 0 || offset >= (body.total ?? offset)) break;
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** eBay's own totals for a date range, used to cross-check the ledger. */
+export async function fetchTransactionSummary(fromIso: string, toIso: string): Promise<EbaySummary | null> {
+  try {
+    const filter = encodeURIComponent(`transactionDate:[${fromIso}..${toIso}]`);
+    const { status, data } = await financesRequest(`/sell/finances/v1/transaction_summary?filter=${filter}`);
+    if (status >= 400) return null;
+    const d = data as Record<string, { value?: string } | undefined>;
+    const c = (k: string) => (d[k]?.value != null ? Math.abs(toCents(d[k]?.value)) : undefined);
+    return {
+      creditCents: c("creditAmount"),
+      refundCents: c("refundAmount"),
+      shippingLabelCents: c("shippingLabelAmount"),
+      nonSaleChargeCents: c("nonSaleChargeAmount"),
+      disputeCents: c("disputeAmount"),
+      onHoldCents: c("onHoldAmount"),
+    };
   } catch {
     return null;
   }

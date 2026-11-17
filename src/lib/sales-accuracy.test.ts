@@ -119,9 +119,8 @@ describe("shipping loss", () => {
     const v = deriveView(feed(sales, { finances: { available: true, refunds: [], otherCharges: [], labels: [{ date: iso(cur.start + DAY), amount: 9 }, { date: iso(cur.start + 2 * DAY), amount: 9 }] } }), 30, NOW);
     expect(v.current.shippingNet).toBe(-10);
     expect(v.current.freeShippingSales).toBe(1);
-    const tip = v.insights.find((i) => i.kind === "shipping_loss");
-    expect(tip?.text).toMatch(/\$10\.00 more than buyers paid/);
-    expect(tip?.text).toMatch(/1 of 2 sales had free shipping/);
+    // Legacy free shipping is Sel's deliberate choice -> reported, never nagged about.
+    expect(v.insights.map((i) => i.kind)).not.toContain("shipping_loss");
   });
   it("no shipping figure without Finances data", () => {
     const v = deriveView(feed([sale(NOW - DAY)], { finances: { available: false, refunds: [], labels: [], otherCharges: [] } }), 30, NOW);

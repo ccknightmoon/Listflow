@@ -14,6 +14,15 @@ import { ITEM_TYPE_WEIGHT_TABLE } from "./shipping";
 export type DayRange = 7 | 30 | 90;
 const DAY_MS = 86_400_000;
 
+/** Integer cents for exact sums (inputs are 2-decimal dollar amounts). */
+export const toC = (n: number | null | undefined): number => (typeof n === "number" && Number.isFinite(n) ? Math.round(n * 100) : 0);
+const fromC = (c: number): number => c / 100;
+
+/** The date that decides which period a sale belongs to: eBay's transaction date, else the order date. */
+export function saleDate(s: { soldAt: string; bookedAt?: string | null }): string {
+  return s.bookedAt || s.soldAt;
+}
+
 export interface AnalyticsSale {
   key: string;
   listingId: string;
@@ -23,6 +32,9 @@ export interface AnalyticsSale {
   shippingPaid: number;
   taxPaid: number;
   soldAt: string;
+  /** eBay Finances transactionDate of the order's SALE; the date basis when present. */
+  bookedAt?: string | null;
+  orderId?: string | null;
   listedAt: string | null;
   ebayCategory: string | null;
   storeCategoryName: string | null;
@@ -83,7 +95,7 @@ export interface Bucket {
  * 90 = 12x7 + 6) and is flagged partial. Every sale in the period lands in
  * exactly one bar, so the bars always add up to the period total.
  */
-export function bucketPeriod(sales: Array<Pick<AnalyticsSale, "soldAt" | "itemTotal"> & { qty?: number }>, days: number, now: number): Bucket[] {
+export function bucketPeriod(sales: Array<Pick<AnalyticsSale, "soldAt" | "itemTotal"> & { qty?: number; bookedAt?: string | null }>, days: number, now: number): Bucket[] {
   const period = currentPeriod(days, now);
   const step = days <= 7 ? 1 : 7;
   const buckets: Bucket[] = [];
@@ -94,16 +106,16 @@ export function bucketPeriod(sales: Array<Pick<AnalyticsSale, "soldAt" | "itemTo
     buckets.push({ start, end, total: 0, count: 0, units: 0, partial: span < step, days: span });
   }
   for (const s of sales) {
-    const t = Date.parse(s.soldAt);
+    const t = Date.parse(saleDate(s));
     if (Number.isNaN(t) || t < period.start || t >= period.end) continue;
     const b = buckets.find((x) => t >= x.start && t < x.end);
     if (b) {
-      b.total += s.itemTotal;
+      b.total += toC(s.itemTotal); // cents while summing
       b.count += 1;
       b.units += s.qty ?? 1;
     }
   }
-  for (const b of buckets) b.total = round2(b.total);
+  for (const b of buckets) b.total = fromC(b.total);
   return buckets;
 }
 
@@ -164,7 +176,7 @@ export interface FinanceExtras {
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function sumIn(list: DatedAmount[], p: PeriodBounds): number {
-  return list.reduce((acc, x) => (inPeriod(x.date, p) ? acc + x.amount : acc), 0);
+  return list.reduce((acc, x) => (inPeriod(x.date, p) ? acc + toC(x.amount) : acc), 0); // cents
 }
 
 export function daysToSell(s: Pick<AnalyticsSale, "soldAt" | "listedAt">): number | null {
@@ -181,20 +193,20 @@ export function summarizePeriod(
   feePercent: number,
   extras?: FinanceExtras,
 ): PeriodSummary {
-  const sales = allSales.filter((s) => inPeriod(s.soldAt, p));
+  const sales = allSales.filter((s) => inPeriod(saleDate(s), p));
   let units = 0, itemSales = 0, ship = 0, tax = 0, fees = 0, feesActual = 0, cogs = 0, withCost = 0;
   let daysSum = 0, withDays = 0, freeShip = 0;
   for (const s of sales) {
     if (!(s.shippingPaid > 0)) freeShip++;
     units += s.qty;
-    itemSales += s.itemTotal;
-    ship += s.shippingPaid || 0;
-    tax += s.taxPaid || 0;
+    itemSales += toC(s.itemTotal);
+    ship += toC(s.shippingPaid);
+    tax += toC(s.taxPaid);
     const f = chooseFee(s, feePercent);
-    fees += f.fee;
+    fees += toC(f.fee);
     if (f.actual) feesActual++;
     if (typeof s.costBasis === "number" && Number.isFinite(s.costBasis) && s.costBasis >= 0) {
-      cogs += s.costBasis;
+      cogs += toC(s.costBasis);
       withCost++;
     }
     const d = daysToSell(s);
@@ -206,26 +218,26 @@ export function summarizePeriod(
   const refunds = extras?.available ? sumIn(extras.refunds, p) : 0;
   const labelCosts = extras?.available ? sumIn(extras.labels, p) : 0;
   const otherCharges = extras?.available ? sumIn(extras.otherCharges, p) : 0;
-  const profit = itemSales + ship - fees - refunds - labelCosts - otherCharges - cogs;
+  const profit = itemSales + ship - fees - refunds - labelCosts - otherCharges - cogs; // all cents
   return {
     orders: sales.length,
     units,
-    itemSales: round2(itemSales),
-    avgSalePrice: units > 0 ? round2(itemSales / units) : null,
-    shippingPaidByBuyers: round2(ship),
+    itemSales: fromC(itemSales),
+    avgSalePrice: units > 0 ? Math.round(itemSales / units) / 100 : null,
+    shippingPaidByBuyers: fromC(ship),
     freeShippingSales: freeShip,
-    shippingNet: extras?.available ? round2(ship - labelCosts) : null,
-    taxCollected: round2(tax),
-    fees: round2(fees),
+    shippingNet: extras?.available ? fromC(ship - labelCosts) : null,
+    taxCollected: fromC(tax),
+    fees: fromC(fees),
     feesActualCount: feesActual,
     feesEstimatedCount: sales.length - feesActual,
-    cogs: round2(cogs),
+    cogs: fromC(cogs),
     salesWithCost: withCost,
     salesMissingCost: sales.length - withCost,
-    refunds: round2(refunds),
-    labelCosts: round2(labelCosts),
-    otherCharges: round2(otherCharges),
-    profit: round2(profit),
+    refunds: fromC(refunds),
+    labelCosts: fromC(labelCosts),
+    otherCharges: fromC(otherCharges),
+    profit: fromC(profit),
     profitCoversAllCosts: sales.length > 0 && withCost === sales.length && Boolean(extras?.available),
     avgDaysToSell: withDays > 0 ? Math.round((daysSum / withDays) * 10) / 10 : null,
     salesWithDays: withDays,
@@ -320,7 +332,7 @@ export interface CategoryRow {
 }
 
 export function categoryBreakdown(sales: AnalyticsSale[], feePercent: number): CategoryRow[] {
-  const total = sales.reduce((a, s) => a + s.itemTotal, 0);
+  const total = sales.reduce((a, s) => a + toC(s.itemTotal), 0);
   const groups = new Map<string, AnalyticsSale[]>();
   for (const s of sales) {
     const k = resolveCategory(s);
@@ -331,21 +343,21 @@ export function categoryBreakdown(sales: AnalyticsSale[], feePercent: number): C
   const rows: CategoryRow[] = [];
   for (const [category, list] of groups) {
     const units = list.reduce((a, s) => a + s.qty, 0);
-    const revenue = list.reduce((a, s) => a + s.itemTotal, 0);
+    const revenue = list.reduce((a, s) => a + toC(s.itemTotal), 0); // cents
     const costed = list.filter((s) => typeof s.costBasis === "number" && s.costBasis >= 0);
     let marginPercent: number | null = null;
     if (costed.length > 0) {
-      const rev = costed.reduce((a, s) => a + s.itemTotal + (s.shippingPaid || 0), 0);
-      const cost = costed.reduce((a, s) => a + (s.costBasis as number) + chooseFee(s, feePercent).fee, 0);
+      const rev = costed.reduce((a, s) => a + toC(s.itemTotal) + toC(s.shippingPaid), 0);
+      const cost = costed.reduce((a, s) => a + toC(s.costBasis) + toC(chooseFee(s, feePercent).fee), 0);
       marginPercent = rev > 0 ? Math.round(((rev - cost) / rev) * 1000) / 10 : null;
     }
     const days = list.map(daysToSell).filter((d): d is number => d != null);
     rows.push({
       category,
       units,
-      revenue: round2(revenue),
+      revenue: fromC(revenue),
       share: total > 0 ? Math.round((revenue / total) * 1000) / 10 : 0,
-      avgPrice: units > 0 ? round2(revenue / units) : 0,
+      avgPrice: units > 0 ? Math.round(revenue / units) / 100 : 0,
       marginPercent,
       salesWithCost: costed.length,
       avgDaysToSell: days.length ? Math.round((days.reduce((a, d) => a + d, 0) / days.length) * 10) / 10 : null,
@@ -368,7 +380,7 @@ export interface ActiveListing {
 }
 
 export interface Insight {
-  kind: "source_more" | "fast_mover" | "slow_movers" | "missing_costs" | "price_trend" | "no_sales" | "shipping_loss";
+  kind: "source_more" | "fast_mover" | "slow_movers" | "missing_costs" | "price_trend" | "no_sales";
   text: string;
 }
 
@@ -409,14 +421,6 @@ export function buildInsights(input: {
     out.push({
       kind: "slow_movers",
       text: `${slow.length} listing${slow.length === 1 ? " has" : "s have"} been live ${SLOW_MOVER_DAYS}+ days without selling — try a price drop, an offer to watchers, or new photos.`,
-    });
-  }
-  if (current.shippingNet != null && current.shippingNet < -5) {
-    const loss = Math.abs(current.shippingNet);
-    out.push({
-      kind: "shipping_loss",
-      text: `Shipping cost you $${loss.toFixed(2)} more than buyers paid ($${current.shippingPaidByBuyers.toFixed(2)} paid vs $${current.labelCosts.toFixed(2)} in eBay labels)` +
-        (current.freeShippingSales > 0 ? ` — ${current.freeShippingSales} of ${current.orders} sales had free shipping, so their postage came out of the item price.` : ". Check package weights and your calculated-shipping policy."),
     });
   }
   if (current.salesMissingCost > 0) {
@@ -475,8 +479,8 @@ export function deriveView(feed: FeedForView, days: number, now: number): SalesV
   const period = currentPeriod(days, now);
   const previousBounds = previousPeriod(days, now);
   const sales = feed.sales
-    .filter((s) => inPeriod(s.soldAt, period))
-    .sort((a, b) => Date.parse(b.soldAt) - Date.parse(a.soldAt));
+    .filter((s) => inPeriod(saleDate(s), period))
+    .sort((a, b) => Date.parse(saleDate(b)) - Date.parse(saleDate(a)));
   const current = summarizePeriod(feed.sales, period, feed.feePercent, feed.finances);
   const previous = canCompare(previousBounds.start, feed.feedStart)
     ? summarizePeriod(feed.sales, previousBounds, feed.feePercent, feed.finances)

@@ -5,7 +5,8 @@
 // derives every 7/30/90-day view from this one payload.
 
 import { tradingRequest } from "./ebay-inventory";
-import { fetchFinanceTransactions } from "./ebay-finances";
+import { fetchFinanceTransactions, fetchPayouts } from "./ebay-finances";
+import type { LedgerTx, Payout } from "./ledger";
 import { fetchAllOfListType, isListTypeError, toListing } from "./ebay-listings";
 import { parseTransactions, xmlFind, decodeXml, type ParsedSale } from "./sales-parse";
 import { allocateActualFees, extractFinanceExtras, normalizeOrderId } from "./finance-match";
@@ -132,6 +133,10 @@ export interface SalesFeed {
   excluded: { cancelled: number; awaitingPayment: number };
   truncated: boolean;
   finances: { available: boolean; truncated: boolean; refunds: DatedAmount[]; labels: DatedAmount[]; otherCharges: DatedAmount[] };
+  /** Every eBay Finances transaction in the feed window (integer cents) -- the money source of truth. */
+  ledger: LedgerTx[];
+  /** Bank payouts eBay sent in the feed window; null if unavailable. */
+  payouts: Payout[] | null;
   active: ActiveListing[];
   activeCount: number | null;
   feePercent: number;
@@ -140,11 +145,12 @@ export interface SalesFeed {
 
 export async function buildSalesFeed(supabase: Supabase, feePercent: number, now = Date.now()): Promise<SalesFeed | FeedError> {
   const startMs = now - FEED_DAYS * DAY_MS + FEED_SAFETY_MS;
-  const [txResult, finances, activeResult, saleCosts] = await Promise.all([
+  const [txResult, finances, activeResult, saleCosts, payouts] = await Promise.all([
     fetchTransactionBlocks(now, startMs),
     fetchFinanceTransactions(startMs, now),
     fetchAllOfListType("ActiveList").catch(() => null),
     loadSaleCosts(supabase),
+    fetchPayouts(startMs - 14 * DAY_MS, now + DAY_MS),
   ]);
   if ("error" in txResult) return txResult;
 
@@ -159,6 +165,16 @@ export async function buildSalesFeed(supabase: Supabase, feePercent: number, now
 
   const drafts = await loadDrafts(supabase, [...new Set(kept.map((s) => s.listingId))]);
   const actualFees = finances ? allocateActualFees(kept, finances.tx) : new Map<string, number>();
+  // One date basis for money AND items: eBay's transactionDate of the
+  // order's SALE transaction. Sales eBay Finances doesn't (yet) list keep
+  // their order date and are flagged on the page.
+  const bookedByOrder = new Map<string, string>();
+  for (const t of finances?.ledger ?? []) {
+    if (t.type !== "SALE" || !t.orderId) continue;
+    const id = normalizeOrderId(t.orderId) as string;
+    const prev = bookedByOrder.get(id);
+    if (!prev || Date.parse(t.date) < Date.parse(prev)) bookedByOrder.set(id, t.date);
+  }
 
   const sales = kept.map((s) => {
     const d = drafts.get(s.listingId);
@@ -173,6 +189,8 @@ export async function buildSalesFeed(supabase: Supabase, feePercent: number, now
       shippingPaid: s.shippingPaid,
       taxPaid: s.taxPaid,
       soldAt: s.soldAt,
+      bookedAt: (s.orderId && bookedByOrder.get(normalizeOrderId(s.orderId) as string)) || null,
+      orderId: s.orderId,
       listedAt: s.listedAt ?? d?.created_at ?? null,
       ebayCategory: s.ebayCategory,
       storeCategoryName: d?.store_category_name ?? null,
@@ -184,16 +202,11 @@ export async function buildSalesFeed(supabase: Supabase, feePercent: number, now
     };
   });
 
-  const saleDateByOrder = new Map<string, string>();
-  for (const s of kept) {
-    const id = normalizeOrderId(s.orderId);
-    if (id && !saleDateByOrder.has(id)) saleDateByOrder.set(id, s.soldAt);
-  }
   const cancelledOrders = new Set(
     parsed.filter((s) => s.status === "cancelled").map((s) => normalizeOrderId(s.orderId)).filter((x): x is string => Boolean(x)),
   );
   const extras = finances
-    ? extractFinanceExtras(finances.tx, { saleDateByOrder, cancelledOrders })
+    ? extractFinanceExtras(finances.tx, { saleDateByOrder: new Map(), cancelledOrders })
     : { refunds: [], labels: [], otherCharges: [] };
   let active: ActiveListing[] = [];
   let activeCount: number | null = null;
@@ -212,6 +225,8 @@ export async function buildSalesFeed(supabase: Supabase, feePercent: number, now
     excluded,
     truncated: txResult.truncated,
     finances: { available: Boolean(finances), truncated: finances?.truncated ?? false, ...extras },
+    ledger: finances?.ledger ?? [],
+    payouts,
     active,
     activeCount,
     feePercent,
