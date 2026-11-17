@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import NeedsAttention from "@/components/NeedsAttention";
+import { getPublishQueue, type PublishItem } from "@/lib/publish-queue";
 import Link from "next/link";
-import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight, Tag, MessageCircle, Clock } from "lucide-react";
+import { Plus, ImagePlus, FileText, BarChart2, TrendingUp } from "lucide-react";
 import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
 import { apiFetch } from "@/lib/api";
@@ -22,6 +24,8 @@ const TREND_SALES_CACHE_KEY = "dashboard:trendSales";
 const PENDING_OFFERS_CACHE_KEY = "dashboard:pendingOffers";
 const BUYER_QUESTIONS_CACHE_KEY = "dashboard:buyerQuestions";
 const STALE_LISTINGS_CACHE_KEY = "dashboard:staleListings";
+const DRAFT_GAPS_CACHE_KEY = "dashboard:draftGaps";
+const NO_ITEMS: PublishItem[] = [];
 
 interface Stats {
   drafts: number;
@@ -67,6 +71,14 @@ export default function DashboardPage() {
   // Reuses the same GET /api/ebay/store call and STALE_DAYS_THRESHOLD
   // formula /store itself uses (src/lib/stale-listings.ts), so the two
   // counts can't drift apart.
+  const [draftGaps, setDraftGaps] = useState<{ photo: number; price: number } | null>(() => getPageCache<{ photo: number; price: number }>(DRAFT_GAPS_CACHE_KEY) ?? null);
+  const queue = typeof window === "undefined" ? null : getPublishQueue();
+  const queueItems = useSyncExternalStore(
+    (cb) => (queue ? queue.subscribe(cb) : () => {}),
+    () => (queue ? queue.getItems() : NO_ITEMS),
+    () => NO_ITEMS,
+  );
+  const failedListings = queueItems.filter((i) => i.status === "failed").length;
   const [staleListingsCount, setStaleListingsCount] = useState<number | null>(() => getPageCache<number>(STALE_LISTINGS_CACHE_KEY) ?? null);
 
   const supabase = useMemo(
@@ -125,6 +137,21 @@ export default function DashboardPage() {
         null;
       setDisplayName(name);
       if (name) setPageCache(DISPLAY_NAME_CACHE_KEY, name);
+    })();
+
+    // Drafts that can't be listed yet (Needs attention).
+    void (async () => {
+      try {
+        const [photo, price] = await Promise.all([
+          apiFetch<{ total?: number }>("/api/drafts?filter=needs-photo&page=1&pageSize=1"),
+          apiFetch<{ total?: number }>("/api/drafts?filter=needs-price&page=1&pageSize=1"),
+        ]);
+        const gaps = { photo: photo.total ?? 0, price: price.total ?? 0 };
+        setDraftGaps(gaps);
+        setPageCache(DRAFT_GAPS_CACHE_KEY, gaps);
+      } catch {
+        // leave as-is
+      }
     })();
 
     // Same eBay sales endpoint the Sales page itself uses, just a fourth
@@ -321,138 +348,17 @@ export default function DashboardPage() {
           <ActionTile href="/sales" viewTransitionName="sales-panel" icon={TrendingUp} title="Sales history" delay="d6" />
         </div>
 
-        <MorphLink
-          href="/ship"
-          viewTransitionName="ship-panel"
-          className="card d6 stagger col-span-2 p-3.5 flex items-center gap-3 active:scale-[.98]"
-          style={{
-            background: "color-mix(in srgb, var(--danger) 10%, var(--glass))",
-            borderColor: "color-mix(in srgb, var(--danger) 26%, var(--glass-line))",
-            transitionTimingFunction: "var(--spring)",
+        <NeedsAttention
+          counts={{
+            toShip: shipCount,
+            offers: pendingOffersCount,
+            questions: buyerQuestionsCount,
+            failedListings,
+            draftsNeedPhoto: draftGaps?.photo ?? null,
+            draftsNeedPrice: draftGaps?.price ?? null,
+            stale: staleListingsCount,
           }}
-        >
-          <div
-            className="w-[34px] h-[34px] rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: "var(--glass-strong)", color: "var(--danger)" }}
-          >
-            <Package className="w-4 h-4" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold">To ship</p>
-            <p className="text-[11.5px]" style={{ color: "var(--text-tertiary)" }}>
-              {shipCount === null
-                ? "Check pending shipments"
-                : shipCount === 0
-                ? "All caught up"
-                : `Orders ready for packing · tap to view`}
-            </p>
-          </div>
-          {shipCount !== null && shipCount > 0 && (
-            <span
-              className="text-[11px] font-extrabold min-w-[20px] h-5 rounded-full flex items-center justify-center px-1.5 text-white flex-shrink-0"
-              style={{ background: "var(--danger)" }}
-            >
-              {shipCount}
-            </span>
-          )}
-          <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--danger)" }} />
-        </MorphLink>
-
-        <Link
-          href="/offers"
-          className="card d6 stagger col-span-2 p-3.5 flex items-center gap-3 active:scale-[.98]"
-          style={{ transitionTimingFunction: "var(--spring)" }}
-        >
-          <div
-            className="w-[34px] h-[34px] rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: "color-mix(in srgb, var(--accent) 16%, var(--bg-surface))", color: "var(--accent)" }}
-          >
-            <Tag className="w-4 h-4" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold">Pending offers</p>
-            <p className="text-[11.5px]" style={{ color: "var(--text-tertiary)" }}>
-              {pendingOffersCount === null
-                ? "Check for Best Offers"
-                : pendingOffersCount === 0
-                ? "All caught up"
-                : "Waiting on your response · tap to view"}
-            </p>
-          </div>
-          {pendingOffersCount !== null && pendingOffersCount > 0 && (
-            <span
-              className="text-[11px] font-extrabold min-w-[20px] h-5 rounded-full flex items-center justify-center px-1.5 text-white flex-shrink-0"
-              style={{ background: "var(--accent)" }}
-            >
-              {pendingOffersCount}
-            </span>
-          )}
-          <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--accent)" }} />
-        </Link>
-
-        <Link
-          href="/messages"
-          className="card d6 stagger col-span-2 p-3.5 flex items-center gap-3 active:scale-[.98]"
-          style={{ transitionTimingFunction: "var(--spring)" }}
-        >
-          <div
-            className="w-[34px] h-[34px] rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: "color-mix(in srgb, var(--accent) 16%, var(--bg-surface))", color: "var(--accent)" }}
-          >
-            <MessageCircle className="w-4 h-4" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold">Buyer questions</p>
-            <p className="text-[11.5px]" style={{ color: "var(--text-tertiary)" }}>
-              {buyerQuestionsCount === null
-                ? "Check for buyer questions"
-                : buyerQuestionsCount === 0
-                ? "All caught up"
-                : "Waiting on your reply · tap to view"}
-            </p>
-          </div>
-          {buyerQuestionsCount !== null && buyerQuestionsCount > 0 && (
-            <span
-              className="text-[11px] font-extrabold min-w-[20px] h-5 rounded-full flex items-center justify-center px-1.5 text-white flex-shrink-0"
-              style={{ background: "var(--accent)" }}
-            >
-              {buyerQuestionsCount}
-            </span>
-          )}
-          <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--accent)" }} />
-        </Link>
-
-        <Link
-          href="/store"
-          className="card d6 stagger col-span-2 p-3.5 flex items-center gap-3 active:scale-[.98]"
-          style={{ transitionTimingFunction: "var(--spring)" }}
-        >
-          <div
-            className="w-[34px] h-[34px] rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: "var(--warning-bg)", color: "var(--warning-border)" }}
-          >
-            <Clock className="w-4 h-4" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-bold">Stale listings</p>
-            <p className="text-[11.5px]" style={{ color: "var(--text-tertiary)" }}>
-              {staleListingsCount === null
-                ? "Check for stale listings"
-                : staleListingsCount === 0
-                ? "Nothing sitting too long"
-                : "30+ days, no sale · tap to view"}
-            </p>
-          </div>
-          {staleListingsCount !== null && staleListingsCount > 0 && (
-            <span
-              className="text-[11px] font-extrabold min-w-[20px] h-5 rounded-full flex items-center justify-center px-1.5 text-white flex-shrink-0"
-              style={{ background: "var(--warning-border)" }}
-            >
-              {staleListingsCount}
-            </span>
-          )}
-          <ChevronRight className="w-4 h-4 flex-shrink-0" style={{ color: "var(--warning-border)" }} />
-        </Link>
+        />
       </div>
 
       {!statsLoaded && (

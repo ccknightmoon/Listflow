@@ -37,3 +37,16 @@ describe("nav hidden on focused screens", () => {
     expect(renderToString(createElement(Nav))).toBe("");
   });
 });
+
+import NeedsAttention from "./NeedsAttention";
+describe("NeedsAttention", () => {
+  const zero = { toShip: 0, offers: 0, questions: 0, failedListings: 0, draftsNeedPhoto: 0, draftsNeedPrice: 0, stale: 0 };
+  it("shows rows with one-tap links, most urgent first", () => {
+    const html = renderToString(createElement(NeedsAttention, { counts: { ...zero, toShip: 2, draftsNeedPrice: 5 } }));
+    expect(html.indexOf("Orders to ship")).toBeLessThan(html.indexOf("Drafts missing a price"));
+    expect(html).toContain('href="/drafts?filter=needs-price"');
+  });
+  it("says all caught up when everything is zero", () => {
+    expect(renderToString(createElement(NeedsAttention, { counts: zero }))).toContain("All caught up");
+  });
+});

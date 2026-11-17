@@ -123,7 +123,15 @@ export default function DraftsPage() {
   const draftsByIdRef = useRef<Record<string, Draft>>({});
 
   useEffect(() => {
-    loadDrafts();
+    // Deep link from the dashboard's "Needs attention" (e.g. ?filter=needs-price).
+    const urlFilter = new URLSearchParams(window.location.search).get("filter");
+    const validFilters: DraftFilter[] = ["all", "ready", "needs-photo", "needs-price"];
+    if (urlFilter && (validFilters as string[]).includes(urlFilter) && urlFilter !== "all") {
+      setFilter(urlFilter as DraftFilter);
+      loadDrafts({ filter: urlFilter as DraftFilter, page: 1 });
+    } else {
+      loadDrafts();
+    }
     loadNoPriceTotal();
     return () => {
       if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
