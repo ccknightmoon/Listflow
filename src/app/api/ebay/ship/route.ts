@@ -6,6 +6,8 @@ import { ebayContext } from "@/lib/ebay-request-context";
 import { fetchUnshippedOrders, type UnshippedOrder } from "@/lib/ebay-ship-orders";
 
 export const runtime = "nodejs";
+// Always ask eBay: an order must drop off the moment it ships.
+export const dynamic = "force-dynamic";
 
 function xmlFind(xml: string, tag: string): string {
   const m = xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
@@ -139,7 +141,7 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ items, count: items.length });
+  return NextResponse.json({ items, count: items.length }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("[api/ebay/ship] failed:", err);
     return NextResponse.json({ error: (err as Error).message, items: [], count: 0 }, { status: 500 });

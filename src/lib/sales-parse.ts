@@ -31,7 +31,7 @@ function num(s: string): number {
 // eBay CancelStatusCodeType values that mean the sale did not happen (or
 // was fully reversed). Pending/requested/rejected cancellations still count
 // as sales until eBay closes them.
-const CANCELLED_STATUSES = new Set([
+export const CANCELLED_STATUSES = new Set([
   "CancelComplete",
   "CancelClosedWithRefund",
   "CancelClosedUnknownRefund",

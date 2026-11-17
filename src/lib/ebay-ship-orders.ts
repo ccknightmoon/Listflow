@@ -1,5 +1,8 @@
 import { tradingRequest } from "@/lib/ebay-inventory";
 import { xmlFind, xmlFindAll } from "@/lib/ebay-listings";
+import { decodeEntities } from "@/lib/html-entities";
+import { fetchFinanceTransactions } from "@/lib/ebay-finances";
+import { orderIdOf, shipState } from "@/lib/ship-status";
 
 // Moved out of api/ebay/ship/route.ts so the daily-digest cron
 // (src/app/api/cron/daily-digest/route.ts) can get an unshipped-orders
@@ -36,6 +39,8 @@ export interface UnshippedOrder {
   paidAt: string;
   address: ShippingAddress | null;
   galleryUrl: string | null;
+  buyerUserId?: string | null;
+  orderId?: string | null;
 }
 
 export interface FetchUnshippedOrdersResult {
@@ -45,70 +50,78 @@ export interface FetchUnshippedOrdersResult {
   reconnect?: boolean;
 }
 
+const SHIP_WINDOW_DAYS = 30;
+const MAX_PAGES = 10;
+
+function txXml(from: string, to: string, page: number) {
+  return `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailLevel>ReturnAll</DetailLevel><IncludeContainingOrder>true</IncludeContainingOrder><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination></GetSellerTransactionsRequest>`;
+}
+
+/** Order ids that have an eBay shipping label in Finances (label bought = shipped). Empty if unavailable. */
+async function ordersWithEbayLabels(): Promise<Set<string>> {
+  const res = await fetchFinanceTransactions(Date.now() - 45 * 86_400_000, Date.now()).catch(() => null);
+  const set = new Set<string>();
+  for (const t of res?.ledger ?? []) {
+    if (t.type === "SHIPPING_LABEL" && t.orderId && t.amountCents < 0) set.add(t.orderId.toUpperCase());
+  }
+  return set;
+}
+
 export async function fetchUnshippedOrders(): Promise<FetchUnshippedOrdersResult> {
-  const from = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const from = new Date(Date.now() - SHIP_WINDOW_DAYS * 86_400_000).toISOString();
   const to = new Date().toISOString();
 
-  const result = await tradingRequest(
-    "GetSellerTransactions",
-    `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailLevel>ReturnAll</DetailLevel><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>1</PageNumber></Pagination></GetSellerTransactionsRequest>`
-  );
-
-  if (!result.body.includes("<Ack>Success</Ack>")) {
-    const errMsg = xmlFind(result.body, "LongMessage") || xmlFind(result.body, "ShortMessage") || "eBay API error";
-    // "Not connected" is already checked up front via requireEbayConnection()
-    // before this ever runs.
-    const isAuth = errMsg.toLowerCase().includes("auth") || errMsg.toLowerCase().includes("token") || errMsg.toLowerCase().includes("permission");
+  // Newer schema (1225) so OrderID/ShippedTime/tracking come back on the
+  // containing order too, plus every page (not just the first 200).
+  const [first, labelled] = await Promise.all([
+    tradingRequest("GetSellerTransactions", txXml(from, to, 1), "1225"),
+    ordersWithEbayLabels(),
+  ]);
+  if (!first.body.includes("<Ack>Success</Ack>") && !first.body.includes("<Ack>Warning</Ack>")) {
+    const errMsg = xmlFind(first.body, "LongMessage") || xmlFind(first.body, "ShortMessage") || "eBay API error";
+    const isAuth = ["auth", "token", "permission", "scope"].some((w) => errMsg.toLowerCase().includes(w));
     return { items: [], error: errMsg, connect: false, reconnect: isAuth };
   }
+  const pages = Math.min(parseInt(xmlFind(xmlFind(first.body, "PaginationResult"), "TotalNumberOfPages") || "1", 10) || 1, MAX_PAGES);
+  const bodies = [first.body];
+  if (pages > 1) {
+    const rest = await Promise.all(Array.from({ length: pages - 1 }, (_, i) => tradingRequest("GetSellerTransactions", txXml(from, to, i + 2), "1225")));
+    for (const r of rest) bodies.push(r.body);
+  }
 
-  const txBlocks = xmlFindAll(result.body, "Transaction");
-
-  const items = txBlocks
-    .map((tx) => {
-      const paidTime = xmlFind(tx, "PaidTime");
-      const shippedTime = xmlFind(tx, "ShippedTime");
-
-      // Only items that have been paid but not yet shipped
-      if (!paidTime || shippedTime) return null;
-
+  const seen = new Set<string>();
+  const items: UnshippedOrder[] = [];
+  for (const body of bodies) {
+    for (const tx of xmlFindAll(body, "Transaction")) {
+      if (shipState(tx, labelled) !== "awaiting") continue;
       const itemBlock = xmlFind(tx, "Item");
       const listingId = xmlFind(itemBlock, "ItemID");
-      const title = xmlFind(itemBlock, "Title") || xmlFind(tx, "Title");
       const transactionId = xmlFind(tx, "TransactionID");
+      const key = `${listingId}-${transactionId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
-      const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);
+      const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10) || 1;
       const pictureDetails = xmlFind(itemBlock, "PictureDetails");
-      const galleryUrl = xmlFind(pictureDetails, "GalleryURL") || xmlFind(itemBlock, "GalleryURL") || null;
-
-      const buyerBlock = xmlFind(tx, "Buyer");
-      const buyerInfoBlock = xmlFind(buyerBlock, "BuyerInfo");
-      const addrBlock = xmlFind(buyerInfoBlock, "ShippingAddress");
-
-      const addrName = xmlFind(addrBlock, "Name");
-      const street1 = xmlFind(addrBlock, "Street1");
-      const street2 = xmlFind(addrBlock, "Street2");
-      const city = xmlFind(addrBlock, "CityName");
-      const state = xmlFind(addrBlock, "StateOrProvince");
-      const zip = xmlFind(addrBlock, "PostalCode");
-
-      const address = (city || state || zip)
-        ? { name: addrName, street1, street2, city, state, zip }
-        : null;
-
-      return {
+      const addrBlock = xmlFind(xmlFind(xmlFind(tx, "Buyer"), "BuyerInfo"), "ShippingAddress");
+      const city = xmlFind(addrBlock, "CityName"), state = xmlFind(addrBlock, "StateOrProvince"), zip = xmlFind(addrBlock, "PostalCode");
+      items.push({
         listingId,
         transactionId,
-        title,
+        title: decodeEntities(xmlFind(itemBlock, "Title") || xmlFind(tx, "Title")),
         price,
         qty,
-        total: price * qty,
-        paidAt: paidTime,
-        address,
-        galleryUrl,
-      };
-    })
-    .filter((item): item is NonNullable<typeof item> => item !== null);
-
+        total: Math.round(price * qty * 100) / 100,
+        paidAt: xmlFind(tx, "PaidTime") || xmlFind(xmlFind(tx, "ContainingOrder"), "PaidTime"),
+        address: city || state || zip
+          ? { name: decodeEntities(xmlFind(addrBlock, "Name")), street1: decodeEntities(xmlFind(addrBlock, "Street1")), street2: decodeEntities(xmlFind(addrBlock, "Street2")), city: decodeEntities(city), state, zip }
+          : null,
+        galleryUrl: xmlFind(pictureDetails, "GalleryURL") || xmlFind(itemBlock, "GalleryURL") || null,
+        buyerUserId: xmlFind(xmlFind(tx, "Buyer"), "UserID") || null,
+        orderId: orderIdOf(tx),
+      });
+    }
+  }
+  items.sort((a, b) => Date.parse(a.paidAt) - Date.parse(b.paidAt)); // oldest (most urgent) first
   return { items };
 }

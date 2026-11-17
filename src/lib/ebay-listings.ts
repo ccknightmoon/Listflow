@@ -1,4 +1,5 @@
 import { tradingRequest } from "@/lib/ebay-inventory";
+import { decodeEntities } from "@/lib/html-entities";
 import { getEbayContext } from "@/lib/ebay-request-context";
 import { createTtlDedupeCache } from "@/lib/ttl-cache";
 
@@ -140,7 +141,7 @@ export async function fetchAllOfListType(listType: ListType): Promise<ListingsRe
 
 export function toListing(item: string, status: "active" | "ended") {
   const listingId = xmlFind(item, "ItemID");
-  const title = xmlFind(item, "Title") || "Untitled";
+  const title = decodeEntities(xmlFind(item, "Title")) || "Untitled";
   // Ended listings don't carry CurrentPrice — fall back to StartPrice.
   const priceStr = xmlFind(item, "CurrentPrice") || xmlFind(item, "StartPrice");
   const price = priceStr ? parseFloat(priceStr) : null;

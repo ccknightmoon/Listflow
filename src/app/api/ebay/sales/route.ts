@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { decodeEntities } from "@/lib/html-entities";
 import { tradingRequest } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
@@ -186,7 +187,7 @@ export async function GET(req: Request) {
 
   const sales = allTxBlocks.map((tx) => {
     const itemBlock = xmlFind(tx, "Item");
-    const title = xmlFind(itemBlock, "Title") || xmlFind(tx, "Title");
+    const title = decodeEntities(xmlFind(itemBlock, "Title") || xmlFind(tx, "Title"));
     const listingId = xmlFind(itemBlock, "ItemID");
     const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
     const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10);

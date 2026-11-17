@@ -7,6 +7,7 @@ import { ArrowLeft, ExternalLink, Loader2, Package, RefreshCw, Shirt } from "luc
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import { usePullToRefresh } from "@/components/usePullToRefresh";
 
 const SHIP_CACHE_KEY = "ship:items";
 
@@ -44,12 +45,16 @@ export default function ShipPage() {
   const [items, setItems] = useState<ShipItem[]>(() => getPageCache<ShipItem[]>(SHIP_CACHE_KEY) ?? []);
   const [loading, setLoading] = useState(() => getPageCache<ShipItem[]>(SHIP_CACHE_KEY) === undefined);
   const [error, setError] = useState<string | null>(null);
+  // True during EVERY check with eBay (cached rows can show meanwhile, but
+  // the list always reconciles with eBay on open / refresh / pull-down).
+  const [checking, setChecking] = useState(true);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
 
   useEffect(() => { load(); }, []);
 
   async function load() {
+    setChecking(true);
     if (getPageCache<ShipItem[]>(SHIP_CACHE_KEY) === undefined) setLoading(true);
     setError(null);
     setNeedsConnect(false);
@@ -69,8 +74,10 @@ export default function ShipPage() {
       setError("Failed to load shipments");
     } finally {
       setLoading(false);
+      setChecking(false);
     }
   }
+  const pull = usePullToRefresh(load);
 
   return (
     <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-10 overflow-hidden" style={{ viewTransitionName: "ship-panel" }}>
@@ -83,6 +90,11 @@ export default function ShipPage() {
         style={{ width: 200, height: 200, top: 10, right: -70, background: "var(--glow-primary)" }}
       />
 
+      {pull > 0 && (
+        <div className="flex justify-center -mt-2 mb-2" aria-hidden>
+          <RefreshCw className="w-5 h-5" style={{ color: "var(--accent)", opacity: pull, transform: `rotate(${pull * 270}deg)` }} />
+        </div>
+      )}
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dashboard"
@@ -93,7 +105,9 @@ export default function ShipPage() {
         </Link>
         <div className="flex-1">
           <h1 className="text-xl font-medium">To ship</h1>
-          {!loading && !error && (
+          {checking && !loading ? (
+            <p className="text-xs text-[var(--text-secondary)]">Checking with eBay…</p>
+          ) : !loading && !error && (
             <p className="text-xs text-[var(--text-secondary)]">
               {items.length === 0
                 ? "All caught up"
@@ -102,11 +116,12 @@ export default function ShipPage() {
           )}
         </div>
         <button
-          onClick={() => { setLoading(true); void load(); }}
-          disabled={loading}
+          onClick={() => void load()}
+          disabled={checking}
+          aria-label="Check with eBay"
           className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
         >
-          {loading
+          {checking
             ? <Loader2 className="w-4 h-4 animate-spin text-[var(--text-secondary)]" />
             : <RefreshCw className="w-4 h-4 text-[var(--text-secondary)]" />
           }
