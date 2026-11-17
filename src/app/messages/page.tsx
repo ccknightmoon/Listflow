@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMoney } from "@/lib/format";
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { useEffect, useRef, useState } from "react";
@@ -18,6 +19,9 @@ interface BuyerQuestion {
   itemId: string | null;
   title: string | null;
   thumbnail: string | null;
+  price?: number | null;
+  url?: string | null;
+  context?: "listing" | "order" | "general";
 }
 
 const MAX_REPLY_LEN = 2000; // Matches eBay's own limit on a reply's Body field.
@@ -213,25 +217,29 @@ export default function MessagesPage() {
             return (
               <div key={key} className={`card stagger p-3 ${i < 6 ? `d${i + 1}` : ""}`}>
                 <div className="flex items-start gap-3">
-                  {q.thumbnail ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={q.thumbnail}
-                      alt={q.title ?? ""}
-                      loading="lazy"
-                      decoding="async"
-                      className="w-12 h-12 rounded-md object-cover flex-shrink-0"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-shrink-0">
-                      <Shirt className="w-5 h-5 text-[var(--text-secondary)]" />
-                    </div>
-                  )}
+                  {(() => {
+                    const thumb = q.thumbnail ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={q.thumbnail} alt="" loading="lazy" decoding="async" width={48} height={48} className="w-12 h-12 rounded-md object-cover flex-shrink-0" />
+                    ) : (
+                      <div className="w-12 h-12 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-shrink-0">
+                        {q.context === "general" ? <MessageCircle className="w-5 h-5 text-[var(--text-secondary)]" /> : <Shirt className="w-5 h-5 text-[var(--text-secondary)]" />}
+                      </div>
+                    );
+                    return q.url ? <a href={q.url} target="_blank" rel="noopener noreferrer" aria-label="Open listing on eBay">{thumb}</a> : thumb;
+                  })()}
 
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{q.title || "Your listing"}</p>
+                    {q.url ? (
+                      <a href={q.url} target="_blank" rel="noopener noreferrer" className="flex items-baseline gap-2 min-w-0">
+                        <span className="text-sm font-medium truncate">{q.title || "Listing"}</span>
+                        {q.price != null && <span className="text-xs font-semibold tabular-nums flex-none" style={{ color: "var(--text-secondary)" }}>{formatMoney(q.price)}</span>}
+                      </a>
+                    ) : (
+                      <p className="text-sm font-medium truncate">General message</p>
+                    )}
                     <p className="text-xs text-[var(--text-secondary)] mt-0.5 truncate">
-                      {q.senderId || "Unknown buyer"}{timeAgo(q.createdAt) ? ` · ${timeAgo(q.createdAt)}` : ""}
+                      {q.context === "order" ? "About their order · " : ""}{q.senderId || "Unknown buyer"}{timeAgo(q.createdAt) ? ` · ${timeAgo(q.createdAt)}` : ""}
                     </p>
                     <p className="text-sm mt-1.5">{q.body || q.subject || "(no message text)"}</p>
                   </div>

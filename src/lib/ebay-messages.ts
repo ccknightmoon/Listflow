@@ -1,5 +1,6 @@
 import { tradingRequest } from "@/lib/ebay-inventory";
 import { xmlFind, xmlFindAll } from "@/lib/ebay-listings";
+import { decodeEntities } from "@/lib/html-entities";
 
 // Buyer questions come in through eBay's "Ask seller a question" flow on a
 // listing. Confirmed against eBay's Trading API reference before writing
@@ -16,6 +17,8 @@ export interface BuyerQuestion {
   body: string;
   createdAt: string;
   itemId: string | null;
+  itemTitle?: string | null;
+  itemPrice?: number | null;
 }
 
 function makeGetMemberMessagesXml(): string {
@@ -27,6 +30,33 @@ function makeGetMemberMessagesXml(): string {
 // Single call covering every listing at once (unlike GetBestOffers, which
 // is one call per active listing) -- no worker-pool/concurrency cap needed
 // here.
+/** Parse GetMemberMessages XML into questions with their listing details. */
+export function parseMemberMessages(body: string): BuyerQuestion[] {
+  // eBay nests each question in a <MemberMessageExchange>, with the listing
+  // (<Item>) as a SIBLING of <Question> -- not inside it. Reading Item from
+  // inside Question is why every card used to say "Your listing".
+  const exchanges = xmlFindAll(body, "MemberMessageExchange");
+  return (exchanges.length ? exchanges : xmlFindAll(body, "Question"))
+    .map((ex) => {
+      const q = xmlFind(ex, "Question") || ex;
+      const itemBlock = xmlFind(ex, "Item");
+      const priceStr = xmlFind(xmlFind(itemBlock, "SellingStatus"), "CurrentPrice");
+      const price = priceStr ? parseFloat(priceStr) : NaN;
+      return {
+        messageId: xmlFind(q, "MessageID"),
+        senderId: xmlFind(q, "SenderID"),
+        subject: decodeEntities(xmlFind(q, "Subject")),
+        body: decodeEntities(xmlFind(q, "Body")),
+        createdAt: xmlFind(q, "CreationDate"),
+        itemId: xmlFind(itemBlock, "ItemID") || null,
+        itemTitle: decodeEntities(xmlFind(itemBlock, "Title")) || null,
+        itemPrice: Number.isFinite(price) ? price : null,
+      };
+    })
+    .filter((q) => q.messageId && q.senderId);
+
+}
+
 export async function fetchUnansweredQuestions(): Promise<{ questions: BuyerQuestion[]; error?: string; reconnect?: boolean }> {
   const { body } = await tradingRequest("GetMemberMessages", makeGetMemberMessagesXml());
 
@@ -40,20 +70,7 @@ export async function fetchUnansweredQuestions(): Promise<{ questions: BuyerQues
     return { questions: [], error: errMsg, reconnect: isAuth };
   }
 
-  const questions = xmlFindAll(body, "Question")
-    .map((block) => {
-      const itemBlock = xmlFind(block, "Item");
-      return {
-        messageId: xmlFind(block, "MessageID"),
-        senderId: xmlFind(block, "SenderID"),
-        subject: xmlFind(block, "Subject"),
-        body: xmlFind(block, "Body"),
-        createdAt: xmlFind(block, "CreationDate"),
-        itemId: xmlFind(itemBlock, "ItemID") || null,
-      };
-    })
-    .filter((q) => q.messageId && q.senderId);
-
+  const questions = parseMemberMessages(body);
   return { questions };
 }
 

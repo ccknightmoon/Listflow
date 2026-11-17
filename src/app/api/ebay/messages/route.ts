@@ -4,6 +4,8 @@ import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { fetchUnansweredQuestions } from "@/lib/ebay-messages";
 import { fetchAllOfListType, isListTypeError, toListing } from "@/lib/ebay-listings";
+import { lookupItems } from "@/lib/ebay-items";
+import { fetchUnshippedOrders, type UnshippedOrder } from "@/lib/ebay-ship-orders";
 
 export const runtime = "nodejs";
 
@@ -35,22 +37,54 @@ export async function GET() {
       // Attach title/thumbnail from active listings for any question that
       // has an item attached -- same cheap single-listing-page-fetch join
       // /api/ebay/offers already does, not a per-question API call.
-      let titleByItemId = new Map<string, string>();
-      let thumbnailByItemId = new Map<string, string | null>();
-      if (questions.some((q) => q.itemId)) {
+      // Item details: eBay's message (title/price) -> active listings
+      // (photo) -> GetItem for anything else (sold/ended), batched + cached.
+      type Info = { title: string | null; thumbnail: string | null; price: number | null };
+      const info = new Map<string, Info>();
+      const withItem = questions.filter((q) => q.itemId);
+      if (withItem.length) {
         const activeResult = await fetchAllOfListType("ActiveList");
         if (!isListTypeError(activeResult)) {
-          const listings = activeResult.items.map((item) => toListing(item, "active"));
-          titleByItemId = new Map(listings.map((l) => [l.listingId, l.title]));
-          thumbnailByItemId = new Map(listings.map((l) => [l.listingId, l.thumbnail]));
+          for (const l of activeResult.items.map((item) => toListing(item, "active"))) {
+            info.set(l.listingId, { title: l.title, thumbnail: l.thumbnail, price: l.price });
+          }
+        }
+        const missing = [...new Set(withItem.map((q) => q.itemId as string))].filter((id) => !info.get(id)?.thumbnail).slice(0, 24);
+        if (missing.length) {
+          const looked = await lookupItems(missing);
+          for (const [id, v] of looked) info.set(id, { title: info.get(id)?.title ?? v.title, thumbnail: v.thumbnail, price: info.get(id)?.price ?? v.price });
         }
       }
 
-      const enriched = questions.map((q) => ({
-        ...q,
-        title: q.itemId ? titleByItemId.get(q.itemId) ?? null : null,
-        thumbnail: q.itemId ? thumbnailByItemId.get(q.itemId) ?? null : null,
-      }));
+      // Messages with no listing attached (e.g. about a payment): show the
+      // buyer's open order if there is one.
+      const orderByBuyer = new Map<string, { itemId: string; title: string; thumbnail: string | null; price: number }>();
+      if (questions.some((q) => !q.itemId)) {
+        const orders = await fetchUnshippedOrders().catch(() => ({ items: [] as UnshippedOrder[] }));
+        for (const o of orders.items) {
+          if (o.buyerUserId && !orderByBuyer.has(o.buyerUserId.toLowerCase())) {
+            orderByBuyer.set(o.buyerUserId.toLowerCase(), { itemId: o.listingId, title: o.title, thumbnail: o.galleryUrl, price: o.total });
+          }
+        }
+      }
+
+      const enriched = questions.map((q) => {
+        if (q.itemId) {
+          const i = info.get(q.itemId);
+          return {
+            ...q,
+            title: q.itemTitle || i?.title || null,
+            thumbnail: i?.thumbnail ?? null,
+            price: q.itemPrice ?? i?.price ?? null,
+            url: `https://www.ebay.com/itm/${q.itemId}`,
+            context: "listing" as const,
+          };
+        }
+        const o = orderByBuyer.get(q.senderId.toLowerCase());
+        return o
+          ? { ...q, title: o.title, thumbnail: o.thumbnail, price: o.price, url: `https://www.ebay.com/itm/${o.itemId}`, context: "order" as const }
+          : { ...q, title: null, thumbnail: null, price: null, url: null, context: "general" as const };
+      });
 
       return NextResponse.json({ questions: enriched });
     } catch (err) {
