@@ -1,5 +1,7 @@
 # Listflow
 
+> **Personal use (Sel) today.** Before opening to other sellers, work through [`LAUNCH-READINESS.md`](./LAUNCH-READINESS.md) (prioritized checklist). Keep every feature per-user (RLS, `user_id`, per-user eBay context) -- no single-user shortcuts. UX roadmap: [`PLAN-ux.md`](./PLAN-ux.md).
+
 AI-powered eBay listing assistant for resellers. Snap photos of items → AI identifies the item, suggests a title and pricing → review and post to eBay.
 
 ## Tech Stack
