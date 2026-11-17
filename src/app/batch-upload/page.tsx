@@ -2499,6 +2499,7 @@ export default function BatchUploadPage() {
                             <span className="text-xs text-[var(--text-secondary)]">— shipping $</span>
                             <input
                               type="number"
+                      inputMode="decimal"
                               min="0"
                               step="0.01"
                               placeholder="0.00"
@@ -2901,6 +2902,7 @@ export default function BatchUploadPage() {
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
                       <input
                         type="number"
+                      inputMode="decimal"
                         min="0.99"
                         step="0.01"
                         placeholder="Set your price"
@@ -2919,6 +2921,7 @@ export default function BatchUploadPage() {
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
                       <input
                         type="number"
+                      inputMode="decimal"
                         min="0"
                         step="0.01"
                         placeholder="0.00"

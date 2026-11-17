@@ -7,6 +7,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X, Copy, Pencil } from "lucide-react";
 import BulkEditSheet from "@/components/BulkEditSheet";
+import SwipeRow from "@/components/SwipeRow";
+import { getPublishQueue } from "@/lib/publish-queue";
 import type { BulkEdit } from "@/lib/bulk-edit";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
@@ -292,6 +294,7 @@ export default function DraftsPage() {
   async function handleDeleteSelected() {
     if (selected.size === 0) return;
     const ids = Array.from(selected);
+    if (!(await confirmAction({ title: `Delete ${ids.length} draft${ids.length !== 1 ? "s" : ""}?`, message: "Their photos and details will be removed.", confirmLabel: "Delete", destructive: true }))) return;
     setDeleting(true);
     try {
       const data = await apiFetch<{ error?: string }>("/api/drafts", {
@@ -308,6 +311,27 @@ export default function DraftsPage() {
       setError((err as Error).message);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  // Swipe actions (one draft at a time).
+  function listOneInBackground(d: Draft) {
+    getPublishQueue().enqueue({ draftId: d.id, title: d.title ?? "Untitled", thumbnail: d.thumbnail_url });
+  }
+  async function deleteOne(d: Draft) {
+    if (!(await confirmAction({ title: "Delete this draft?", message: d.title ?? undefined, confirmLabel: "Delete", destructive: true }))) return;
+    try {
+      const data = await apiFetch<{ error?: string }>("/api/drafts", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: [d.id] }),
+      });
+      if (data.error) throw new Error(data.error);
+      delete draftsByIdRef.current[d.id];
+      await loadDrafts();
+      loadNoPriceTotal();
+    } catch (err) {
+      setError((err as Error).message);
     }
   }
 
@@ -558,8 +582,15 @@ export default function DraftsPage() {
               const isSelected = selected.has(d.id);
               const isHeavy = heavyIds.has(d.id);
               return (
-                <div
+                <SwipeRow
                   key={d.id}
+                  actions={[
+                    { label: "List", tone: "accent", icon: <Upload className="w-4 h-4" />, onAction: () => listOneInBackground(d) },
+                    { label: "Copy", tone: "neutral", icon: <Copy className="w-4 h-4" />, onAction: () => void handleDuplicate({ stopPropagation() {} } as React.MouseEvent, d.id) },
+                    { label: "Delete", tone: "danger", icon: <Trash2 className="w-4 h-4" />, onAction: () => void deleteOne(d) },
+                  ]}
+                >
+                <div
                   onClick={(e) => {
                     // Only the clicked row carries the shared transition
                     // name — every row can't hold it statically, since a
@@ -635,6 +666,7 @@ export default function DraftsPage() {
                     <path d="M1 1L5 5L1 9" stroke="var(--text-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
+                </SwipeRow>
               );
             })}
           </div>

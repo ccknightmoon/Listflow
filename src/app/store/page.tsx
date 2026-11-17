@@ -1,12 +1,13 @@
 "use client";
 
+import SwipeRow from "@/components/SwipeRow";
 import { applyPrice } from "@/lib/bulk-edit";
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag, RotateCcw, MessageCircle } from "lucide-react";
+import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag, RotateCcw, MessageCircle, RefreshCw, TrendingDown } from "lucide-react";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { useCountUp } from "@/lib/use-count-up";
@@ -210,6 +211,27 @@ export default function StorePage() {
       setError("Network error");
     } finally {
       setRelisting((prev) => { const next = new Set(prev); next.delete(listing.listingId); return next; });
+    }
+  }
+
+  // Swipe "−10%": exact-cents markdown via the same rule as bulk edit.
+  async function quickMarkdown(listing: StoreListing, percent: number) {
+    const next = applyPrice(listing.price, { mode: "percent", value: percent });
+    if (next == null) return;
+    if (!(await confirmAction({ title: `Lower to ${formatMoney(next)}?`, message: `"${listing.title}" is ${listing.price != null ? formatMoney(listing.price) : "unpriced"} now.`, confirmLabel: "Lower price" }))) return;
+    setSavingPrice((prev) => new Set(prev).add(listing.listingId));
+    try {
+      const data = await apiFetch<{ error?: string }>("/api/ebay/update-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ listingId: listing.listingId, price: next.toFixed(2), draftId: listing.draftId }),
+      });
+      if (data.error) throw new Error(data.error);
+      setListings((prev) => prev.map((x) => (x.listingId === listing.listingId ? { ...x, price: next } : x)));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSavingPrice((prev) => { const n = new Set(prev); n.delete(listing.listingId); return n; });
     }
   }
 
@@ -544,8 +566,20 @@ export default function StorePage() {
       {!loading && sorted.length > 0 && (
         <div className="flex flex-col gap-2">
           {sorted.map((l, rowIndex) => (
-            <div
+            <SwipeRow
               key={l.listingId}
+              actions={
+                selectMode
+                  ? []
+                  : l.status === "ended"
+                    ? [{ label: "Relist", tone: "accent" as const, icon: <RefreshCw className="w-4 h-4" />, onAction: () => void handleRelist(l) }]
+                    : [
+                        { label: "−10%", tone: "accent" as const, icon: <TrendingDown className="w-4 h-4" />, onAction: () => void quickMarkdown(l, -10) },
+                        { label: "End", tone: "danger" as const, icon: <Trash2 className="w-4 h-4" />, onAction: () => void handleDelist(l) },
+                      ]
+              }
+            >
+            <div
               className={`card stagger p-3 ${rowIndex < 6 ? `d${rowIndex + 1}` : ""} ${selectMode && selected.has(l.listingId) ? "ring-2 ring-[var(--accent)]" : ""}`}
               onClick={
                 selectMode
@@ -586,6 +620,7 @@ export default function StorePage() {
                       <span className="text-xs text-[var(--text-secondary)]">$</span>
                       <input
                         type="number"
+                      inputMode="decimal"
                         step="0.01"
                         min="0.99"
                         value={editingPrice.get(l.listingId)}
@@ -712,6 +747,7 @@ export default function StorePage() {
                 )}
               </div>
             </div>
+            </SwipeRow>
           ))}
         </div>
       )}

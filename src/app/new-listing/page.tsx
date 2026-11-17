@@ -106,6 +106,9 @@ export default function NewListingPage() {
   // and pricing are done; "List & snap next" publishes in the background.
   const [autoList, setAutoList] = useState(false);
   const handingOff = useRef(false);
+  // Photos start uploading the moment they're added, so saving/publishing
+  // doesn't wait on uploads later.
+  const preUploads = useRef(new Map<string, Promise<string | null>>());
   const heldFiles = useRef<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -236,6 +239,20 @@ export default function NewListingPage() {
     if (aiResult) void handleListOnEbay();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fires when analysis + pricing settle
   }, [autoList, loading, pricingLoading, aiResult]);
+
+  useEffect(() => {
+    for (const photo of photos) {
+      if (photo.uploadedUrl || preUploads.current.has(photo.id)) continue;
+      const id = photo.id;
+      preUploads.current.set(id, uploadThumbnail(photo.previewUrl).then(
+        (url) => {
+          setPhotos((prev) => prev.map((p) => (p.id === id && !p.uploadedUrl ? { ...p, uploadedUrl: url } : p)));
+          return url;
+        },
+        () => { preUploads.current.delete(id); return null; }, // retried at save time
+      ));
+    }
+  }, [photos]);
 
   async function handleFileChange(file: File | undefined) {
     if (!file) return;
@@ -494,6 +511,8 @@ export default function NewListingPage() {
       const uploadOutcomes = await Promise.all(
         photos.map(async (photo) => {
           if (photo.uploadedUrl) return photo.uploadedUrl;
+          const early = await preUploads.current.get(photo.id);
+          if (early) return early;
           try {
             return await uploadThumbnail(photo.previewUrl);
           } catch (err) {
@@ -789,6 +808,19 @@ export default function NewListingPage() {
             ))}
           </div>
         )}
+        {/* Camera loop: one big tap per extra photo (front -> measurements -> flaws). */}
+        <button
+          type="button"
+          onClick={() => fileInput.current?.click()}
+          disabled={photos.length >= 24}
+          className="tap w-full mt-3 min-h-[52px] rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold"
+          style={photos.length === 0
+            ? { background: "var(--accent)", color: "white" }
+            : { background: "var(--accent-tint)", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 40%, transparent)" }}
+        >
+          <Camera className="w-5 h-5" />
+          {photos.length === 0 ? "Take photos" : photos.length === 1 ? "Next photo (measurements)" : photos.length === 2 ? "Next photo (flaws / tag)" : `Next photo (${photos.length + 1})`}
+        </button>
         {photoUndo && (
           <button type="button" onClick={undoPhotoChange} className="mt-1 text-xs flex items-center gap-1 text-[var(--accent)]">
             <Undo2 className="w-3.5 h-3.5" /> Undo {photoUndoLabel.toLowerCase()}
@@ -803,6 +835,8 @@ export default function NewListingPage() {
           <input
             className="input"
             maxLength={80}
+            enterKeyHint="done"
+            autoCapitalize="words"
             placeholder="Title (auto-filled by AI)"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
@@ -1037,6 +1071,7 @@ export default function NewListingPage() {
                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
                     <input
                       type="number"
+                      inputMode="decimal"
                       min="0.99"
                       step="0.01"
                       placeholder="0.00"
@@ -1084,6 +1119,7 @@ export default function NewListingPage() {
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
                   <input
                     type="number"
+                      inputMode="decimal"
                     min="0"
                     step="0.01"
                     placeholder="0.00"

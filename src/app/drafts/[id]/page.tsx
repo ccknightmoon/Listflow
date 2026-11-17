@@ -1277,6 +1277,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             <input
               className="input w-full"
               type="number"
+                      inputMode="decimal"
               min="0.99"
               step="0.01"
               value={price}
@@ -1289,6 +1290,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           <input
             className="input w-full"
             type="number"
+                      inputMode="decimal"
             min="0"
             step="0.01"
             placeholder="0.00"

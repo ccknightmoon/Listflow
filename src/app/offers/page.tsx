@@ -339,6 +339,7 @@ export default function OffersPage() {
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
                       <input
                         type="number"
+                      inputMode="decimal"
                         min="0.01"
                         step="0.01"
                         placeholder="Counter price"
