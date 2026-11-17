@@ -36,7 +36,7 @@ describe("extractFinanceExtras", () => {
       tx({ type: "NON_SALE_CHARGE", amount: 1.25, bookingEntry: "DEBIT" }),
       tx({ type: "SALE", amount: 20 }),
     ]);
-    expect(e.refunds).toEqual([{ date: "2026-11-10T00:00:00Z", amount: 12 }]);
+    expect(e.refunds).toEqual([{ date: "2026-11-10T00:00:00Z", amount: 12, orderId: null }]);
     expect(e.labels.map((l) => l.amount)).toEqual([5.5, -5.5]);
     expect(e.otherCharges.map((l) => l.amount)).toEqual([1.25]);
   });

@@ -8,14 +8,20 @@ import { tradingRequest } from "./ebay-inventory";
 import { fetchFinanceTransactions } from "./ebay-finances";
 import { fetchAllOfListType, isListTypeError, toListing } from "./ebay-listings";
 import { parseTransactions, xmlFind, decodeXml, type ParsedSale } from "./sales-parse";
-import { allocateActualFees, extractFinanceExtras } from "./finance-match";
+import { allocateActualFees, extractFinanceExtras, normalizeOrderId } from "./finance-match";
 import type { AnalyticsSale, ActiveListing, DatedAmount } from "./sales-analytics";
 import type { getServerSupabase } from "./auth";
 
 type Supabase = Awaited<ReturnType<typeof getServerSupabase>>;
 
-/** 90-day view + previous 90 days for comparison + 1 day of time-zone slack. */
-export const FEED_DAYS = 181;
+/**
+ * eBay's GetSellerTransactions can't return sales older than 90 days, so
+ * the feed is the last 90 days (minus a few minutes of safety). That
+ * covers the 7d and 30d views AND their previous periods; the 90d view has
+ * no previous period to compare against (the page says so).
+ */
+export const FEED_DAYS = 90;
+const FEED_SAFETY_MS = 5 * 60_000;
 const DAY_MS = 86_400_000;
 const MAX_PAGES_PER_WINDOW = 10;
 // Newer schema so OrderID/ExtendedOrderID match eBay Finances' orderId.
@@ -45,13 +51,19 @@ function ebayError(body: string): FeedError {
 const ok = (body: string) => body.includes("<Ack>Success</Ack>") || body.includes("<Ack>Warning</Ack>");
 
 /** All transaction blocks modified in the last `days` days (30-day windows x pages). */
-async function fetchTransactionBlocks(now: number, days: number): Promise<{ blocks: string[]; truncated: boolean } | FeedError> {
+/** Splits [startMs, now] into eBay's max 30-day ModTime windows, newest first. */
+export function transactionWindows(now: number, startMs: number): Array<{ from: string; to: string }> {
   const windows: Array<{ from: string; to: string }> = [];
-  for (let end = now, left = days; left > 0; left -= 30) {
-    const start = end - Math.min(30, left) * DAY_MS;
+  for (let end = now; end > startMs; ) {
+    const start = Math.max(startMs, end - 30 * DAY_MS);
     windows.push({ from: new Date(start).toISOString(), to: new Date(end).toISOString() });
     end = start;
   }
+  return windows;
+}
+
+async function fetchTransactionBlocks(now: number, startMs: number): Promise<{ blocks: string[]; truncated: boolean } | FeedError> {
+  const windows = transactionWindows(now, startMs);
   let truncated = false;
   const perWindow = await Promise.all(windows.map(async (w) => {
     const first = await tradingRequest("GetSellerTransactions", transactionsXml(w.from, w.to, 1), TRANSACTIONS_COMPAT_LEVEL);
@@ -114,6 +126,8 @@ async function loadSaleCosts(supabase: Supabase): Promise<{ costs: Map<string, n
 export interface SalesFeed {
   generatedAt: string;
   feedDays: number;
+  /** Earliest moment the feed covers; periods starting earlier can't be compared. */
+  feedStart: string;
   sales: Array<AnalyticsSale & { thumbnail: string | null; hasDraft: boolean }>;
   excluded: { cancelled: number; awaitingPayment: number };
   truncated: boolean;
@@ -125,9 +139,9 @@ export interface SalesFeed {
 }
 
 export async function buildSalesFeed(supabase: Supabase, feePercent: number, now = Date.now()): Promise<SalesFeed | FeedError> {
-  const startMs = now - FEED_DAYS * DAY_MS;
+  const startMs = now - FEED_DAYS * DAY_MS + FEED_SAFETY_MS;
   const [txResult, finances, activeResult, saleCosts] = await Promise.all([
-    fetchTransactionBlocks(now, FEED_DAYS),
+    fetchTransactionBlocks(now, startMs),
     fetchFinanceTransactions(startMs, now),
     fetchAllOfListType("ActiveList").catch(() => null),
     loadSaleCosts(supabase),
@@ -170,7 +184,17 @@ export async function buildSalesFeed(supabase: Supabase, feePercent: number, now
     };
   });
 
-  const extras = finances ? extractFinanceExtras(finances.tx) : { refunds: [], labels: [], otherCharges: [] };
+  const saleDateByOrder = new Map<string, string>();
+  for (const s of kept) {
+    const id = normalizeOrderId(s.orderId);
+    if (id && !saleDateByOrder.has(id)) saleDateByOrder.set(id, s.soldAt);
+  }
+  const cancelledOrders = new Set(
+    parsed.filter((s) => s.status === "cancelled").map((s) => normalizeOrderId(s.orderId)).filter((x): x is string => Boolean(x)),
+  );
+  const extras = finances
+    ? extractFinanceExtras(finances.tx, { saleDateByOrder, cancelledOrders })
+    : { refunds: [], labels: [], otherCharges: [] };
   let active: ActiveListing[] = [];
   let activeCount: number | null = null;
   if (activeResult && !isListTypeError(activeResult)) {
@@ -183,6 +207,7 @@ export async function buildSalesFeed(supabase: Supabase, feePercent: number, now
   return {
     generatedAt: new Date(now).toISOString(),
     feedDays: FEED_DAYS,
+    feedStart: new Date(startMs).toISOString(),
     sales,
     excluded,
     truncated: txResult.truncated,

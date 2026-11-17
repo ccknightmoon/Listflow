@@ -66,22 +66,52 @@ export function allocateActualFees(sales: MatchableSale[], tx: FinanceTx[]): Map
   return out;
 }
 
-export interface FinanceExtrasOut {
-  refunds: Array<{ date: string; amount: number }>;
-  labels: Array<{ date: string; amount: number }>;
-  otherCharges: Array<{ date: string; amount: number }>;
+export interface DatedCharge {
+  date: string;
+  amount: number;
+  /** Set when this charge belongs to a known sale -- then `date` is that sale's date. */
+  orderId?: string | null;
 }
 
-/** Money that leaves the seller outside of sale fees: refunds, eBay labels, other charges (ads etc.). */
-export function extractFinanceExtras(tx: FinanceTx[]): FinanceExtrasOut {
+export interface FinanceExtrasOut {
+  refunds: DatedCharge[];
+  labels: DatedCharge[];
+  otherCharges: DatedCharge[];
+}
+
+export interface AttributionContext {
+  /** normalized order id -> sale date, for sales counted on the page */
+  saleDateByOrder: Map<string, string>;
+  /** normalized order ids of cancelled orders (already excluded from sales) */
+  cancelledOrders: Set<string>;
+}
+
+/**
+ * Money that leaves the seller outside of sale fees: refunds, eBay labels,
+ * other charges (ads etc.).
+ *
+ * Dating rule: a charge tied to an order we know is dated by that SALE's
+ * date, so a label bought Oct 19 for an Oct 17 sale lands in the same
+ * period as the sale. Charges with no matching sale keep eBay's
+ * transaction date.
+ *
+ * Refunds for CANCELLED orders are skipped: those sales were never counted
+ * in item sales, so subtracting the refund too would count it twice.
+ */
+export function extractFinanceExtras(tx: FinanceTx[], ctx?: AttributionContext): FinanceExtrasOut {
   const out: FinanceExtrasOut = { refunds: [], labels: [], otherCharges: [] };
   for (const t of tx) {
     if (!Number.isFinite(t.amount) || t.amount === 0) continue;
+    const order = normalizeOrderId(t.orderId);
+    if (t.type === "REFUND" && order && ctx?.cancelledOrders.has(order)) continue;
+    const saleDate = order ? ctx?.saleDateByOrder.get(order) : undefined;
+    const date = saleDate ?? t.date;
+    const orderId = saleDate ? order : null;
     // Credits (e.g. a label refund, a fee credit) reduce the cost.
     const signed = t.bookingEntry === "CREDIT" ? -Math.abs(t.amount) : Math.abs(t.amount);
-    if (t.type === "REFUND") out.refunds.push({ date: t.date, amount: Math.abs(t.amount) });
-    else if (t.type === "SHIPPING_LABEL") out.labels.push({ date: t.date, amount: signed });
-    else if (t.type === "NON_SALE_CHARGE") out.otherCharges.push({ date: t.date, amount: signed });
+    if (t.type === "REFUND") out.refunds.push({ date, amount: Math.abs(t.amount), orderId });
+    else if (t.type === "SHIPPING_LABEL") out.labels.push({ date, amount: signed, orderId });
+    else if (t.type === "NON_SALE_CHARGE") out.otherCharges.push({ date, amount: signed, orderId });
   }
   return out;
 }

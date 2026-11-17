@@ -71,6 +71,7 @@ export interface Bucket {
   end: number; // exclusive
   total: number;
   count: number;
+  units: number;
   /** Covers fewer days than a full bucket (only ever the last one). */
   partial: boolean;
   days: number;
@@ -82,7 +83,7 @@ export interface Bucket {
  * 90 = 12x7 + 6) and is flagged partial. Every sale in the period lands in
  * exactly one bar, so the bars always add up to the period total.
  */
-export function bucketPeriod(sales: Pick<AnalyticsSale, "soldAt" | "itemTotal">[], days: number, now: number): Bucket[] {
+export function bucketPeriod(sales: Array<Pick<AnalyticsSale, "soldAt" | "itemTotal"> & { qty?: number }>, days: number, now: number): Bucket[] {
   const period = currentPeriod(days, now);
   const step = days <= 7 ? 1 : 7;
   const buckets: Bucket[] = [];
@@ -90,7 +91,7 @@ export function bucketPeriod(sales: Pick<AnalyticsSale, "soldAt" | "itemTotal">[
     const span = Math.min(step, days - offset);
     const start = localDayStart(period.start, offset);
     const end = offset + span >= days ? period.end : localDayStart(period.start, offset + span);
-    buckets.push({ start, end, total: 0, count: 0, partial: span < step, days: span });
+    buckets.push({ start, end, total: 0, count: 0, units: 0, partial: span < step, days: span });
   }
   for (const s of sales) {
     const t = Date.parse(s.soldAt);
@@ -99,6 +100,7 @@ export function bucketPeriod(sales: Pick<AnalyticsSale, "soldAt" | "itemTotal">[
     if (b) {
       b.total += s.itemTotal;
       b.count += 1;
+      b.units += s.qty ?? 1;
     }
   }
   for (const b of buckets) b.total = round2(b.total);
@@ -131,6 +133,10 @@ export interface PeriodSummary {
   itemSales: number; // excl. shipping & tax
   avgSalePrice: number | null; // itemSales / units
   shippingPaidByBuyers: number;
+  /** Sales where the buyer paid $0 shipping (free-shipping listings). */
+  freeShippingSales: number;
+  /** Buyer-paid shipping minus eBay label costs; null without Finances data. */
+  shippingNet: number | null;
   taxCollected: number;
   fees: number;
   feesActualCount: number;
@@ -177,8 +183,9 @@ export function summarizePeriod(
 ): PeriodSummary {
   const sales = allSales.filter((s) => inPeriod(s.soldAt, p));
   let units = 0, itemSales = 0, ship = 0, tax = 0, fees = 0, feesActual = 0, cogs = 0, withCost = 0;
-  let daysSum = 0, withDays = 0;
+  let daysSum = 0, withDays = 0, freeShip = 0;
   for (const s of sales) {
+    if (!(s.shippingPaid > 0)) freeShip++;
     units += s.qty;
     itemSales += s.itemTotal;
     ship += s.shippingPaid || 0;
@@ -206,6 +213,8 @@ export function summarizePeriod(
     itemSales: round2(itemSales),
     avgSalePrice: units > 0 ? round2(itemSales / units) : null,
     shippingPaidByBuyers: round2(ship),
+    freeShippingSales: freeShip,
+    shippingNet: extras?.available ? round2(ship - labelCosts) : null,
     taxCollected: round2(tax),
     fees: round2(fees),
     feesActualCount: feesActual,
@@ -359,7 +368,7 @@ export interface ActiveListing {
 }
 
 export interface Insight {
-  kind: "source_more" | "fast_mover" | "slow_movers" | "missing_costs" | "price_trend" | "no_sales";
+  kind: "source_more" | "fast_mover" | "slow_movers" | "missing_costs" | "price_trend" | "no_sales" | "shipping_loss";
   text: string;
 }
 
@@ -369,7 +378,7 @@ export function buildInsights(input: {
   days: number;
   now: number;
   current: PeriodSummary;
-  previous: PeriodSummary;
+  previous: PeriodSummary | null;
   categories: CategoryRow[];
   active: ActiveListing[];
 }): Insight[] {
@@ -402,17 +411,25 @@ export function buildInsights(input: {
       text: `${slow.length} listing${slow.length === 1 ? " has" : "s have"} been live ${SLOW_MOVER_DAYS}+ days without selling — try a price drop, an offer to watchers, or new photos.`,
     });
   }
+  if (current.shippingNet != null && current.shippingNet < -5) {
+    const loss = Math.abs(current.shippingNet);
+    out.push({
+      kind: "shipping_loss",
+      text: `Shipping cost you $${loss.toFixed(2)} more than buyers paid ($${current.shippingPaidByBuyers.toFixed(2)} paid vs $${current.labelCosts.toFixed(2)} in eBay labels)` +
+        (current.freeShippingSales > 0 ? ` — ${current.freeShippingSales} of ${current.orders} sales had free shipping, so their postage came out of the item price.` : ". Check package weights and your calculated-shipping policy."),
+    });
+  }
   if (current.salesMissingCost > 0) {
     out.push({
       kind: "missing_costs",
       text: `${current.salesMissingCost} of ${current.orders} sales have no item cost — add costs to see your real profit and margins.`,
     });
   }
-  const price = percentChange(current.avgSalePrice ?? 0, previous.avgSalePrice ?? 0);
-  if (price.pct != null && Math.abs(price.pct) >= 10) {
+  const price = previous ? percentChange(current.avgSalePrice ?? 0, previous.avgSalePrice ?? 0) : null;
+  if (price && price.pct != null && Math.abs(price.pct) >= 10) {
     out.push({
       kind: "price_trend",
-      text: `Average sale price is ${price.pct > 0 ? "up" : "down"} ${Math.abs(price.pct)}% vs the previous ${input.days} days ($${(current.avgSalePrice ?? 0).toFixed(2)} vs $${(previous.avgSalePrice ?? 0).toFixed(2)}).`,
+      text: `Average sale price is ${price.pct > 0 ? "up" : "down"} ${Math.abs(price.pct)}% vs the previous ${input.days} days ($${(current.avgSalePrice ?? 0).toFixed(2)} vs $${(previous?.avgSalePrice ?? 0).toFixed(2)}).`,
     });
   }
   return out;
@@ -426,6 +443,8 @@ export interface FeedForView {
   active: ActiveListing[];
   activeCount: number | null;
   feePercent: number;
+  /** Earliest moment the data covers (ISO). Older periods can't be compared. */
+  feedStart?: string;
 }
 
 export interface SalesView {
@@ -434,13 +453,21 @@ export interface SalesView {
   previousBounds: PeriodBounds;
   sales: AnalyticsSale[]; // in period, newest first
   current: PeriodSummary;
-  previous: PeriodSummary;
-  changes: { itemSales: Change; units: Change; avgSalePrice: Change; sellThrough: Change | null };
+  /** null when the previous period starts before the data does (eBay keeps 90 days). */
+  previous: PeriodSummary | null;
+  changes: { itemSales: Change | null; units: Change | null; avgSalePrice: Change | null; profit: Change | null };
   sellThroughNow: number | null;
   buckets: Bucket[];
   categories: CategoryRow[];
   top: AnalyticsSale[];
   insights: Insight[];
+}
+
+/** Can the previous period be compared with the data we have? */
+export function canCompare(previousStart: number, feedStart?: string): boolean {
+  if (!feedStart) return true;
+  const fs = Date.parse(feedStart);
+  return Number.isNaN(fs) || previousStart >= fs;
 }
 
 /** Everything the Sales page shows for one tab, from the single cached feed. */
@@ -451,10 +478,11 @@ export function deriveView(feed: FeedForView, days: number, now: number): SalesV
     .filter((s) => inPeriod(s.soldAt, period))
     .sort((a, b) => Date.parse(b.soldAt) - Date.parse(a.soldAt));
   const current = summarizePeriod(feed.sales, period, feed.feePercent, feed.finances);
-  const previous = summarizePeriod(feed.sales, previousBounds, feed.feePercent, feed.finances);
+  const previous = canCompare(previousBounds.start, feed.feedStart)
+    ? summarizePeriod(feed.sales, previousBounds, feed.feePercent, feed.finances)
+    : null;
   const activeNow = feed.activeCount ?? feed.active.length;
   const stNow = feed.activeCount == null && feed.active.length === 0 ? null : sellThrough(current.units, activeNow);
-  const stPrev = stNow == null ? null : sellThrough(previous.units, activeNow);
   const categories = categoryBreakdown(sales, feed.feePercent);
   return {
     days,
@@ -463,12 +491,14 @@ export function deriveView(feed: FeedForView, days: number, now: number): SalesV
     sales,
     current,
     previous,
-    changes: {
-      itemSales: percentChange(current.itemSales, previous.itemSales),
-      units: percentChange(current.units, previous.units),
-      avgSalePrice: percentChange(current.avgSalePrice ?? 0, previous.avgSalePrice ?? 0),
-      sellThrough: stNow == null || stPrev == null ? null : percentChange(stNow, stPrev),
-    },
+    changes: previous
+      ? {
+          itemSales: percentChange(current.itemSales, previous.itemSales),
+          units: percentChange(current.units, previous.units),
+          avgSalePrice: percentChange(current.avgSalePrice ?? 0, previous.avgSalePrice ?? 0),
+          profit: percentChange(current.profit, previous.profit),
+        }
+      : { itemSales: null, units: null, avgSalePrice: null, profit: null },
     sellThroughNow: stNow,
     buckets: bucketPeriod(sales, days, now),
     categories,
