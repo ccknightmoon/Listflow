@@ -227,6 +227,10 @@ One row per user, added in the Phase 3 spending-safety-net work (`supabase-migra
 
 Sel's decision: no free or flat-rate shipping. `parseShippingMode()` always returns "calculated"; every API stores/reports "calculated"; the UI shows a fixed label instead of a picker. `/api/ebay/list` picks the fulfillment policy with `chooseCalculatedPolicy` (`src/lib/calculated-policy.ts`): the Settings choice if it's really CALCULATED, else eBay's default calculated policy, else the only/first one; no calculated policy = clear error with Seller Hub steps. Every inventory item declares a package (`buildPackageWeightAndSize`): known item types from `ITEM_TYPE_WEIGHT_TABLE`, else the title, else a conservative 2 lb 14x10x4 MAILING_BOX. Covered by `calculated-shipping.test.ts`. Note: drafts priced before this change had estimated shipping folded into their price.
 
+### Nov 17, 2026: Sales analytics rebuild (branch `feat/sales-analytics`)
+
+`/sales` now loads ~6 months once from `GET /api/ebay/sales/analytics` (`src/lib/sales-feed.ts`; cached 3 min/user server-side, 5 min in the tab; `?refresh=1` bypasses) and derives 7/30/90-day views locally with `deriveView` (`src/lib/sales-analytics.ts`). Periods are local-time ("last 30 days" = today + 29 prior days); chart bars align to the period and sum to the total. Fees: real per-order eBay Finances fees (`src/lib/finance-match.ts`, matched by order ID; GetSellerTransactions called at compat level 1225 so OrderIDs match) with estimate fallback on item+shipping+tax. Cancelled/unpaid sales excluded. Category: eBay leaf category > store category > item type > title keywords. Photos load lazily via `/api/ebay/sales/thumbnails`. Costs: `POST /api/sales/costs` (draft cost_basis, or `sale_costs` table from unapplied migration 025). The old `/api/ebay/sales` route is unchanged (Dashboard sparkline still uses it). Side finding: `drafts_custom_sku_unique` is a GLOBAL unique index on custom_sku -- fine single-user, must become per-user before other sellers join.
+
 ## Deferred
 
 | Feature | Notes |

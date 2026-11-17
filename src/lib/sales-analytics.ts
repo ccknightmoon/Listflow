@@ -417,3 +417,62 @@ export function buildInsights(input: {
   }
   return out;
 }
+
+// ------------------------------------------------------------ whole view
+
+export interface FeedForView {
+  sales: AnalyticsSale[];
+  finances: FinanceExtras;
+  active: ActiveListing[];
+  activeCount: number | null;
+  feePercent: number;
+}
+
+export interface SalesView {
+  days: number;
+  period: PeriodBounds;
+  previousBounds: PeriodBounds;
+  sales: AnalyticsSale[]; // in period, newest first
+  current: PeriodSummary;
+  previous: PeriodSummary;
+  changes: { itemSales: Change; units: Change; avgSalePrice: Change; sellThrough: Change | null };
+  sellThroughNow: number | null;
+  buckets: Bucket[];
+  categories: CategoryRow[];
+  top: AnalyticsSale[];
+  insights: Insight[];
+}
+
+/** Everything the Sales page shows for one tab, from the single cached feed. */
+export function deriveView(feed: FeedForView, days: number, now: number): SalesView {
+  const period = currentPeriod(days, now);
+  const previousBounds = previousPeriod(days, now);
+  const sales = feed.sales
+    .filter((s) => inPeriod(s.soldAt, period))
+    .sort((a, b) => Date.parse(b.soldAt) - Date.parse(a.soldAt));
+  const current = summarizePeriod(feed.sales, period, feed.feePercent, feed.finances);
+  const previous = summarizePeriod(feed.sales, previousBounds, feed.feePercent, feed.finances);
+  const activeNow = feed.activeCount ?? feed.active.length;
+  const stNow = feed.activeCount == null && feed.active.length === 0 ? null : sellThrough(current.units, activeNow);
+  const stPrev = stNow == null ? null : sellThrough(previous.units, activeNow);
+  const categories = categoryBreakdown(sales, feed.feePercent);
+  return {
+    days,
+    period,
+    previousBounds,
+    sales,
+    current,
+    previous,
+    changes: {
+      itemSales: percentChange(current.itemSales, previous.itemSales),
+      units: percentChange(current.units, previous.units),
+      avgSalePrice: percentChange(current.avgSalePrice ?? 0, previous.avgSalePrice ?? 0),
+      sellThrough: stNow == null || stPrev == null ? null : percentChange(stNow, stPrev),
+    },
+    sellThroughNow: stNow,
+    buckets: bucketPeriod(sales, days, now),
+    categories,
+    top: topSales(sales, 5),
+    insights: buildInsights({ days, now, current, previous, categories, active: feed.active }),
+  };
+}
