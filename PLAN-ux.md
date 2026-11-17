@@ -1,6 +1,6 @@
 # Listflow — whole-app UX & speed plan (Nov 18, 2026)
 
-**Status:** Phase 1 built on branch `feat/phase1-speed` (Nov 18). Phases 2–3 not started.
+**Status:** Phase 1 live (Nov 18). Phase 2 built on branch `feat/phase2-volume`. Phase 3 not started.
 
 **Goal:** post more listings, faster, from a phone, in an app that looks and feels as polished everywhere as the Sales page.
 
@@ -35,7 +35,46 @@
 | 1.7 | **Replace browser `confirm()` pop-ups** | 10 native `confirm()` calls (delete, delist, relist, offers…) look out of place on a phone. Use a styled bottom-sheet confirm with a clear destructive button and **Undo** where possible (delete draft, delist). | S | Low | Component test, then manually check each flow. |
 | 1.8 | **Add to Home Screen** | No web app manifest or icons, so the home-screen app opens like a browser tab. Add a manifest, icons, standalone mode, safe-area padding and a theme colour. | S | Low | Install on iPhone: it opens full-screen with the right icon and the status bar isn't overlapped. |
 
-## Phase 2: High-volume editing and day-to-day workflow
+## Phase 2: High-volume editing and day-to-day workflow — ✅ built
+
+**What was built:**
+- 2.1 Bulk edit.
+  - Drafts: price ± $/%, condition, store category, title words — with a live preview that matches what gets saved.
+  - Listings: price ± $/%.
+- 2.2 Swipe actions.
+  - Drafts: List / Copy / Delete.
+  - Listings: −10% / End; ended listings: Relist.
+- 2.3 Camera loop: a big "Next photo" button, and photos upload the moment they're added.
+- 2.4 Decimal keypads on every price field; the title field gets Done and word capitalisation.
+- 2.5 "Needs attention" inbox on the Dashboard.
+- 2.6 Counter-offer presets: −5% / −10% / meet halfway.
+- 2.7 eBay cross-check fixed: transaction_summary needs a status filter, so totals are now compared status by status.
+- Also: Batch "List all" now runs on the background publish queue and tray.
+
+### Review findings (Nov 18, after Phase 1)
+
+**Fixed in Phase 2:**
+- The draft editor's spinner is now a form-shaped skeleton.
+- Ship orders repaint instantly from the last load (they used to reload every visit).
+- Drafts bulk delete now asks for confirmation.
+- Drafts deep links (e.g. `?filter=needs-price`) work.
+
+**Checked and fine:**
+- List thumbnails are lazy-loaded with fixed sizes, so no layout shift.
+- Batch Upload's own code is ~57 KB (~17 KB gzipped) despite 3,000 lines.
+
+**Backlog (not done yet):**
+
+| Item | Why | Effort | Risk |
+|---|---|---|---|
+| Settings page: 12 separate fetches on load, no cache | Slow first paint on the least-visited page | S | Low |
+| Shared bundle: Sentry + Supabase ≈ 66 KB gz loaded on every page | Faster first load on cellular | M | Med |
+| Dashboard fires 8 parallel requests (3 hit eBay) on every visit | Load on eBay limits and the phone | M | Low |
+| Batch Upload: grouping step still shows a spinner card (it's a real AI step with progress text) | Could show per-photo progress | S | Low |
+| Unused photos: photos pre-uploaded then removed before saving stay in storage | Storage cost over time | S | Low |
+| Old `/api/ebay/sales` route (Dashboard sparkline) re-pulls eBay; could reuse the analytics feed | Fewer eBay calls | S | Low |
+| PublishTray and the AI-usage banner can stack on nav pages | Visual clutter in a rare case | S | Low |
+
 
 | # | Item | What changes and why it matters | Effort | Risk | How it's verified |
 |---|---|---|---|---|---|
