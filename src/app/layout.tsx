@@ -1,3 +1,4 @@
+import PublishTray from "@/components/PublishTray";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
@@ -63,7 +64,10 @@ export default async function RootLayout({
         <meta name="theme-color" content="#F3F1FA" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#101017" media="(prefers-color-scheme: dark)" />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <PublishTray />
+      </body>
     </html>
   );
 }

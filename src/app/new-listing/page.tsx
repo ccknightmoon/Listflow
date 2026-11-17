@@ -1,6 +1,7 @@
 "use client";
 
 import { takePendingPhotos } from "@/lib/pending-photos";
+import { getPublishQueue } from "@/lib/publish-queue";
 import { formatMoney } from "@/lib/format";
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
@@ -101,6 +102,11 @@ export default function NewListingPage() {
   const [aiResult, setAiResult] = useState<AiResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [pricingLoading, setPricingLoading] = useState(false);
+  // Fast path: "Analyze & list" opens the publish review as soon as the AI
+  // and pricing are done; "List & snap next" publishes in the background.
+  const [autoList, setAutoList] = useState(false);
+  const handingOff = useRef(false);
+  const heldFiles = useRef<File[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [savedDraftId, setSavedDraftId] = useState<string | null>(null);
@@ -221,8 +227,15 @@ export default function NewListingPage() {
     void (async () => {
       for (const f of files) await handleFileChange(f);
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on arrival
-  }, []);
+  }, []); // run once on arrival
+
+  useEffect(() => {
+    if (!autoList || loading || pricingLoading) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot trigger
+    setAutoList(false);
+    if (aiResult) void handleListOnEbay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires when analysis + pricing settle
+  }, [autoList, loading, pricingLoading, aiResult]);
 
   async function handleFileChange(file: File | undefined) {
     if (!file) return;
@@ -638,6 +651,29 @@ export default function NewListingPage() {
     }
   }
 
+  // One tap: publish this item in the background and open the camera for
+  // the next one. The camera has to open inside the tap (browser rule), so
+  // any photo taken before the form has reset is held, then added to the
+  // fresh form.
+  async function handleListAndNext() {
+    handingOff.current = true;
+    fileInput.current?.click();
+    setShowPublishReview(false);
+    try {
+      const draftId = await handleSaveDraft();
+      if (!draftId) throw new Error("Couldn't save this item — check your connection and try again.");
+      getPublishQueue().enqueue({ draftId, title, thumbnail: photos[0]?.previewUrl ?? null });
+      resetForOtherItem();
+    } catch (err) {
+      setListStatus("error");
+      setListError((err as Error).message);
+    } finally {
+      handingOff.current = false;
+      const held = heldFiles.current.splice(0);
+      for (const f of held) await handleFileChange(f);
+    }
+  }
+
   async function handleSaveDraftAndRedirect() {
     const id = await handleSaveDraft();
     if (id) setTimeout(() => router.push("/drafts"), 1200);
@@ -708,9 +744,15 @@ export default function NewListingPage() {
             accept="image/*"
             capture="environment"
             className="hidden"
+            multiple
             onChange={(e) => {
-              void handleFileChange(e.target.files?.[0]);
+              const files = Array.from(e.target.files ?? []);
               e.currentTarget.value = "";
+              if (handingOff.current) {
+                heldFiles.current.push(...files);
+                return;
+              }
+              void (async () => { for (const f of files) await handleFileChange(f); })();
             }}
           />
         </div>
@@ -796,18 +838,26 @@ export default function NewListingPage() {
         />
       </div>
 
-      <button
-        onClick={handleAnalyze}
-        disabled={loading}
-        className="btn btn-primary w-full mb-4"
-      >
-        {loading ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <Sparkles className="w-4 h-4" />
+      <div className="flex gap-2 mb-4">
+        <button
+          onClick={handleAnalyze}
+          disabled={loading}
+          className={`btn w-full ${photos.length > 0 ? "flex-1" : "btn-primary"}`}
+        >
+          {loading && !autoList ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+          {loading && !autoList ? "Analyzing…" : "Analyze & price"}
+        </button>
+        {photos.length > 0 && (
+          <button
+            onClick={() => { setAutoList(true); void handleAnalyze(); }}
+            disabled={loading || pricingLoading}
+            className="btn btn-primary flex-1"
+          >
+            {autoList ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {autoList ? "Getting it ready…" : "Analyze & list"}
+          </button>
         )}
-        {loading ? "Analyzing photos..." : "Analyze & price"}
-      </button>
+      </div>
 
       {error && (
         <div className="card p-3 mb-4 text-sm" style={{ color: "var(--danger)" }}>
@@ -841,13 +891,19 @@ export default function NewListingPage() {
               {cost && <p><strong>Cost basis:</strong> {formatMoney(Number(cost))}</p>}
               {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
             </div>
+            <button type="button" onClick={() => void handleListAndNext()} disabled={listStatus === "listing"} className="btn btn-primary w-full mb-2">
+              <Camera className="w-4 h-4" /> List it &amp; snap the next item
+            </button>
             <div className="flex gap-2">
               <button type="button" onClick={() => setShowPublishReview(false)} className="btn flex-1">Back to edit</button>
-              <button type="button" onClick={() => void handlePublish()} disabled={listStatus === "listing"} className="btn btn-primary flex-1">
+              <button type="button" onClick={() => void handlePublish()} disabled={listStatus === "listing"} className="btn flex-1">
                 {listStatus === "listing" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {listStatus === "listing" ? "Publishing..." : "Publish on eBay"}
+                {listStatus === "listing" ? "Publishing..." : "Publish & stay"}
               </button>
             </div>
+            <p className="text-[11px] mt-2 text-center" style={{ color: "var(--text-tertiary)" }}>
+              &ldquo;List it &amp; snap next&rdquo; publishes in the background — progress shows at the bottom of every page.
+            </p>
           </div>
         </div>
       )}
