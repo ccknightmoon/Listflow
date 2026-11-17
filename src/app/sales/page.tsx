@@ -248,7 +248,8 @@ export default function SalesPage() {
     const offCents = checks.reduce((a, c) => a + Math.abs(c.diff), 0) + Math.abs(fundsSum - fin.L.netCents) + Math.abs(fin.L.linesSumCents - fin.L.netCents);
     const unrecognized = fin.L.lines.find((l) => l.key === "unclassified");
     return {
-      state: sum === "loading" || sum === undefined ? "checking" : sum === null ? "no_summary" : offCents === 0 ? "match" : "off",
+      // "Matches eBay" only when eBay's own totals were actually compared.
+      state: sum === "loading" || sum === undefined ? "checking" : sum === null || checks.length === 0 ? "no_summary" : offCents === 0 ? "match" : "off",
       checks,
       offCents,
       fundsSum,
