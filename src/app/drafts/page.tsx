@@ -2,7 +2,6 @@
 
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
-import BottomNav from "@/components/BottomNav";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -647,7 +646,8 @@ export default function DraftsPage() {
 
       {hasSelection && (
         <div
-          className="fixed bottom-[92px] left-0 right-0 z-40 px-5 max-w-md mx-auto"
+          className="fixed left-0 right-0 z-40 px-5 max-w-md mx-auto"
+          style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))" }}
         >
           <div className="card p-3 flex gap-2">
             <button
@@ -678,7 +678,6 @@ export default function DraftsPage() {
           </div>
         </div>
       )}
-      <BottomNav />
     </main>
   );
 }

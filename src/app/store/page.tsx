@@ -6,7 +6,6 @@ import { formatMoney } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag, RotateCcw, MessageCircle } from "lucide-react";
-import BottomNav from "@/components/BottomNav";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { useCountUp } from "@/lib/use-count-up";
@@ -712,7 +711,7 @@ export default function StorePage() {
       )}
 
       {selectMode && selected.size > 0 && (
-        <div className="fixed bottom-20 left-0 right-0 max-w-md mx-auto px-5">
+        <div className="fixed left-0 right-0 z-30 max-w-md mx-auto px-5" style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))" }}>
           <div className="card p-3 flex flex-col gap-2">
             <p className="text-xs text-[var(--text-secondary)]">{selected.size} item{selected.size !== 1 ? "s" : ""} selected</p>
             <div className="flex gap-2">
@@ -739,8 +738,6 @@ export default function StorePage() {
           </div>
         </div>
       )}
-
-      <BottomNav />
     </main>
   );
 }

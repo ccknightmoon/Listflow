@@ -1,4 +1,5 @@
 import PublishTray from "@/components/PublishTray";
+import BottomNav from "@/components/BottomNav";
 import ConfirmHost from "@/components/ConfirmHost";
 import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
@@ -36,6 +37,9 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#101017",
+  // Lets env(safe-area-inset-bottom) report the iPhone home-indicator area,
+  // which the bottom nav and progress tray pad against.
+  viewportFit: "cover",
 };
 
 const ACCENT_VALUES = ["indigo", "sapphire", "emerald", "amber", "rose", "teal"];
@@ -73,6 +77,7 @@ export default async function RootLayout({
       </head>
       <body>
         {children}
+        <BottomNav />
         <PublishTray />
         <ConfirmHost />
       </body>

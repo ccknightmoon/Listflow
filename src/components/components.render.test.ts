@@ -9,10 +9,13 @@ import NewListingSheet from "./NewListingSheet";
 import { ListSkeleton, EmptyState } from "./ui";
 
 describe("shared UI renders", () => {
-  it("bottom nav has the centre + button and all destinations", () => {
+  it("bottom nav: Home, Listings, +, Sales, More — 5 slots, 44px+ targets", () => {
     const html = renderToString(createElement(BottomNav));
     expect(html).toContain('aria-label="Start a listing"');
-    for (const label of ["Home", "Listings", "Sales", "Settings"]) expect(html).toContain(label);
+    for (const label of ["Home", "Listings", "Sales", "More"]) expect(html).toContain(label);
+    expect(html).toContain("grid-cols-5");
+    expect(html).toContain("min-h-[48px]");
+    expect(html).toContain("safe-area-inset-bottom");
   });
   it("new-listing sheet opens the camera directly (capture input) and offers batch", () => {
     const html = renderToString(createElement(NewListingSheet, { open: true, onClose: () => {} }));
@@ -23,5 +26,14 @@ describe("shared UI renders", () => {
   it("skeleton and empty state", () => {
     expect(renderToString(createElement(ListSkeleton, { rows: 3, label: "Loading drafts…" }))).toContain("Loading drafts…");
     expect(renderToString(createElement(EmptyState, { title: "No drafts yet", body: "Tap + to start" }))).toContain("No drafts yet");
+  });
+});
+
+describe("nav hidden on focused screens", () => {
+  it("renders nothing on New Listing", async () => {
+    vi.resetModules();
+    vi.doMock("next/navigation", () => ({ usePathname: () => "/new-listing", useRouter: () => ({ push: () => {} }) }));
+    const { default: Nav } = await import("./BottomNav");
+    expect(renderToString(createElement(Nav))).toBe("");
   });
 });

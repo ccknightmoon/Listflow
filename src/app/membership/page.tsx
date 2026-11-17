@@ -1,6 +1,5 @@
 import Link from "next/link";
 import { ArrowLeft, Feather, Rocket, Building2, Check, X } from "lucide-react";
-import BottomNav from "@/components/BottomNav";
 
 export default function MembershipPage() {
   return (
@@ -60,8 +59,6 @@ export default function MembershipPage() {
           cta="Upgrade"
         />
       </div>
-
-      <BottomNav />
     </main>
   );
 }

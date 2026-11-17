@@ -2,7 +2,6 @@
 
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
-import BottomNav from "@/components/BottomNav";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, RefreshCw, MessageCircle, Shirt, Send } from "lucide-react";
@@ -286,7 +285,6 @@ export default function MessagesPage() {
           })}
         </div>
       )}
-      <BottomNav />
     </main>
   );
 }

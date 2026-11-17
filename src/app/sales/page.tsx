@@ -6,7 +6,6 @@
 // locally by deriveView() in src/lib/sales-analytics.ts. Switching tabs never
 // waits on eBay.
 
-import BottomNav from "@/components/BottomNav";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -1114,7 +1113,6 @@ export default function SalesPage() {
           )}
         </>
       )}
-      <BottomNav />
     </main>
   );
 }

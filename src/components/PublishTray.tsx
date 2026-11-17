@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { usePathname } from "next/navigation";
+import { isNavVisible } from "@/lib/nav-config";
 import { CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Loader2, RotateCw, XCircle } from "lucide-react";
 import { getPublishQueue, summarizeQueue, type PublishItem } from "@/lib/publish-queue";
 
@@ -16,18 +18,46 @@ export default function PublishTray() {
     () => EMPTY,
   );
   const [open, setOpen] = useState(false);
+  const navShown = isNavVisible(usePathname());
+  const ref = useRef<HTMLDivElement | null>(null);
+  const visible = Boolean(queue && items.length > 0);
+
+  // Reserve space so the tray never covers content: pages get extra bottom
+  // padding, and bottom action bars read --tray-offset to sit above it.
+  useEffect(() => {
+    const root = document.documentElement;
+    if (!visible || !ref.current) {
+      root.style.removeProperty("--tray-offset");
+      document.body.style.removeProperty("padding-bottom");
+      return;
+    }
+    const apply = () => {
+      const h = (ref.current?.offsetHeight ?? 0) + 8;
+      root.style.setProperty("--tray-offset", `${h}px`);
+      document.body.style.paddingBottom = `${h}px`;
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(ref.current);
+    return () => ro.disconnect();
+  }, [visible, open, items.length]);
+
   if (!queue || items.length === 0) return null;
   const s = summarizeQueue(items);
   const busy = s.active > 0;
 
   return (
     <div
-      className="fixed left-3 right-3 bottom-[92px] z-40 max-w-md mx-auto rounded-2xl text-xs"
-      style={{ background: "var(--glass-strong)", border: "1px solid var(--glass-line)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", boxShadow: "var(--shadow-card)" }}
+      ref={ref}
+      className="fixed left-3 right-3 z-40 max-w-md mx-auto rounded-2xl text-xs"
+      style={{
+        // Just above the bottom nav where it shows; otherwise at the bottom edge.
+        bottom: navShown ? "calc(84px + env(safe-area-inset-bottom))" : "calc(12px + env(safe-area-inset-bottom))",
+        background: "var(--glass-strong)", border: "1px solid var(--glass-line)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", boxShadow: "var(--shadow-card)" }}
       role="status"
       aria-live="polite"
     >
-      <button type="button" className="w-full flex items-center gap-2 px-3 py-2.5" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+      <button type="button" className="w-full flex items-center gap-2 px-3 min-h-[44px]" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         {busy ? <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--accent)" }} /> : s.failed ? <XCircle className="w-4 h-4" style={{ color: "var(--danger)" }} /> : <CheckCircle2 className="w-4 h-4" style={{ color: "var(--success)" }} />}
         <span className="flex-1 text-left font-semibold">
           {busy ? `Listing ${Math.min(s.done + 1, s.total)} of ${s.total}…` : `${s.listed} listed${s.failed ? ` · ${s.failed} failed` : ""}`}

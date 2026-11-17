@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Plus, ImagePlus, FileText, BarChart2, TrendingUp, Package, ChevronRight, Tag, MessageCircle, Clock } from "lucide-react";
-import BottomNav from "@/components/BottomNav";
 import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
 import { apiFetch } from "@/lib/api";
@@ -459,8 +458,6 @@ export default function DashboardPage() {
       {!statsLoaded && (
         <p className="text-center text-xs mt-3" style={{ color: "var(--text-tertiary)" }}>Loading your store…</p>
       )}
-
-      <BottomNav />
     </main>
   );
 }
