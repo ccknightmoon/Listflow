@@ -368,12 +368,12 @@ export default function SalesPage() {
   const activeIndex = DAY_OPTIONS.indexOf(days);
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-28 overflow-hidden" style={{ viewTransitionName: "sales-panel" }}>
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-8 overflow-hidden" style={{ viewTransitionName: "sales-panel" }}>
       <div className="bloom d1 stagger" style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }} />
       <div className="bloom d1 stagger" style={{ width: 200, height: 200, top: 10, right: -70, background: "var(--glow-success)" }} />
 
       {/* Header — positioned above the background glow so it never renders blurred */}
-      <div className="relative z-[2] flex items-start gap-3 mb-4">
+      <div className="relative flex items-start gap-3 mb-4">
         <Link
           href="/dashboard"
           className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"

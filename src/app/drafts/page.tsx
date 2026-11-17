@@ -1,5 +1,6 @@
 "use client";
 
+import { Z } from "@/lib/z-layers";
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { useEffect, useRef, useState } from "react";
@@ -466,7 +467,7 @@ export default function DraftsPage() {
 
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-28 overflow-hidden" style={{ viewTransitionName: "drafts-panel" }}>
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-8 overflow-hidden" style={{ viewTransitionName: "drafts-panel" }}>
       <div
         className="bloom d1 stagger"
         style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
@@ -707,8 +708,8 @@ export default function DraftsPage() {
 
       {hasSelection && (
         <div
-          className="fixed left-0 right-0 z-40 px-5 max-w-md mx-auto"
-          style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))" }}
+          className="fixed left-0 right-0 px-5 max-w-md mx-auto"
+          style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))", zIndex: Z.actionBar }}
         >
           <div className="card p-3 flex gap-2">
             <button

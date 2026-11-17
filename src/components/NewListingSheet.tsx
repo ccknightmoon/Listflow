@@ -1,7 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Camera, Images, FileText, X } from "lucide-react";
+import { Camera, Images, FileText } from "lucide-react";
+import Sheet from "@/components/Sheet";
 import { setPendingPhotos } from "@/lib/pending-photos";
 
 // Opened from the "+" in the bottom nav. The camera / photo picker opens
@@ -10,8 +11,6 @@ import { setPendingPhotos } from "@/lib/pending-photos";
 // on them immediately.
 export default function NewListingSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
   const router = useRouter();
-  if (!open) return null;
-
   function go(target: "single" | "batch", files: FileList | null, path: string) {
     if (!files || files.length === 0) return;
     setPendingPhotos(target, Array.from(files));
@@ -23,18 +22,7 @@ export default function NewListingSheet({ open, onClose }: { open: boolean; onCl
   const rowStyle = { background: "var(--glass)", border: "1px solid var(--glass-line)" } as const;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Start a listing">
-      <button type="button" aria-label="Close" className="absolute inset-0" style={{ background: "rgba(0,0,0,.55)" }} onClick={onClose} />
-      <div
-        className="relative w-full max-w-md mx-3 mb-3 rounded-3xl p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]"
-        style={{ background: "var(--bg-surface)", border: "1px solid var(--glass-line)", boxShadow: "var(--shadow-card)" }}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-semibold">Start a listing</p>
-          <button type="button" onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg">
-            <X className="w-4 h-4" style={{ color: "var(--text-secondary)" }} />
-          </button>
-        </div>
+    <Sheet open={open} onClose={onClose} title="Start a listing">
         <div className="flex flex-col gap-2">
           <label className={row} style={rowStyle}>
             <span className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "var(--accent-tint)", color: "var(--accent)" }}>
@@ -66,7 +54,6 @@ export default function NewListingSheet({ open, onClose }: { open: boolean; onCl
             </span>
           </button>
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }

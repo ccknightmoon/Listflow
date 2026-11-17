@@ -10,7 +10,7 @@ describe("BulkEditSheet", () => {
     expect(listings).toContain("Set to $");
     expect(listings).not.toContain("Title words");
     const drafts = renderToString(createElement(BulkEditSheet, { open: true, items, fields: ["price", "condition", "category", "title"], onClose: () => {}, onApply: async () => null }));
-    for (const t of ["Price", "Condition", "Store category", "Title words", "Edit <!-- -->1<!-- --> item"]) expect(drafts).toContain(t);
+    for (const t of ["Price", "Condition", "Store category", "Title words", "Edit 1 item"]) expect(drafts).toContain(t);
   });
   it("renders nothing when closed", () => {
     expect(renderToString(createElement(BulkEditSheet, { open: false, items, fields: ["price"], onClose: () => {}, onApply: async () => null }))).toBe("");

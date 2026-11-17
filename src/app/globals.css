@@ -153,6 +153,10 @@ html[data-theme="light"] {
 
 body {
   margin: 0;
+  /* Room for the floating bottom nav (where shown) and the progress tray,
+     so the last thing on any page is never hidden behind them. Set by
+     BottomNav (--nav-space) and PublishTray (--tray-offset). */
+  padding-bottom: calc(var(--nav-space, 0px) + var(--tray-offset, 0px));
   background: var(--bg-page);
   color: var(--text-primary);
   font-family: var(--font-body), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;

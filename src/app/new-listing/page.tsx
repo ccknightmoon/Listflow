@@ -1,5 +1,6 @@
 "use client";
 
+import Sheet from "@/components/Sheet";
 import { takePendingPhotos } from "@/lib/pending-photos";
 import { getPublishQueue } from "@/lib/publish-queue";
 import { formatMoney } from "@/lib/format";
@@ -19,7 +20,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Undo2,
-  X,
   GripVertical,
 } from "lucide-react";
 
@@ -899,15 +899,28 @@ export default function NewListingPage() {
         </div>
       )}
 
-      {showPublishReview && (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <div className="card w-full max-w-md p-4" role="dialog" aria-modal="true" aria-labelledby="publish-review-title">
-            <div className="flex items-center justify-between mb-3">
-              <h2 id="publish-review-title" className="text-lg font-medium">Review before publishing</h2>
-              <button type="button" onClick={() => setShowPublishReview(false)} aria-label="Close publish review" className="p-1">
-                <X className="w-5 h-5" />
+      <Sheet
+        open={showPublishReview}
+        onClose={() => setShowPublishReview(false)}
+        title="Review before publishing"
+        footer={
+          <>
+            <button type="button" onClick={() => void handleListAndNext()} disabled={listStatus === "listing"} className="btn btn-primary w-full mb-2">
+              <Camera className="w-4 h-4" /> List it &amp; snap the next item
+            </button>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowPublishReview(false)} className="btn flex-1">Back to edit</button>
+              <button type="button" onClick={() => void handlePublish()} disabled={listStatus === "listing"} className="btn flex-1">
+                {listStatus === "listing" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {listStatus === "listing" ? "Publishing..." : "Publish & stay"}
               </button>
             </div>
+            <p className="text-[11px] mt-2 text-center" style={{ color: "var(--text-tertiary)" }}>
+              &ldquo;List it &amp; snap next&rdquo; publishes in the background — progress shows at the bottom of every page.
+            </p>
+          </>
+        }
+      >
             <div className="flex gap-3 mb-4">
               {photos[0]?.previewUrl && (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -925,22 +938,7 @@ export default function NewListingPage() {
               {cost && <p><strong>Cost basis:</strong> {formatMoney(Number(cost))}</p>}
               {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
             </div>
-            <button type="button" onClick={() => void handleListAndNext()} disabled={listStatus === "listing"} className="btn btn-primary w-full mb-2">
-              <Camera className="w-4 h-4" /> List it &amp; snap the next item
-            </button>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setShowPublishReview(false)} className="btn flex-1">Back to edit</button>
-              <button type="button" onClick={() => void handlePublish()} disabled={listStatus === "listing"} className="btn flex-1">
-                {listStatus === "listing" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {listStatus === "listing" ? "Publishing..." : "Publish & stay"}
-              </button>
-            </div>
-            <p className="text-[11px] mt-2 text-center" style={{ color: "var(--text-tertiary)" }}>
-              &ldquo;List it &amp; snap next&rdquo; publishes in the background — progress shows at the bottom of every page.
-            </p>
-          </div>
-        </div>
-      )}
+      </Sheet>
 
       {aiResult && (
         <div className="card p-4 mb-4">

@@ -1,5 +1,8 @@
 "use client";
 
+import Sheet from "@/components/Sheet";
+import Lightbox from "@/components/Lightbox";
+import { Z } from "@/lib/z-layers";
 import { EditorSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
@@ -968,33 +971,22 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       )}
 
-      {zoomedPhoto && (
-        <div
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center"
-          onClick={() => setZoomedPhoto(null)}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={zoomedPhoto} alt="" className="max-w-full max-h-full object-contain" draggable={false} />
-          <button
-            onClick={() => setZoomedPhoto(null)}
-            className="absolute top-4 right-4 p-2 text-white bg-black/40 rounded-full"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-      )}
+      <Lightbox src={zoomedPhoto} onClose={() => setZoomedPhoto(null)} />
 
-      {showPublishReview && (
-        <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-4 sm:items-center">
-          <div className="card w-full max-w-md p-4" role="dialog" aria-modal="true" aria-labelledby="publish-review-title">
-            <div className="flex items-center justify-between mb-3">
-              <h2 id="publish-review-title" className="text-lg font-medium">
-                {listingUrl ? "Review relist/update" : "Review before publishing"}
-              </h2>
-              <button type="button" onClick={() => setShowPublishReview(false)} aria-label="Close publish review" className="p-1">
-                <X className="w-5 h-5" />
+      <Sheet
+        open={showPublishReview}
+        onClose={() => setShowPublishReview(false)}
+        title={listingUrl ? "Review relist/update" : "Review before publishing"}
+        footer={
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setShowPublishReview(false)} className="btn flex-1">Back to edit</button>
+              <button type="button" onClick={() => void handlePublish()} disabled={listing} className="btn btn-primary flex-1">
+                {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                {listing ? "Saving..." : listingUrl ? "Save and relist on eBay" : "Publish on eBay"}
               </button>
             </div>
+        }
+      >
             <div className="flex gap-3 mb-4">
               {photoUrls[0] && (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -1012,16 +1004,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               {cost && <p><strong>Cost basis:</strong> {formatMoney(Number(cost))}</p>}
               {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
             </div>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setShowPublishReview(false)} className="btn flex-1">Back to edit</button>
-              <button type="button" onClick={() => void handlePublish()} disabled={listing} className="btn btn-primary flex-1">
-                {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-                {listing ? "Saving..." : listingUrl ? "Save and relist on eBay" : "Publish on eBay"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </Sheet>
 
       {photoUrls.length > 0 ? (
         <div className="mb-4">
@@ -1500,8 +1483,14 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 px-5 pb-6 pt-3 max-w-md mx-auto"
-        style={{ background: "var(--bg-surface)" }}>
+      <div className="fixed left-0 right-0 px-5 pt-3 max-w-md mx-auto"
+        style={{
+          // Sits above the progress tray when it's showing; padded for the iPhone home indicator.
+          bottom: "var(--tray-offset, 0px)",
+          paddingBottom: "max(1.5rem, env(safe-area-inset-bottom))",
+          background: "var(--bg-surface)",
+          zIndex: Z.sticky,
+        }}>
         <div className="flex flex-col gap-2">
           {listingUrl && (
             <div className="flex gap-2">

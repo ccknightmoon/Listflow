@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { usePathname } from "next/navigation";
 import { isNavVisible } from "@/lib/nav-config";
+import { useAnyOverlayOpen } from "@/components/Sheet";
+import { Z } from "@/lib/z-layers";
 import { CheckCircle2, ChevronDown, ChevronUp, ExternalLink, Loader2, RotateCw, XCircle } from "lucide-react";
 import { getPublishQueue, summarizeQueue, type PublishItem } from "@/lib/publish-queue";
 
@@ -19,6 +21,7 @@ export default function PublishTray() {
   );
   const [open, setOpen] = useState(false);
   const navShown = isNavVisible(usePathname());
+  const overlayOpen = useAnyOverlayOpen();
   const ref = useRef<HTMLDivElement | null>(null);
   const visible = Boolean(queue && items.length > 0);
 
@@ -28,13 +31,13 @@ export default function PublishTray() {
     const root = document.documentElement;
     if (!visible || !ref.current) {
       root.style.removeProperty("--tray-offset");
-      document.body.style.removeProperty("padding-bottom");
       return;
     }
+    // globals.css pads <body> by --nav-space + --tray-offset, and bottom
+    // action bars sit above --tray-offset, so nothing hides behind the tray.
     const apply = () => {
       const h = (ref.current?.offsetHeight ?? 0) + 8;
       root.style.setProperty("--tray-offset", `${h}px`);
-      document.body.style.paddingBottom = `${h}px`;
     };
     apply();
     const ro = new ResizeObserver(apply);
@@ -52,8 +55,14 @@ export default function PublishTray() {
   return (
     <div
       ref={ref}
-      className="fixed left-3 right-3 z-40 max-w-md mx-auto rounded-2xl text-xs"
+      className="fixed left-3 right-3 max-w-md mx-auto rounded-2xl text-xs"
+      aria-hidden={overlayOpen || undefined}
       style={{
+        zIndex: Z.tray,
+        // Hidden while a sheet/modal is open -- it never floats over one.
+        opacity: overlayOpen ? 0 : 1,
+        pointerEvents: overlayOpen ? "none" : undefined,
+        transition: "opacity .15s ease",
         // Just above the bottom nav where it shows; otherwise at the bottom edge.
         bottom: navShown ? "calc(84px + env(safe-area-inset-bottom))" : "calc(12px + env(safe-area-inset-bottom))",
         background: "var(--glass-strong)", border: "1px solid var(--glass-line)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", boxShadow: "var(--shadow-card)" }}

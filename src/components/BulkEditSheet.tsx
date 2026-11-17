@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2 } from "lucide-react";
+import Sheet from "@/components/Sheet";
 import { ALL_CONDITIONS, previewBulkEdit, type BulkEdit, type BulkTarget, type PriceChange, type TitleChange } from "@/lib/bulk-edit";
 import { formatMoney } from "@/lib/format";
 import type { StoreCategoryLite } from "@/lib/store-category-match";
@@ -66,8 +67,6 @@ export default function BulkEditSheet({
   const changing = rows.filter((r) => Object.keys(r.patch).length > 0).length;
   const hasEdit = Object.keys(edit).length > 0;
 
-  if (!open) return null;
-
   async function apply() {
     setSaving(true);
     setError(null);
@@ -85,18 +84,20 @@ export default function BulkEditSheet({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Bulk edit">
-      <button type="button" aria-label="Close" className="absolute inset-0" style={{ background: "rgba(0,0,0,.55)" }} onClick={onClose} />
-      <div
-        className="relative w-full max-w-md mx-3 mb-3 rounded-3xl p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] max-h-[88vh] overflow-y-auto"
-        style={{ background: "var(--bg-surface)", border: "1px solid var(--glass-line)", boxShadow: "var(--shadow-card)" }}
-      >
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-base font-semibold">Edit {items.length} item{items.length !== 1 ? "s" : ""}</p>
-          <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 -mr-2 flex items-center justify-center rounded-xl">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={`Edit ${items.length} item${items.length !== 1 ? "s" : ""}`}
+      footer={
+        <>
+        {error && <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>{error}</p>}
+        <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={!hasEdit || changing === 0 || saving} onClick={apply}>
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {saving ? "Saving…" : `Apply to ${changing} item${changing !== 1 ? "s" : ""}`}
+        </button>
+        </>
+      }
+    >
 
         {fields.includes("price") && (
           <div className="mb-4">
@@ -179,12 +180,6 @@ export default function BulkEditSheet({
           </div>
         )}
 
-        {error && <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>{error}</p>}
-        <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={!hasEdit || changing === 0 || saving} onClick={apply}>
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {saving ? "Saving…" : `Apply to ${changing} item${changing !== 1 ? "s" : ""}`}
-        </button>
-      </div>
-    </div>
+    </Sheet>
   );
 }

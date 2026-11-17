@@ -1,5 +1,6 @@
 "use client";
 
+import { Z } from "@/lib/z-layers";
 import SwipeRow from "@/components/SwipeRow";
 import PriceSheet from "@/components/PriceSheet";
 import { getPublishQueue } from "@/lib/publish-queue";
@@ -358,7 +359,7 @@ export default function StorePage() {
 
   return (
     <main
-      className={`relative min-h-screen max-w-md mx-auto px-5 pt-6 overflow-hidden ${bulkBarActive ? "pb-72" : "pb-28"}`}
+      className={`relative min-h-screen max-w-md mx-auto px-5 pt-6 overflow-hidden ${bulkBarActive ? "pb-40" : "pb-8"}`}
       style={{ viewTransitionName: "store-panel" }}
     >
       <div
@@ -766,7 +767,7 @@ export default function StorePage() {
       )}
 
       {selectMode && selected.size > 0 && (
-        <div className="fixed left-0 right-0 z-30 max-w-md mx-auto px-5" style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))" }}>
+        <div className="fixed left-0 right-0 max-w-md mx-auto px-5" style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))", zIndex: Z.actionBar }}>
           <div className="card p-3 flex flex-col gap-2">
             <p className="text-xs text-[var(--text-secondary)]">{selected.size} item{selected.size !== 1 ? "s" : ""} selected</p>
             <button

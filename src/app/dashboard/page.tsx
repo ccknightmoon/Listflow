@@ -227,7 +227,7 @@ export default function DashboardPage() {
   const weeklySales = stats?.weeklySales ?? null;
 
   return (
-    <main className="relative min-h-screen flex flex-col max-w-md mx-auto px-4 pt-5 pb-28 overflow-hidden">
+    <main className="relative min-h-screen flex flex-col max-w-md mx-auto px-4 pt-5 pb-8 overflow-hidden">
       <div
         className="bloom d1 stagger"
         style={{ width: 260, height: 260, top: -80, left: -60, background: "var(--glow-primary)" }}

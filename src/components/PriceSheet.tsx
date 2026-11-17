@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Loader2, X, Eye } from "lucide-react";
+import { Loader2, Eye } from "lucide-react";
+import Sheet from "@/components/Sheet";
 import { planPriceCut, summarizeCut, PRICE_CUT_PRESETS, type CutRow, type CutTarget } from "@/lib/price-cut";
 import { OFFER_DISCOUNTS } from "@/lib/watcher-offers-shared";
 import type { PriceChange } from "@/lib/bulk-edit";
@@ -45,8 +46,6 @@ export default function PriceSheet({
   const floorNum = parseFloat(floor);
   const rows = useMemo(() => (change ? planPriceCut(items, change, Number.isFinite(floorNum) ? floorNum : null) : []), [items, change, floorNum]);
   const sum = summarizeCut(rows);
-  if (!open) return null;
-
   const single = items.length === 1;
   const seg = (on: boolean) => ({
     background: on ? "var(--accent-tint)" : "var(--glass)",
@@ -55,13 +54,12 @@ export default function PriceSheet({
   });
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true" aria-label="Lower price">
-      <button type="button" aria-label="Close" className="absolute inset-0" style={{ background: "rgba(0,0,0,.55)" }} onClick={onClose} />
-      <div
-        className="relative w-full max-w-md mx-3 mb-3 rounded-3xl p-4 pb-[calc(1rem+env(safe-area-inset-bottom))] max-h-[90vh] overflow-y-auto"
-        style={{ background: "var(--bg-surface)", border: "1px solid var(--glass-line)", boxShadow: "var(--shadow-card)" }}
-      >
-        <div className="flex items-start gap-3 mb-4">
+    <Sheet
+      open={open}
+      onClose={onClose}
+      title={single ? items[0].title : "Lower prices"}
+      header={
+        <div className="flex items-start gap-3">
           {single && thumbnail && (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={thumbnail} alt="" width={56} height={56} className="w-14 h-14 rounded-xl object-cover flex-none" />
@@ -77,10 +75,14 @@ export default function PriceSheet({
               <p className="text-xs" style={{ color: "var(--text-secondary)" }}>Runs in the background — progress shows in the tray.</p>
             )}
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 -mr-2 -mt-2 flex items-center justify-center rounded-xl">
-            <X className="w-4 h-4" />
-          </button>
         </div>
+      }
+      footer={
+        <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={sum.changing === 0} onClick={() => { onApply(rows.filter((r) => r.to != null)); onClose(); }}>
+          {single ? (rows[0]?.to != null ? `Lower to ${formatMoney(rows[0].to)}` : "Lower price") : `Lower ${sum.changing.toLocaleString("en-US")} price${sum.changing !== 1 ? "s" : ""}`}
+        </button>
+      }
+    >
 
         <div className="grid grid-cols-3 gap-1.5 mb-2">
           {PRICE_CUT_PRESETS.map((p) => (
@@ -152,10 +154,6 @@ export default function PriceSheet({
           )}
         </div>
 
-        <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={sum.changing === 0} onClick={() => { onApply(rows.filter((r) => r.to != null)); onClose(); }}>
-          {single ? (rows[0]?.to != null ? `Lower to ${formatMoney(rows[0].to)}` : "Lower price") : `Lower ${sum.changing.toLocaleString("en-US")} price${sum.changing !== 1 ? "s" : ""}`}
-        </button>
-
         {single && onSendOffer && offerEligible && (
           <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>
             <p className="text-sm font-semibold">Or send an offer to interested buyers</p>
@@ -185,7 +183,6 @@ export default function PriceSheet({
             )}
           </div>
         )}
-      </div>
-    </div>
+    </Sheet>
   );
 }
