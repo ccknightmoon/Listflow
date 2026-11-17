@@ -639,7 +639,10 @@ export async function getAllOffers() {
 }
 
 // Makes a Trading API XML call. Returns status code and raw XML response body.
-export async function tradingRequest(callName: string, xmlBody: string): Promise<{ status: number; body: string }> {
+// compatLevel: the Trading API schema version to answer in. 967 stays the
+// default for every existing caller; the Sales analytics feed asks for a
+// newer level so OrderID comes back in the same format eBay Finances uses.
+export async function tradingRequest(callName: string, xmlBody: string, compatLevel = "967"): Promise<{ status: number; body: string }> {
   const token = await getAccessToken();
   return new Promise((resolve, reject) => {
     const buf = Buffer.from(xmlBody, "utf-8");
@@ -650,7 +653,7 @@ export async function tradingRequest(callName: string, xmlBody: string): Promise
         method: "POST",
         headers: {
           "X-EBAY-API-SITEID": "0",
-          "X-EBAY-API-COMPATIBILITY-LEVEL": "967",
+          "X-EBAY-API-COMPATIBILITY-LEVEL": compatLevel,
           "X-EBAY-API-CALL-NAME": callName,
           "X-EBAY-API-IAF-TOKEN": token,
           "Content-Type": "text/xml",

@@ -1,5 +1,6 @@
 import https from "node:https";
 import { getAccessToken } from "./ebay-oauth";
+import type { FinanceTx } from "./finance-match";
 
 // eBay's Sell Finances API -- unlike every other REST call in this app
 // (ebay-inventory.ts's inventoryRequest, which hits api.ebay.com), this API
@@ -126,6 +127,65 @@ export async function fetchRealFeesForRange(startISO: string, endISO: string): P
     }
 
     return { totalRealFees, saleTransactionCount, truncated: offset < total };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Per-transaction feed for the Sales analytics page (real per-order fees,
+// refunds, eBay shipping labels, other charges). Same "null = not
+// available" contract as fetchRealFeesForRange above.
+
+
+interface RawFinanceTx {
+  transactionType?: string;
+  transactionDate?: string;
+  orderId?: string;
+  bookingEntry?: string;
+  amount?: { value?: string };
+  totalFeeAmount?: { value?: string };
+}
+
+const FINANCE_WINDOW_DAYS = 90;
+
+export async function fetchFinanceTransactions(startMs: number, endMs: number): Promise<{ tx: FinanceTx[]; truncated: boolean } | null> {
+  try {
+    const windows: Array<[number, number]> = [];
+    for (let to = endMs; to > startMs; to -= FINANCE_WINDOW_DAYS * 86_400_000) {
+      windows.push([Math.max(startMs, to - FINANCE_WINDOW_DAYS * 86_400_000), to]);
+    }
+    const results = await Promise.all(windows.map(async ([from, to]) => {
+      const out: FinanceTx[] = [];
+      let offset = 0;
+      let total = Infinity;
+      let page = 0;
+      while (offset < total && page < FINANCES_MAX_PAGES) {
+        const filter = encodeURIComponent(`transactionDate:[${new Date(from).toISOString()}..${new Date(to).toISOString()}]`);
+        const { status, data } = await financesRequest(`/sell/finances/v1/transaction?filter=${filter}&limit=${FINANCES_PAGE_SIZE}&offset=${offset}`);
+        if (status >= 400) return null;
+        const body = data as { transactions?: RawFinanceTx[]; total?: number };
+        const list = body.transactions ?? [];
+        for (const t of list) {
+          out.push({
+            type: t.transactionType ?? "",
+            orderId: t.orderId ?? null,
+            date: t.transactionDate ?? "",
+            fee: parseFloat(t.totalFeeAmount?.value ?? "0") || 0,
+            amount: parseFloat(t.amount?.value ?? "0") || 0,
+            bookingEntry: t.bookingEntry ?? null,
+          });
+        }
+        total = typeof body.total === "number" ? body.total : list.length;
+        if (list.length === 0) break;
+        offset += list.length;
+        page++;
+      }
+      return { tx: out, truncated: offset < total };
+    }));
+    if (results.some((r) => r === null)) return null;
+    const ok = results as Array<{ tx: FinanceTx[]; truncated: boolean }>;
+    return { tx: ok.flatMap((r) => r.tx), truncated: ok.some((r) => r.truncated) };
   } catch {
     return null;
   }
