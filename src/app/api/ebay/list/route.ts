@@ -468,6 +468,10 @@ export async function POST(req: NextRequest) {
       // Also records that it went out with calculated shipping (old drafts
       // were saved as "free"/"buyer_pays").
       await supabase.from("drafts").update({ ebay_listing_id: listingId, shipping_mode: LISTING_SHIPPING_MODE }).eq("id", draftId);
+      // Real listing start for days-to-sell (migration 026). Separate,
+      // best-effort write: if the column doesn't exist yet this fails on
+      // its own and never affects the listing ID saved above.
+      await supabase.from("drafts").update({ ebay_listed_at: new Date().toISOString() }).eq("id", draftId);
     }
 
     // Store category isn't settable through the REST Inventory API's

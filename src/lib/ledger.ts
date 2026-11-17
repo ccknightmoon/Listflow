@@ -248,3 +248,168 @@ export function payoutBridge(all: LedgerTx[], payouts: Payout[], p: PeriodRange)
   }
   return { payoutsSentCents, fromThisPeriodCents: fromThis, fromEarlierCents: payoutsSentCents - fromThis, notYetPaidCents: notYet };
 }
+
+// ------------------------------------------------ sales line, broken down
+
+export interface SaleLineForTie {
+  orderId: string | null;
+  itemCents: number;
+  shippingCents: number;
+  taxCents: number;
+}
+
+export interface SalesBreakdown {
+  /** Item prices of orders eBay Finances settled in the period -- ties to the Item sales tile. */
+  itemCents: Cents;
+  /** Shipping buyers paid on those orders. */
+  shippingCents: Cents;
+  /** Sales tax that eBay's sale amount included (pass-through, not income). 0 when eBay excluded it. */
+  taxInPayoutCents: Cents;
+  /** eBay sale payouts for orders not in the order list (e.g. older than 90 days). */
+  unmatchedCents: Cents;
+  /** Anything left so the parts equal eBay's figure to the cent. */
+  otherCents: Cents;
+  totalCents: Cents; // == the "sales" ledger line
+  matchedOrders: number;
+}
+
+const norm = (id: string | null | undefined) => {
+  const t = (id ?? "").trim();
+  return t ? t.toUpperCase() : null;
+};
+
+/**
+ * Splits eBay's "Sales (before fees)" into item sales + shipping (+ tax if
+ * eBay's figure included it) using the order data, exactly, per order:
+ *   gross(order) = items + shipping            -> no tax in eBay's figure
+ *   gross(order) = items + shipping + tax      -> tax shown as pass-through
+ *   anything else                              -> the remainder is "other"
+ * The parts always add up to the sales line.
+ */
+export function salesBreakdown(all: LedgerTx[], p: PeriodRange, lines: SaleLineForTie[]): SalesBreakdown {
+  const byOrder = new Map<string, SaleLineForTie[]>();
+  for (const l of lines) {
+    const id = norm(l.orderId);
+    if (!id) continue;
+    const list = byOrder.get(id);
+    if (list) list.push(l);
+    else byOrder.set(id, [l]);
+  }
+  const used = new Set<string>();
+  const out: SalesBreakdown = { itemCents: 0, shippingCents: 0, taxInPayoutCents: 0, unmatchedCents: 0, otherCents: 0, totalCents: 0, matchedOrders: 0 };
+  for (const t of all) {
+    if (t.type !== "SALE" || !inRange(t, p)) continue;
+    const gross = t.amountCents + t.feeCents;
+    out.totalCents += gross;
+    const id = norm(t.orderId);
+    if (id && used.has(id)) {
+      // A second sale payout for an order already broken down (e.g. a
+      // post-sale adjustment): keep it visible as "other".
+      out.otherCents += gross;
+      continue;
+    }
+    const orderLines = id ? byOrder.get(id) : undefined;
+    if (!orderLines) {
+      out.unmatchedCents += gross;
+      continue;
+    }
+    used.add(id as string);
+    out.matchedOrders++;
+    const items = orderLines.reduce((a, l) => a + l.itemCents, 0);
+    const ship = orderLines.reduce((a, l) => a + l.shippingCents, 0);
+    const tax = orderLines.reduce((a, l) => a + l.taxCents, 0);
+    out.itemCents += items;
+    out.shippingCents += ship;
+    const rest = gross - items - ship;
+    if (tax > 0 && rest === tax) out.taxInPayoutCents += tax;
+    else out.otherCents += rest;
+  }
+  return out;
+}
+
+// ------------------------------------------------------ dispute pairing
+
+export interface DisputePair {
+  disputeId: string;
+  creditId: string;
+  orderId: string | null;
+  netCents: Cents;
+}
+
+/**
+ * Pairs each dispute debit with the eBay credit that reversed it (same
+ * order, or -- without an order id -- the same amount), so the page can
+ * show "Dispute resolved, net $0" instead of two scary lines.
+ */
+export function pairDisputes(all: LedgerTx[], p: PeriodRange): DisputePair[] {
+  const disputes = all.filter((t) => t.type === "DISPUTE" && t.amountCents < 0 && inRange(t, p));
+  const credits = all.filter((t) => t.type === "CREDIT" && t.amountCents > 0 && inRange(t, p));
+  const taken = new Set<string>();
+  const pairs: DisputePair[] = [];
+  for (const d of disputes) {
+    const byOrder = d.orderId ? credits.find((c) => !taken.has(c.id) && norm(c.orderId) === norm(d.orderId)) : undefined;
+    const byAmount = byOrder ?? credits.find((c) => !taken.has(c.id) && c.amountCents === -d.amountCents && !c.orderId);
+    const c = byOrder ?? byAmount;
+    if (!c) continue;
+    taken.add(c.id);
+    pairs.push({ disputeId: d.id, creditId: c.id, orderId: d.orderId ?? c.orderId, netCents: d.amountCents + c.amountCents });
+  }
+  return pairs;
+}
+
+/**
+ * Ledger lines for display: the sales line split into its parts and
+ * matched dispute/credit pairs folded into one "Disputes resolved" line.
+ * Still adds up to eBay's net to the cent.
+ */
+export interface DisplayLine {
+  key: string;
+  label: string;
+  cents: Cents;
+  txIds: string[];
+  /** sub-line of Sales (indented in the UI) */
+  part?: boolean;
+  note?: string;
+}
+
+export function displayLines(all: LedgerTx[], p: PeriodRange, ledger: Ledger, sb: SalesBreakdown | null): DisplayLine[] {
+  const pairs = pairDisputes(all, p);
+  const pairedIds = new Set(pairs.flatMap((x) => [x.disputeId, x.creditId]));
+  const out: DisplayLine[] = [];
+  for (const l of ledger.lines) {
+    if (l.key === "sales" && sb) {
+      const saleIds = l.txIds;
+      out.push({ key: "sales", label: "Sales (before fees)", cents: l.cents, txIds: saleIds });
+      out.push({ key: "sales_items", label: "Item sales", cents: sb.itemCents, txIds: saleIds, part: true });
+      out.push({ key: "sales_shipping", label: "Shipping charged to buyers", cents: sb.shippingCents, txIds: saleIds, part: true });
+      if (sb.taxInPayoutCents) out.push({ key: "sales_tax", label: "Sales tax in eBay's figure (pass-through)", cents: sb.taxInPayoutCents, txIds: saleIds, part: true });
+      if (sb.unmatchedCents) out.push({ key: "sales_unmatched", label: "Sales for orders older than 90 days", cents: sb.unmatchedCents, txIds: saleIds, part: true });
+      if (sb.otherCents) out.push({ key: "sales_other", label: "Other amounts in eBay's sale figure", cents: sb.otherCents, txIds: saleIds, part: true });
+      continue;
+    }
+    if (l.key === "disputes" || l.key === "credits") {
+      const rest = l.txIds.filter((id) => !pairedIds.has(id));
+      if (rest.length === 0) continue;
+      const restCents = all.filter((t) => rest.includes(t.id)).reduce((a, t) => a + t.amountCents, 0);
+      out.push({ key: l.key, label: l.label, cents: restCents, txIds: rest });
+      continue;
+    }
+    out.push({ key: l.key, label: l.label, cents: l.cents, txIds: l.txIds });
+  }
+  if (pairs.length) {
+    const net = pairs.reduce((a, x) => a + x.netCents, 0);
+    const ids = pairs.flatMap((x) => [x.disputeId, x.creditId]);
+    // Insert where disputes would have been (before credits/adjustments).
+    const at = out.findIndex((x) => x.key === "disputes" || x.key === "adjustments" || x.key === "credits" || x.key === "unclassified");
+    const line: DisplayLine = {
+      key: "disputes_resolved",
+      label: `Dispute${pairs.length !== 1 ? "s" : ""} resolved (${pairs.length})`,
+      cents: net,
+      txIds: ids,
+      note: net === 0 ? "net $0 — eBay credited it back" : undefined,
+    };
+    if (at === -1) out.push(line);
+    else out.splice(at, 0, line);
+  }
+  return out;
+}

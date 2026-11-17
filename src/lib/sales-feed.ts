@@ -103,16 +103,25 @@ interface DraftRow {
   item_type: string | null;
   store_category_name: string | null;
   created_at: string | null;
+  ebay_listed_at?: string | null;
 }
 
 async function loadDrafts(supabase: Supabase, listingIds: string[]): Promise<Map<string, DraftRow>> {
   const map = new Map<string, DraftRow>();
   for (let i = 0; i < listingIds.length; i += 150) {
-    const { data } = await supabase
+    const ids = listingIds.slice(i, i + 150);
+    const withListed = await supabase
       .from("drafts")
-      .select("ebay_listing_id, thumbnail_url, cost_basis, item_type, store_category_name, created_at")
-      .in("ebay_listing_id", listingIds.slice(i, i + 150));
-    for (const d of (data ?? []) as DraftRow[]) map.set(d.ebay_listing_id, d);
+      .select("ebay_listing_id, thumbnail_url, cost_basis, item_type, store_category_name, created_at, ebay_listed_at")
+      .in("ebay_listing_id", ids);
+    // ebay_listed_at needs migration 026 -- fall back without it.
+    const rows: unknown[] | null = withListed.error
+      ? (await supabase
+          .from("drafts")
+          .select("ebay_listing_id, thumbnail_url, cost_basis, item_type, store_category_name, created_at")
+          .in("ebay_listing_id", ids)).data
+      : withListed.data;
+    for (const d of (rows ?? []) as DraftRow[]) map.set(d.ebay_listing_id, d);
   }
   return map;
 }
@@ -122,6 +131,34 @@ async function loadSaleCosts(supabase: Supabase): Promise<{ costs: Map<string, n
   const { data, error } = await supabase.from("sale_costs").select("sale_key, cost");
   if (error) return { costs: new Map(), available: false };
   return { costs: new Map((data ?? []).map((r) => [r.sale_key as string, Number(r.cost)])), available: true };
+}
+
+export interface ListingSnapshot {
+  date: string; // YYYY-MM-DD (UTC)
+  activeCount: number;
+  capturedAt: string;
+}
+
+async function loadAndRecordSnapshots(supabase: Supabase, activeCount: number | null, now: number): Promise<ListingSnapshot[] | null> {
+  if (activeCount != null) {
+    // Best-effort; fails quietly until migration 026 is applied.
+    const { data: auth } = await supabase.auth.getUser();
+    if (auth?.user) {
+      await supabase.from("active_listing_snapshots").upsert({
+        user_id: auth.user.id,
+        snapshot_date: new Date(now).toISOString().slice(0, 10),
+        active_count: activeCount,
+        captured_at: new Date(now).toISOString(),
+      });
+    }
+  }
+  const { data, error } = await supabase
+    .from("active_listing_snapshots")
+    .select("snapshot_date, active_count, captured_at")
+    .gte("snapshot_date", new Date(now - 200 * DAY_MS).toISOString().slice(0, 10))
+    .order("snapshot_date");
+  if (error) return null;
+  return (data ?? []).map((r) => ({ date: r.snapshot_date as string, activeCount: Number(r.active_count), capturedAt: r.captured_at as string }));
 }
 
 export interface SalesFeed {
@@ -141,6 +178,8 @@ export interface SalesFeed {
   activeCount: number | null;
   feePercent: number;
   saleCostsAvailable: boolean;
+  /** Daily active-listing counts (migration 026); null until it's applied. */
+  snapshots: ListingSnapshot[] | null;
 }
 
 export async function buildSalesFeed(supabase: Supabase, feePercent: number, now = Date.now()): Promise<SalesFeed | FeedError> {
@@ -191,7 +230,11 @@ export async function buildSalesFeed(supabase: Supabase, feePercent: number, now
       soldAt: s.soldAt,
       bookedAt: (s.orderId && bookedByOrder.get(normalizeOrderId(s.orderId) as string)) || null,
       orderId: s.orderId,
-      listedAt: s.listedAt ?? d?.created_at ?? null,
+      // Hard listing start only: eBay's own StartTime, else the moment
+      // Listflow published it. Draft creation dates are NOT used (they can
+      // be days before the item went live).
+      listedAt: s.listedAt ?? d?.ebay_listed_at ?? null,
+      listedAtSource: (s.listedAt ? "ebay" : d?.ebay_listed_at ? "listflow" : null) as "ebay" | "listflow" | null,
       ebayCategory: s.ebayCategory,
       storeCategoryName: d?.store_category_name ?? null,
       itemType: d?.item_type ?? null,
@@ -217,7 +260,10 @@ export async function buildSalesFeed(supabase: Supabase, feePercent: number, now
     activeCount = activeResult.total;
   }
 
+  const snapshots = await loadAndRecordSnapshots(supabase, activeCount, now);
+
   return {
+    snapshots,
     generatedAt: new Date(now).toISOString(),
     feedDays: FEED_DAYS,
     feedStart: new Date(startMs).toISOString(),

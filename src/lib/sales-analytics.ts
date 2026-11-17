@@ -36,6 +36,8 @@ export interface AnalyticsSale {
   bookedAt?: string | null;
   orderId?: string | null;
   listedAt: string | null;
+  /** Where listedAt came from: eBay's StartTime or Listflow's publish time. */
+  listedAtSource?: "ebay" | "listflow" | null;
   ebayCategory: string | null;
   storeCategoryName: string | null;
   itemType: string | null;

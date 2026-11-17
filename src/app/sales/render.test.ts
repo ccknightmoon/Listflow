@@ -22,6 +22,9 @@ function feed() {
     { id: `S${i}`, type: "SALE", status: "PAYOUT", date: s.bookedAt, orderId: s.orderId, payoutId: "P1", feeType: null, memo: null,
       amountCents: Math.round((s.itemTotal + s.shippingPaid) * 100) - 325, feeCents: 325 },
     { id: `L${i}`, type: "SHIPPING_LABEL", status: "PAYOUT", date: s.bookedAt, orderId: s.orderId, payoutId: "P1", feeType: null, memo: "USPS label", amountCents: -599, feeCents: 0 },
+  ]).concat([
+    { id: "D1", type: "DISPUTE", status: "PAYOUT", date: iso(now - 3 * DAY), orderId: "O-3", payoutId: "P1", feeType: null, memo: null, amountCents: -10770, feeCents: 0 },
+    { id: "C1", type: "CREDIT", status: "PAYOUT", date: iso(now - 2 * DAY), orderId: "O-3", payoutId: "P1", feeType: null, memo: null, amountCents: 10770, feeCents: 0 },
   ]);
   return {
     generatedAt: iso(now), feedStart: iso(now - 90 * DAY), sales,
@@ -41,6 +44,11 @@ describe("Sales page render", () => {
       expect(html, text).toContain(text);
     }
     expect(html).not.toContain("Uncategorized");
+    expect(html).toContain("Shipping charged to buyers");
+    expect(html).toContain("resolved");
+    expect(html).toContain("net $0");
+    const tie = html.slice(html.indexOf("settled on eBay Finances"), html.indexOf("settled on eBay Finances") + 40);
+    expect(tie).toContain("✓");
     expect(html).not.toContain("NaN");
     expect(html).toMatch(/\$\d{1,3}(,\d{3})*\.\d{2}/);
   });

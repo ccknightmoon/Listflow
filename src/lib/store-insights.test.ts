@@ -136,3 +136,25 @@ describe("tips are actionable and never nag about legacy free shipping", () => {
     expect(tips2.find((t) => t.kind === "calculated_shipping")?.text).toMatch(/\$25\.00/);
   });
 });
+
+import { activeCountAt, exactSellThroughTrend } from "./store-insights";
+describe("exact sell-through from daily snapshots", () => {
+  const snaps = [
+    { date: "2026-11-01", activeCount: 1100, capturedAt: "2026-11-01T07:30:00Z" },
+    { date: "2026-11-08", activeCount: 1180, capturedAt: "2026-11-08T07:30:00Z" },
+  ];
+  it("uses the count recorded just before the period end, never a guess", () => {
+    expect(activeCountAt(snaps, Date.parse("2026-11-01T20:00:00Z"))).toBe(1100);
+    expect(activeCountAt(snaps, Date.parse("2026-11-05T00:00:00Z"))).toBeNull(); // nothing within 36h
+    expect(activeCountAt(null, Date.now())).toBeNull();
+  });
+  it("trend is null unless every bar has a recorded count", () => {
+    const now = Date.parse("2026-11-08T12:00:00Z");
+    const bars = [
+      { start: 0, end: Date.parse("2026-11-01T23:00:00Z"), units: 10 },
+      { start: 0, end: now + 1, units: 20 },
+    ] as never;
+    expect(exactSellThroughTrend(bars, snaps, 1200, now)).toEqual([Math.round((10 / 1110) * 1000) / 10, Math.round((20 / 1220) * 1000) / 10]);
+    expect(exactSellThroughTrend(bars, [], 1200, now)).toBeNull();
+  });
+});

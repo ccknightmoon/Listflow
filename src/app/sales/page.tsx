@@ -15,8 +15,8 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
-import { buildLedger, compareWithSummary, payoutBridge, LINE_LABELS, type EbaySummary, type LedgerTx, type Payout } from "@/lib/ledger";
-import { saleEconomics, shippingSplit, categoryProfit, bestAndWorst, sellThroughTrend, staleListings, storeTips } from "@/lib/store-insights";
+import { buildLedger, compareWithSummary, payoutBridge, salesBreakdown, displayLines, LINE_LABELS, type EbaySummary, type LedgerTx, type Payout, type PeriodRange } from "@/lib/ledger";
+import { saleEconomics, shippingSplit, categoryProfit, bestAndWorst, staleListings, storeTips, activeCountAt, exactSellThroughTrend, type Snapshot } from "@/lib/store-insights";
 import {
   deriveView, chooseFee, resolveCategory, toC, percentChange, type AnalyticsSale, type ActiveListing, type Change, type DatedAmount, type DayRange,
 } from "@/lib/sales-analytics";
@@ -36,6 +36,7 @@ interface Feed {
   feedStart?: string;
   ledger?: LedgerTx[];
   payouts?: Payout[] | null;
+  snapshots?: Snapshot[] | null;
 }
 
 type FeedResponse = Partial<Feed> & { error?: string; connect?: boolean; reconnect?: boolean };
@@ -187,42 +188,70 @@ export default function SalesPage() {
     const ledger = feed.ledger ?? [];
     const hasLedger = feed.finances.available && ledger.length > 0;
     const P = view.period;
+    const inP = (x: FeedSale, r: PeriodRange) => { const t = Date.parse(x.bookedAt || x.soldAt); return t >= r.start && t < r.end; };
+    const tieLines = (r: PeriodRange) => feed.sales
+      .filter((x) => x.bookedAt && inP(x, r))
+      .map((x) => ({ orderId: x.orderId ?? null, itemCents: toC(x.itemTotal), shippingCents: toC(x.shippingPaid), taxCents: toC(x.taxPaid) }));
+    const costIn = (r: PeriodRange) => feed.sales.filter((x) => inP(x, r)).reduce((a, x) => a + (typeof x.costBasis === "number" ? toC(x.costBasis) : 0), 0);
+
     const L = hasLedger ? buildLedger(ledger, P) : null;
+    const sb = L ? salesBreakdown(ledger, P, tieLines(P)) : null;
+    const lines = L ? displayLines(ledger, P, L, sb) : null;
     const econ = saleEconomics(view.sales, ledger, P, feed.feePercent);
     const costCents = econ.reduce((a, e) => a + (e.costCents ?? 0), 0);
-    const profitCents = L ? L.netCents - costCents : toC(view.current.profit);
+    // Sales tax is never income: if eBay's sale figure included it, take it back out.
+    const taxOut = sb?.taxInPayoutCents ?? 0;
+    const profitCents = L ? L.netCents - taxOut - costCents : toC(view.current.profit);
     let prevProfitCents: number | null = null;
     if (view.previous) {
       if (hasLedger) {
-        const prevSales = feed.sales.filter((x) => {
-          const t = Date.parse(x.bookedAt || x.soldAt);
-          return t >= view.previousBounds.start && t < view.previousBounds.end;
-        });
-        const prevCost = prevSales.reduce((a, x) => a + (typeof x.costBasis === "number" ? toC(x.costBasis) : 0), 0);
-        prevProfitCents = buildLedger(ledger, view.previousBounds).netCents - prevCost;
+        const PL = buildLedger(ledger, view.previousBounds);
+        const psb = salesBreakdown(ledger, view.previousBounds, tieLines(view.previousBounds));
+        prevProfitCents = PL.netCents - psb.taxInPayoutCents - costIn(view.previousBounds);
       } else {
         prevProfitCents = toC(view.previous.profit);
       }
     }
+    // Item sales tile = items on eBay Finances (sales line) + sales eBay hasn't settled yet.
+    const awaiting = view.sales.filter((x) => !x.bookedAt);
+    const awaitingCents = awaiting.reduce((a, x) => a + toC(x.itemTotal), 0);
+    const tileTieDiff = sb ? toC(view.current.itemSales) - (sb.itemCents + awaitingCents) : 0;
+
+    // Sell-through: exact only. Now = live count; past = recorded daily counts (migration 026).
+    const liveActive = feed.activeCount ?? null;
+    const prevActive = view.previous ? activeCountAt(feed.snapshots, view.previousBounds.end) : null;
+    const stPrev = view.previous && prevActive != null ? Math.round((view.previous.units / Math.max(1, view.previous.units + prevActive)) * 1000) / 10 : null;
+
     const shipping = shippingSplit(view.sales, ledger, P, feed.feePercent);
     const cats = categoryProfit(view.sales, econ);
     const stale = staleListings(feed.active, nowMs);
     return {
       hasLedger,
       L,
+      sb,
+      lines,
+      taxOut,
       econ,
       costCents,
       costedCount: econ.filter((e) => e.costCents != null).length,
       profitCents,
       profitChange: prevProfitCents == null ? null : percentChange(profitCents, prevProfitCents),
+      awaitingCount: awaiting.length,
+      awaitingCents,
+      tileTieDiff,
+      stChange: stPrev != null && view.sellThroughNow != null ? percentChange(view.sellThroughNow, stPrev) : null,
+      stTrend: exactSellThroughTrend(view.buckets, feed.snapshots, liveActive, nowMs),
+      snapshotsOn: feed.snapshots != null,
       shipping,
       cats,
       bw: bestAndWorst(econ),
       stale,
       tips: storeTips({ categories: cats, econ, shipping, stale }),
       bridge: L && feed.payouts ? payoutBridge(ledger, feed.payouts, P) : null,
-      stTrend: sellThroughTrend(view.buckets, feed.activeCount ?? feed.active.length),
-      unbooked: view.sales.filter((x) => !x.bookedAt).length,
+      unbooked: awaiting.length,
+      estFees: econ.filter((e) => !e.feeActual).length,
+      titleCategories: view.sales.filter((x) => !x.ebayCategory && !x.storeCategoryName && !x.itemType).length,
+      noStartDate: view.sales.filter((x) => !x.listedAt).length,
     };
   }, [feed, view, nowMs]);
 
@@ -343,8 +372,8 @@ export default function SalesPage() {
       <div className="bloom d1 stagger" style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }} />
       <div className="bloom d1 stagger" style={{ width: 200, height: 200, top: 10, right: -70, background: "var(--glow-success)" }} />
 
-      {/* Header */}
-      <div className="flex items-start gap-3 mb-4">
+      {/* Header — positioned above the background glow so it never renders blurred */}
+      <div className="relative z-[2] flex items-start gap-3 mb-4">
         <Link
           href="/dashboard"
           className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
@@ -540,6 +569,14 @@ export default function SalesPage() {
                   {recon.unrecognized && (
                     <p style={{ color: "var(--danger)" }}>{cents(recon.unrecognized.cents)} is in transaction types Listflow doesn&apos;t recognize — shown as its own line below.</p>
                   )}
+                  <p className="font-semibold text-xs mt-1">What isn&apos;t from eBay</p>
+                  <ul className="flex flex-col gap-0.5" style={{ color: "var(--text-tertiary)" }}>
+                    <li>• Item costs: what you entered ({fin.costedCount} of {view.sales.length} sales).</li>
+                    {fin.estFees > 0 && <li>• {fin.estFees} per-sale fee{fin.estFees !== 1 ? "s" : ""} in the category/best-worst tables are estimated (sales eBay hasn&apos;t settled yet). The totals above use eBay&apos;s real fees.</li>}
+                    {fin.titleCategories > 0 && <li>• {fin.titleCategories} sale{fin.titleCategories !== 1 ? "s" : ""} grouped by title keywords (eBay didn&apos;t return a category).</li>}
+                    {fin.noStartDate > 0 && <li>• {fin.noStartDate} sale{fin.noStartDate !== 1 ? "s" : ""} left out of days-to-sell: no real listing start date.</li>}
+                    <li>• Labels bought outside eBay aren&apos;t on your eBay account.</li>
+                  </ul>
                   {fin.unbooked > 0 && (
                     <p style={{ color: "var(--text-tertiary)" }}>{fin.unbooked} sale{fin.unbooked !== 1 ? "s" : ""} aren&apos;t in eBay Finances yet (just sold); they&apos;re dated by order date.</p>
                   )}
@@ -599,10 +636,14 @@ export default function SalesPage() {
 
           {/* Where the money goes — tap a line to see the transactions behind it */}
           {fin && (() => {
-            type WRow = { key: string; label: string; cents: number; detail: "ledger" | "costs" | null; txIds?: string[] };
-            const rows: WRow[] = fin.L
+            type WRow = { key: string; label: string; cents: number; detail: "ledger" | "costs" | null; txIds?: string[]; part?: boolean; note?: string };
+            const rows: WRow[] = fin.lines
               ? [
-                  ...fin.L.lines.map((l) => ({ key: l.key, label: l.label, cents: l.cents, detail: "ledger" as const, txIds: l.txIds })),
+                  ...fin.lines.map((l) => ({
+                    key: l.key, label: l.label, cents: l.cents, txIds: l.txIds, part: l.part, note: l.note,
+                    detail: l.part ? null : ("ledger" as const),
+                  })),
+                  ...(fin.taxOut ? [{ key: "tax_out", label: "Less sales tax (not your income)", cents: -fin.taxOut, detail: null }] : []),
                   { key: "costs", label: `Item costs (${fin.costedCount}/${view.sales.length} entered)`, cents: -fin.costCents, detail: "costs" as const },
                 ]
               : [
@@ -611,7 +652,8 @@ export default function SalesPage() {
                   { key: "fees", label: `eBay fees (estimated, ${feed.feePercent}%)`, cents: -toC(c.fees), detail: null },
                   { key: "costs", label: `Item costs (${fin.costedCount}/${view.sales.length} entered)`, cents: -fin.costCents, detail: "costs" as const },
                 ];
-            const base = Math.max(1, rows.filter((r) => r.cents > 0).reduce((a, r) => a + r.cents, 0));
+            // Percentages are a share of SALES (the first line), so profit reads as a margin.
+            const base = Math.max(1, fin.L ? fin.L.salesCents : toC(c.itemSales) + toC(c.shippingPaidByBuyers));
             const ledgerById = new Map((feed.ledger ?? []).map((t) => [t.id, t]));
             return (
               <div className="card p-4 mb-3">
@@ -619,7 +661,7 @@ export default function SalesPage() {
                   Where the money goes
                   <InfoTip label="About this breakdown">
                     {fin.hasLedger
-                      ? `Straight from your eBay Finances transactions dated ${shortDate(view.period.start)} – today. Percentages are of money in. Tap a line to see each transaction.`
+                      ? `Straight from your eBay Finances transactions dated ${shortDate(view.period.start)} – today. Percentages are a share of sales. Indented lines break sales into item prices and shipping and tie to the Item sales tile. Tap a line to see each transaction.`
                       : "Estimated from your orders. Reconnect eBay for exact numbers."}
                   </InfoTip>
                 </p>
@@ -627,6 +669,14 @@ export default function SalesPage() {
                   {rows.map((r) => {
                     const open = openLine === r.key;
                     const positive = r.cents >= 0;
+                    if (r.part) {
+                      return (
+                        <div key={r.key} className="flex justify-between gap-2 text-[11px] tabular-nums pl-3 -mt-1" style={{ color: "var(--text-tertiary)" }}>
+                          <span>↳ {r.label}</span>
+                          <span>{cents(r.cents)}<span className="ml-1.5">{pctOf(r.cents, base)}</span></span>
+                        </div>
+                      );
+                    }
                     return (
                       <div key={r.key}>
                         <button
@@ -639,6 +689,7 @@ export default function SalesPage() {
                           <div className="flex justify-between gap-2 text-xs tabular-nums">
                             <span style={{ color: "var(--text-secondary)" }}>
                               {r.label}{r.detail && <span className="ml-1" style={{ color: "var(--text-tertiary)" }}>{open ? "▾" : "▸"}</span>}
+                              {r.note && <span className="block text-[10.5px]" style={{ color: "var(--success)" }}>{r.note}</span>}
                             </span>
                             <span className="font-semibold" style={{ color: positive ? "var(--text-primary)" : "var(--danger)" }}>
                               {positive ? "" : "−"}{cents(Math.abs(r.cents))}
@@ -721,16 +772,28 @@ export default function SalesPage() {
               <p className="text-[10.5px] font-medium" style={{ color: "var(--text-tertiary)" }}>
                 Sell-through
                 <InfoTip label="How sell-through is worked out">
-                  Items sold ÷ (items sold + {(feed.activeCount ?? feed.active.length).toLocaleString("en-US")} listings active now). Approximate: eBay doesn&apos;t give past active counts, so there&apos;s no comparison.
+                  Items sold ÷ (items sold + {(feed.activeCount ?? feed.active.length).toLocaleString("en-US")} listings active right now, from eBay).
+                  {fin?.snapshotsOn
+                    ? " Past periods and the trend use the active count Listflow recorded that day; they appear once enough days are recorded."
+                    : " eBay doesn't keep past active counts, so comparisons and the trend start once daily recording is switched on (database update 026)."}
                 </InfoTip>
               </p>
               <div className="flex items-end justify-between gap-1">
                 <p className="font-display font-extrabold text-lg tabular-nums leading-tight mt-0.5">{view.sellThroughNow != null ? `${view.sellThroughNow}%` : "—"}</p>
-                {fin && <Sparkline values={fin.stTrend} />}
+                {fin?.stTrend && <Sparkline values={fin.stTrend} />}
               </div>
-              <span className="text-[10.5px]" style={{ color: "var(--text-tertiary)" }}>of active stock · trend by {days <= 7 ? "day" : "week"}</span>
+              {fin?.stChange ? <ChangeBadge change={fin.stChange} days={days} /> : (
+                <span className="text-[10.5px]" style={{ color: "var(--text-tertiary)" }}>{fin?.snapshotsOn ? "building history…" : "of active stock now"}</span>
+              )}
             </div>
           </div>
+          {fin?.sb && (
+            <p className="text-[10.5px] mb-1 px-1" style={{ color: "var(--text-tertiary)" }}>
+              Dates are eBay transaction dates. Item sales {money(c.itemSales)} = {cents(fin.sb.itemCents)} settled on eBay Finances
+              {fin.awaitingCount > 0 ? ` + ${cents(fin.awaitingCents)} from ${fin.awaitingCount} sale${fin.awaitingCount !== 1 ? "s" : ""} eBay hasn't settled yet` : ""}
+              {fin.tileTieDiff === 0 ? " ✓" : ` (differs by ${cents(fin.tileTieDiff)})`}
+            </p>
+          )}
           {view.previous && (
             <p className="text-[10.5px] mb-3 px-1" style={{ color: "var(--text-tertiary)" }}>
               Previous {days} days ({shortDate(view.previousBounds.start)} – {shortDate(view.previousBounds.end - 1)}): {money(view.previous.itemSales)} · {view.previous.units} items

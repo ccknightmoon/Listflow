@@ -237,3 +237,31 @@ export function storeTips(input: {
   if (missing > 0) tips.push({ kind: "missing_costs", text: `${missing} of ${econ.length} sales have no item cost — add them to see true profit and margins.` });
   return tips;
 }
+
+// ------------------------------------------- exact sell-through (snapshots)
+
+export interface Snapshot { date: string; activeCount: number; capturedAt: string }
+
+/** Active-listing count recorded closest before `endMs` (within 36h), else null. */
+export function activeCountAt(snapshots: Snapshot[] | null | undefined, endMs: number): number | null {
+  if (!snapshots?.length) return null;
+  let best: Snapshot | null = null;
+  for (const s of snapshots) {
+    const t = Date.parse(s.capturedAt);
+    if (Number.isNaN(t) || t > endMs || endMs - t > 36 * 3600_000) continue;
+    if (!best || t > Date.parse(best.capturedAt)) best = s;
+  }
+  return best ? best.activeCount : null;
+}
+
+/** Sell-through per chart bar from recorded counts; null if any bar has no record (no guessing). */
+export function exactSellThroughTrend(buckets: Bucket[], snapshots: Snapshot[] | null | undefined, liveNow: number | null, nowMs: number): number[] | null {
+  const out: number[] = [];
+  for (const b of buckets) {
+    const active = b.end >= nowMs ? liveNow : activeCountAt(snapshots, b.end);
+    if (active == null) return null;
+    const d = b.units + active;
+    out.push(d > 0 ? Math.round((b.units / d) * 1000) / 10 : 0);
+  }
+  return out;
+}
