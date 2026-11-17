@@ -1,5 +1,7 @@
 "use client";
 
+import { formatMoney } from "@/lib/format";
+import { counterPresets } from "@/lib/counter-presets";
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { useEffect, useRef, useState } from "react";
@@ -333,8 +335,27 @@ export default function OffersPage() {
                   </p>
                 )}
 
+                {counterOpen && !isResponding && counterPresets(offer.askingPrice, offer.offerPrice).length > 0 && (
+                  <div className="flex gap-1.5 mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                    {counterPresets(offer.askingPrice, offer.offerPrice).map((p) => (
+                      <button
+                        key={p.label}
+                        type="button"
+                        onClick={() => setCounterPrices((prev) => ({ ...prev, [key]: p.price.toFixed(2) }))}
+                        className="tap flex-1 rounded-xl min-h-[44px] text-xs font-semibold flex flex-col items-center justify-center"
+                        style={{
+                          background: counterPrices[key] === p.price.toFixed(2) ? "var(--accent-tint)" : "var(--glass)",
+                          border: `1px solid ${counterPrices[key] === p.price.toFixed(2) ? "var(--accent)" : "var(--glass-line)"}`,
+                        }}
+                      >
+                        <span>{formatMoney(p.price)}</span>
+                        <span className="text-[10px] font-medium" style={{ color: "var(--text-tertiary)" }}>{p.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 {counterOpen && !isResponding && (
-                  <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+                  <div className="flex items-center gap-2 mt-2">
                     <div className="relative flex-1">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
                       <input
