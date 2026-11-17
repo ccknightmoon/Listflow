@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMoney } from "@/lib/format";
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -1002,13 +1003,13 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               <div className="min-w-0">
                 <p className="font-medium truncate">{title || "Untitled listing"}</p>
                 <p className="text-sm text-[var(--text-secondary)]">{photoUrls.length} photo{photoUrls.length === 1 ? "" : "s"}</p>
-                <p className="text-sm font-medium">${price ? Number(price).toFixed(2) : "No price"}</p>
+                <p className="text-sm font-medium">{price ? formatMoney(Number(price)) : "No price"}</p>
               </div>
             </div>
             <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "var(--glass)" }}>
               <p><strong>Condition:</strong> {condition || "Not set"}</p>
               <p><strong>Shipping:</strong> Calculated (buyer pays by location)</p>
-              {cost && <p><strong>Cost basis:</strong> ${Number(cost).toFixed(2)}</p>}
+              {cost && <p><strong>Cost basis:</strong> {formatMoney(Number(cost))}</p>}
               {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
             </div>
             <div className="flex gap-2">

@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMoney } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag, RotateCcw, MessageCircle } from "lucide-react";
@@ -610,7 +611,7 @@ export default function StorePage() {
                           : () => setEditingPrice((prev) => new Map(prev).set(l.listingId, l.price != null ? l.price.toFixed(2) : ""))
                       }
                     >
-                      {l.price != null ? `$${l.price.toFixed(2)}` : "Tap to set price"}
+                      {l.price != null ? formatMoney(l.price) : "Tap to set price"}
                       {l.sku ? ` · SKU: ${l.sku}` : ""}
                       {l.status === "ended"
                         ? (l.endTime ? ` · Ended ${timeAgo(l.endTime)}` : " · Ended")

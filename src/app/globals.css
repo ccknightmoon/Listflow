@@ -291,6 +291,10 @@ img {
   border-radius: 50%;
   filter: blur(46px);
   pointer-events: none;
+  /* Own compositing layer: stops iOS Safari painting dark boxes behind
+     nearby text/controls that clip their overflow. */
+  transform: translateZ(0);
+  will-change: transform;
 }
 
 /* ---------- Shared component classes ----------

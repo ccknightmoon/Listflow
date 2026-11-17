@@ -7,7 +7,8 @@ import BottomNav from "@/components/BottomNav";
 import MorphLink from "@/components/MorphLink";
 import { createBrowserClient } from "@supabase/ssr";
 import { apiFetch } from "@/lib/api";
-import { bucketRevenue, formatCompactCurrency, type BucketableSale } from "@/lib/sales-buckets";
+import { bucketRevenue, type BucketableSale } from "@/lib/sales-buckets";
+import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { useCountUp } from "@/lib/use-count-up";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
 import { isStale } from "@/lib/stale-listings";
@@ -235,7 +236,7 @@ export default function DashboardPage() {
           <div>
             <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }}>This week</p>
             <p className="font-display font-extrabold text-3xl mt-1.5">
-              {displayRevenue !== null ? `$${Math.round(displayRevenue)}` : "—"}
+              {displayRevenue !== null ? formatMoneyShort(displayRevenue) : "—"}
             </p>
           </div>
 
@@ -261,7 +262,7 @@ export default function DashboardPage() {
                           className="text-[7px] font-semibold tabular-nums leading-none"
                           style={{ color: isCurrent ? "var(--accent)" : "var(--text-tertiary)" }}
                         >
-                          {formatCompactCurrency(t)}
+                          {formatMoneyShort(t)}
                         </span>
                         <div
                           className="w-full rounded-t"
@@ -271,7 +272,7 @@ export default function DashboardPage() {
                             opacity: isCurrent ? 1 : 0.45,
                             borderRadius: "3px 3px 1px 1px",
                           }}
-                          title={`$${t.toFixed(2)}`}
+                          title={formatMoney(t)}
                         />
                       </div>
                     );

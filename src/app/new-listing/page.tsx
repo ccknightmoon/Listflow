@@ -1,5 +1,6 @@
 "use client";
 
+import { formatMoney } from "@/lib/format";
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -820,13 +821,13 @@ export default function NewListingPage() {
               <div className="min-w-0">
                 <p className="font-medium truncate">{title || "Untitled listing"}</p>
                 <p className="text-sm text-[var(--text-secondary)]">{photos.length} photo{photos.length === 1 ? "" : "s"}</p>
-                <p className="text-sm font-medium">${result?.suggestedPrice == null && !customPrice ? "No price" : (result?.suggestedPrice ?? Number(customPrice)).toFixed(2)}</p>
+                <p className="text-sm font-medium">{result?.suggestedPrice == null && !customPrice ? "No price" : formatMoney(result?.suggestedPrice ?? Number(customPrice))}</p>
               </div>
             </div>
             <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "var(--glass)" }}>
               <p><strong>Condition:</strong> {condition || "Not set"}</p>
               <p><strong>Shipping:</strong> Calculated (buyer pays by location)</p>
-              {cost && <p><strong>Cost basis:</strong> ${Number(cost).toFixed(2)}</p>}
+              {cost && <p><strong>Cost basis:</strong> {formatMoney(Number(cost))}</p>}
               {missingAspectsWarning?.length ? <p className="mt-2" style={{ color: "var(--warning-border)" }}><strong>Warning:</strong> missing eBay specifics may be requested after publishing.</p> : null}
             </div>
             <div className="flex gap-2">
