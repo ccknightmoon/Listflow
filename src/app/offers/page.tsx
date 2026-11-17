@@ -1,5 +1,6 @@
 "use client";
 
+import BottomNav from "@/components/BottomNav";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Loader2, RefreshCw, Shirt, Tag, Check, X, PencilLine } from "lucide-react";
@@ -170,7 +171,7 @@ export default function OffersPage() {
   }
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-5 overflow-hidden" style={{ viewTransitionName: "offers-panel" }}>
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-28 overflow-hidden" style={{ viewTransitionName: "offers-panel" }}>
       <div
         className="bloom d1 stagger"
         style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
@@ -364,6 +365,7 @@ export default function OffersPage() {
           })}
         </div>
       )}
+      <BottomNav />
     </main>
   );
 }

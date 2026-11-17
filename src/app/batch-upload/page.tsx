@@ -1,5 +1,6 @@
 "use client";
 
+import { takePendingPhotos } from "@/lib/pending-photos";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -501,7 +502,7 @@ export default function BatchUploadPage() {
     });
   }
 
-  async function handleFilesSelected(files: FileList | null) {
+  async function handleFilesSelected(files: FileList | File[] | null) {
     if (!files || files.length === 0) return;
     setError(null);
     setManualDividers(new Set());
@@ -544,6 +545,13 @@ export default function BatchUploadPage() {
   // the first pass. Appended to `photos` rather than replacing it like
   // handleFilesSelected above, since the rest of the batch is already
   // grouped and must stay put.
+  // Photos picked from the bottom-nav "+" sheet start immediately.
+  useEffect(() => {
+    const files = takePendingPhotos("batch");
+    if (files.length > 0) void handleFilesSelected(files);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on arrival
+  }, []);
+
   async function handleAddPhotosToGroup(gIdx: number, files: FileList | null) {
     if (!files || files.length === 0) return;
     setError(null);

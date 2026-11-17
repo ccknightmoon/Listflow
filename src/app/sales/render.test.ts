@@ -1,6 +1,9 @@
 // Smoke test: the Sales page renders every section from a realistic feed
 // without throwing, and the numbers on screen are the exact eBay ones.
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// The page now renders the app's bottom nav, which needs Next's router.
+vi.mock("next/navigation", () => ({ usePathname: () => "/sales", useRouter: () => ({ push: () => {} }) }));
 import { createElement } from "react";
 import { renderToString } from "react-dom/server";
 import { setPageCache } from "@/lib/page-cache";

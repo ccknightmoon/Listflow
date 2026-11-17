@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, LayoutGrid, BarChart3, Settings, AlertTriangle } from "lucide-react";
+import { Home, LayoutGrid, BarChart3, Settings, AlertTriangle, Plus } from "lucide-react";
+import NewListingSheet from "@/components/NewListingSheet";
 import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
 
 const navItems = [
@@ -24,6 +25,7 @@ export default function BottomNav() {
   // (which doesn't render this nav, so it shows its own copy of the same
   // banner directly) so both stay in sync on wording/threshold.
   const { showWarning, message } = useAiUsageWarning();
+  const [sheetOpen, setSheetOpen] = useState(false);
 
   return (
     <>
@@ -44,7 +46,7 @@ export default function BottomNav() {
         </div>
       )}
       <nav
-        className="fixed bottom-3 left-3 right-3 max-w-md mx-auto flex justify-around py-2 px-1 rounded-2xl"
+        className="fixed bottom-3 left-3 right-3 z-40 max-w-md mx-auto flex justify-around items-center py-2 px-1 rounded-2xl"
         style={{
           background: "var(--glass-strong)",
           border: "1px solid var(--glass-line)",
@@ -53,10 +55,10 @@ export default function BottomNav() {
           boxShadow: "var(--shadow-card)",
         }}
       >
-        {navItems.map(({ href, icon: Icon, label }) => {
+        {navItems.map(({ href, icon: Icon, label }, idx) => {
           const active = pathname === href;
           const isPressed = pressed === href;
-          return (
+          const link = (
             <Link
               key={href}
               href={href}
@@ -83,8 +85,28 @@ export default function BottomNav() {
               </span>
             </Link>
           );
+          // The "+" sits in the middle: one tap to the camera from any page.
+          if (idx !== 2) return link;
+          return [
+            <button
+              key="new"
+              type="button"
+              aria-label="Start a listing"
+              onClick={() => setSheetOpen(true)}
+              className="tap relative -mt-5 w-14 h-14 rounded-2xl flex items-center justify-center flex-none"
+              style={{
+                background: "var(--accent)",
+                color: "white",
+                boxShadow: "0 8px 24px color-mix(in srgb, var(--accent) 45%, transparent)",
+              }}
+            >
+              <Plus className="w-7 h-7" strokeWidth={2.5} />
+            </button>,
+            link,
+          ];
         })}
       </nav>
+      <NewListingSheet open={sheetOpen} onClose={() => setSheetOpen(false)} />
     </>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import BottomNav from "@/components/BottomNav";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createBrowserClient } from "@supabase/ssr";
@@ -463,7 +464,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-5 overflow-hidden">
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-28 overflow-hidden">
       <div
         className="bloom d1 stagger"
         style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
@@ -966,6 +967,7 @@ export default function SettingsPage() {
         <span>&middot;</span>
         <Link href="/privacy" className="underline">Privacy</Link>
       </footer>
+      <BottomNav />
     </main>
   );
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import BottomNav from "@/components/BottomNav";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -411,7 +412,7 @@ export default function DraftsPage() {
 
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "drafts-panel" }}>
+    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-28 overflow-hidden" style={{ viewTransitionName: "drafts-panel" }}>
       <div
         className="bloom d1 stagger"
         style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
@@ -649,7 +650,7 @@ export default function DraftsPage() {
 
       {hasSelection && (
         <div
-          className="fixed bottom-4 left-0 right-0 px-5 max-w-md mx-auto"
+          className="fixed bottom-[92px] left-0 right-0 z-40 px-5 max-w-md mx-auto"
         >
           <div className="card p-3 flex gap-2">
             <button
@@ -680,6 +681,7 @@ export default function DraftsPage() {
           </div>
         </div>
       )}
+      <BottomNav />
     </main>
   );
 }

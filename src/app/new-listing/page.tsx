@@ -1,5 +1,6 @@
 "use client";
 
+import { takePendingPhotos } from "@/lib/pending-photos";
 import { formatMoney } from "@/lib/format";
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
@@ -212,6 +213,16 @@ export default function NewListingPage() {
   const photoEditorRef = useRef<HTMLDivElement | null>(null);
   const dragPointer = useRef<{ x: number; y: number } | null>(null);
   const dragScrollFrame = useRef<number | null>(null);
+
+  // Photos taken from the bottom-nav "+" sheet start immediately.
+  useEffect(() => {
+    const files = takePendingPhotos("single");
+    if (files.length === 0) return;
+    void (async () => {
+      for (const f of files) await handleFileChange(f);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on arrival
+  }, []);
 
   async function handleFileChange(file: File | undefined) {
     if (!file) return;
