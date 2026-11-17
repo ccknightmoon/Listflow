@@ -2,6 +2,7 @@
 
 import { confirmAction } from "@/lib/confirm";
 import { takePendingPhotos } from "@/lib/pending-photos";
+import { getPublishQueue } from "@/lib/publish-queue";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -1557,7 +1558,11 @@ export default function BatchUploadPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [results]);
 
-  async function handleListOnEbay(index: number, batchJobId?: string): Promise<boolean> {
+  // prepareOnly: run the readiness checks + save the draft and return its
+  // id, without publishing (used by the background "List all").
+  async function handleListOnEbay(index: number, batchJobId?: string): Promise<boolean>;
+  async function handleListOnEbay(index: number, batchJobId: string | undefined, prepareOnly: true): Promise<string | false>;
+  async function handleListOnEbay(index: number, batchJobId?: string, prepareOnly = false): Promise<boolean | string> {
     if (photoUploadWarnings[index]) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
       setListErrors((prev) => ({
@@ -1597,6 +1602,7 @@ export default function BatchUploadPage() {
       setListErrors((prev) => ({ ...prev, [index]: "Failed to save draft" }));
       return false;
     }
+    if (prepareOnly) return id;
 
     // Best-effort durable tracking for this one item within the current
     // batch run (see supabase-migrations/022_batch_jobs.sql) -- only
@@ -1666,91 +1672,105 @@ export default function BatchUploadPage() {
     }
   }
 
+  // "List all" = check + save every item here (fast), then hand them to the
+  // app-wide background publish queue. Publishing carries on if Sel leaves
+  // this page (progress in the tray on every screen); saved drafts mean
+  // nothing is lost even if the app closes.
   async function handleListAllOnEbay() {
     const indices = results
       .map((_, i) => i)
-      .filter((i) => !results[i].error && !results[i].pending && listStatus[i] !== "listed");
+      .filter((i) => !results[i].error && !results[i].pending && listStatus[i] !== "listed" && listStatus[i] !== "listing");
 
     if (indices.length === 0) return;
-    if (!(await confirmAction({ title: `List ${indices.length} item${indices.length === 1 ? "" : "s"} on eBay now?`, confirmLabel: "List now" }))) return;
+    if (!(await confirmAction({
+      title: `List ${indices.length} item${indices.length === 1 ? "" : "s"} on eBay?`,
+      message: "They publish in the background — keep working or leave this page; progress shows in the tray.",
+      confirmLabel: "List now",
+    }))) return;
 
     setListingAll(true);
     setBatchCancelled(false);
     cancelRef.current = false;
     setListingAllProgress({ done: 0, total: indices.length });
+    setError(null);
 
-    // Durable record of this run (see supabase-migrations/022_batch_jobs.sql)
-    // so it can be reviewed or resumed after the tab closes -- best-effort:
-    // a failure here just means this run proceeds untracked, same as every
-    // batch run before this existed.
-    let batchJobId: string | undefined;
-    try {
-      const jobData = await apiFetch<{ id?: string }>("/api/batch-jobs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ totalItems: indices.length }),
-      });
-      batchJobId = jobData.id;
-      activeBatchJobIdRef.current = batchJobId ?? null;
-    } catch {
-      // Tracking only -- proceed untracked.
-    }
-
-    // A couple of listings at a time instead of strictly one at a time.
-    // Kept lower than ANALYSIS_CONCURRENCY above: a single listing is
-    // already several sequential eBay calls internally (SKU cleanup,
-    // upsert, offer create/update, publish, best-effort category revise),
-    // so 2 concurrent listings roughly doubles real throughput without
-    // stacking too much simultaneous load on eBay's Trading/Inventory APIs.
-    const LISTING_CONCURRENCY = 2;
-    let successCount = 0;
-    let doneCount = 0;
+    const queue = getPublishQueue();
+    let queued = 0;
+    let notReady = 0;
+    let done = 0;
     let cursor = 0;
+    const SAVE_CONCURRENCY = 3;
 
     async function worker() {
       while (cursor < indices.length) {
         await waitForBatchResume();
         if (cancelRef.current) return;
-        const n = cursor++;
-        const ok = await handleListOnEbay(indices[n], batchJobId);
-        if (ok) successCount++;
-        doneCount++;
-        setListingAllProgress({ done: doneCount, total: indices.length });
+        const idx = indices[cursor++];
+        const draftId = await handleListOnEbay(idx, undefined, true);
+        if (draftId) {
+          queue.enqueue({ draftId, title: results[idx].suggestedTitle ?? "Untitled", thumbnail: (groups[idx]?.[0] !== undefined ? photos[groups[idx][0]]?.previewUrl : null) ?? null });
+          setListStatus((prev) => ({ ...prev, [idx]: "listing" }));
+          queued++;
+        } else {
+          notReady++;
+        }
+        done++;
+        setListingAllProgress({ done, total: indices.length });
       }
     }
 
-    await Promise.all(
-      Array.from({ length: Math.min(LISTING_CONCURRENCY, indices.length) }, () => worker())
-    );
+    await Promise.all(Array.from({ length: Math.min(SAVE_CONCURRENCY, indices.length) }, () => worker()));
 
     setListingAll(false);
     setBatchPaused(false);
     setListingAllProgress(null);
-    const failedCount = indices.length - successCount;
-    if (batchJobId) {
-      void apiFetch(`/api/batch-jobs/${batchJobId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status: cancelRef.current ? "canceled" : "completed",
-          completedItems: successCount,
-          failedItems: failedCount,
-        }),
-      }).catch(() => {});
-      activeBatchJobIdRef.current = null;
-    }
-    if (failedCount > 0) {
+    if (notReady > 0) {
       setError(
-        successCount > 0
-          ? `${successCount} item${successCount === 1 ? "" : "s"} listed. ${failedCount} failed and can be retried below.`
-          : `None of the ${failedCount} selected items listed. Review the errors and retry below.`
+        queued > 0
+          ? `${queued} item${queued === 1 ? " is" : "s are"} publishing in the background. ${notReady} need${notReady === 1 ? "s" : ""} a fix below first.`
+          : `None of the ${notReady} items could be queued — see the notes below.`
       );
-    } else if (successCount > 0) {
-      if (failedCount === 0) void clearBatchRecovery().catch(() => {});
-      setTimeout(() => router.push("/store"), 1500);
     }
-
   }
+
+  // Mirror background-queue results back onto this page's rows while it's open.
+  useEffect(() => {
+    const queue = getPublishQueue();
+    const sync = () => {
+      const byDraft = new Map(queue.getItems().map((it) => [it.draftId, it]));
+      setListStatus((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [idxStr, draftId] of Object.entries(draftIds)) {
+          const it = byDraft.get(draftId);
+          const idx = Number(idxStr);
+          if (!it) continue;
+          const st = it.status === "listed" ? "listed" : it.status === "failed" ? "error" : "listing";
+          if (next[idx] !== st) { next[idx] = st; changed = true; }
+        }
+        return changed ? next : prev;
+      });
+      setListErrors((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const [idxStr, draftId] of Object.entries(draftIds)) {
+          const it = byDraft.get(draftId);
+          if (it?.status === "failed" && next[Number(idxStr)] !== it.error) { next[Number(idxStr)] = it.error ?? "Listing failed"; changed = true; }
+        }
+        return changed ? next : prev;
+      });
+    };
+    sync();
+    return queue.subscribe(sync);
+  }, [draftIds]);
+
+  // Once every item is live, the crash-recovery snapshot isn't needed.
+  useEffect(() => {
+    const live = results.filter((r) => !r.error);
+    if (live.length > 0 && results.every((r, i) => r.error || listStatus[i] === "listed")) {
+      void clearBatchRecovery().catch(() => {});
+    }
+  }, [results, listStatus]);
 
   function pauseBatch() {
     // A plain toggle + a side-effect call here, rather than putting the
