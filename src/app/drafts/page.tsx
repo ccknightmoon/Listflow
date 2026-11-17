@@ -5,7 +5,9 @@ import { confirmAction } from "@/lib/confirm";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X, Copy } from "lucide-react";
+import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X, Copy, Pencil } from "lucide-react";
+import BulkEditSheet from "@/components/BulkEditSheet";
+import type { BulkEdit } from "@/lib/bulk-edit";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
@@ -88,6 +90,7 @@ export default function DraftsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [listStatus, setListStatus] = useState<ListStatus>("idle");
   const [listProgress, setListProgress] = useState(0);
@@ -305,6 +308,24 @@ export default function DraftsPage() {
       setError((err as Error).message);
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function applyBulkEdit(edit: BulkEdit): Promise<string | null> {
+    try {
+      const res = await fetch("/api/drafts/bulk", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: Array.from(selected), edit }),
+      });
+      const data = (await res.json()) as { updated?: number; failed?: string[]; skippedLive?: number; error?: string };
+      if (!res.ok || data.error) return data.error ?? "Couldn't save those changes.";
+      await loadDrafts();
+      setSelected(new Set());
+      if (data.failed?.length) return `${data.failed.length} draft(s) didn't save — try again.`;
+      return null;
+    } catch {
+      return "Couldn't save those changes — check your connection.";
     }
   }
 
@@ -651,13 +672,21 @@ export default function DraftsPage() {
         >
           <div className="card p-3 flex gap-2">
             <button
+              type="button"
+              onClick={() => setBulkEditOpen(true)}
+              className="btn px-3"
+              aria-label={`Edit ${selected.size} selected`}
+            >
+              <Pencil className="w-4 h-4" /> Edit
+            </button>
+            <button
               onClick={handleDeleteSelected}
               disabled={deleting}
               className="btn flex-1"
               style={{ color: "var(--danger)" }}
             >
               {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-              {deleting ? "Deleting..." : `Delete (${selected.size})`}
+              {deleting ? "Deleting..." : `Delete`}
             </button>
             <button
               onClick={handleListSelected}
@@ -678,6 +707,16 @@ export default function DraftsPage() {
           </div>
         </div>
       )}
+      <BulkEditSheet
+        open={bulkEditOpen}
+        items={Array.from(selected).map((id) => {
+          const d = draftsByIdRef.current[id];
+          return { id, title: d?.title ?? null, price: d?.suggested_price ?? null, condition: d?.condition ?? null };
+        })}
+        fields={["price", "condition", "category", "title"]}
+        onClose={() => setBulkEditOpen(false)}
+        onApply={applyBulkEdit}
+      />
     </main>
   );
 }

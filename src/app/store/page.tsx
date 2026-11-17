@@ -1,5 +1,6 @@
 "use client";
 
+import { applyPrice } from "@/lib/bulk-edit";
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
@@ -57,6 +58,7 @@ export default function StorePage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkPrice, setBulkPrice] = useState("");
+  const [bulkMode, setBulkMode] = useState<"set" | "add" | "percent">("set");
   const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkSuccessMsg, setBulkSuccessMsg] = useState("");
 
@@ -237,17 +239,21 @@ export default function StorePage() {
     if (!bulkPrice || selected.size === 0) return;
     setBulkSaving(true);
     const targets = sorted.filter((l) => selected.has(l.listingId));
+    const change = { mode: bulkMode, value: parseFloat(bulkPrice) } as const;
     let failed = 0;
     for (const l of targets) {
+      // Same exact-cents rule as the Drafts bulk edit (never below $0.99).
+      const next = applyPrice(l.price, change);
+      if (next == null) { failed++; continue; }
       try {
         const data = await apiFetch<{ error?: string }>("/api/ebay/update-price", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ listingId: l.listingId, price: bulkPrice, draftId: l.draftId }),
+          body: JSON.stringify({ listingId: l.listingId, price: next.toFixed(2), draftId: l.draftId }),
         });
         if (!data.error) {
           setListings((prev) => prev.map((x) =>
-            x.listingId === l.listingId ? { ...x, price: parseFloat(bulkPrice) } : x
+            x.listingId === l.listingId ? { ...x, price: next } : x
           ));
         } else {
           failed++;
@@ -326,7 +332,7 @@ export default function StorePage() {
 
   return (
     <main
-      className={`relative min-h-screen max-w-md mx-auto px-5 pt-6 overflow-hidden ${bulkBarActive ? "pb-56" : "pb-24"}`}
+      className={`relative min-h-screen max-w-md mx-auto px-5 pt-6 overflow-hidden ${bulkBarActive ? "pb-72" : "pb-28"}`}
       style={{ viewTransitionName: "store-panel" }}
     >
       <div
@@ -714,22 +720,40 @@ export default function StorePage() {
         <div className="fixed left-0 right-0 z-30 max-w-md mx-auto px-5" style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))" }}>
           <div className="card p-3 flex flex-col gap-2">
             <p className="text-xs text-[var(--text-secondary)]">{selected.size} item{selected.size !== 1 ? "s" : ""} selected</p>
+            <div className="grid grid-cols-3 gap-1.5">
+              {([["set", "Set to $"], ["add", "+/− $"], ["percent", "+/− %"]] as const).map(([m, t]) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setBulkMode(m)}
+                  className="rounded-xl text-xs font-semibold min-h-[40px]"
+                  style={{
+                    background: bulkMode === m ? "var(--accent-tint)" : "var(--glass)",
+                    border: `1px solid ${bulkMode === m ? "var(--accent)" : "var(--glass-line)"}`,
+                    color: bulkMode === m ? "var(--accent)" : "var(--text-secondary)",
+                  }}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
             <div className="flex gap-2">
               <div className="relative flex-1">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">{bulkMode === "percent" ? "%" : "$"}</span>
                 <input
-                  type="number"
-                  step="0.01"
-                  min="0.99"
-                  placeholder="New price"
+                  type="text"
+                  inputMode="decimal"
+                  enterKeyHint="done"
+                  placeholder={bulkMode === "set" ? "New price" : bulkMode === "add" ? "-2 or 5" : "-10 or 15"}
                   value={bulkPrice}
-                  onChange={(e) => setBulkPrice(e.target.value)}
+                  onChange={(e) => setBulkPrice(e.target.value.replace(/[^0-9.\-]/g, ""))}
                   className="input w-full pl-7"
+                  aria-label="Price change"
                 />
               </div>
               <button
                 onClick={handleBulkPrice}
-                disabled={!bulkPrice || bulkSaving}
+                disabled={!bulkPrice || !Number.isFinite(parseFloat(bulkPrice)) || (bulkMode === "set" && parseFloat(bulkPrice) < 0.99) || bulkSaving}
                 className="btn btn-primary px-4"
               >
                 {bulkSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update"}
