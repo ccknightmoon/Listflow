@@ -1,7 +1,9 @@
 "use client";
 
 import SwipeRow from "@/components/SwipeRow";
-import { applyPrice } from "@/lib/bulk-edit";
+import PriceSheet from "@/components/PriceSheet";
+import { getPublishQueue } from "@/lib/publish-queue";
+import type { CutRow } from "@/lib/price-cut";
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
@@ -40,6 +42,8 @@ interface StoreListing {
   endTime: string | null;
   status: "active" | "ended";
   draftId?: string | null;
+  costBasis?: number | null;
+  watchCount?: number | null;
 }
 
 export default function StorePage() {
@@ -58,9 +62,6 @@ export default function StorePage() {
   const [savingPrice, setSavingPrice] = useState<Set<string>>(new Set());
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [bulkPrice, setBulkPrice] = useState("");
-  const [bulkMode, setBulkMode] = useState<"set" | "add" | "percent">("set");
-  const [bulkSaving, setBulkSaving] = useState(false);
   const [bulkSuccessMsg, setBulkSuccessMsg] = useState("");
 
   async function loadAll() {
@@ -150,6 +151,13 @@ export default function StorePage() {
   }
 
   useEffect(() => { loadAll(); }, []);
+  // Deep link from the Dashboard's "Needs attention": /store?filter=stale
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("filter") !== "stale") return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- read the URL once on arrival
+    setTab("active");
+    setStaleOnly(true);
+  }, []);
   // Keeps the cache in sync with every change to `listings` — both load
   // phases below, plus delist/price-update mutations further down — without
   // needing a separate cache write at each individual call site.
@@ -214,24 +222,59 @@ export default function StorePage() {
     }
   }
 
-  // Swipe "−10%": exact-cents markdown via the same rule as bulk edit.
-  async function quickMarkdown(listing: StoreListing, percent: number) {
-    const next = applyPrice(listing.price, { mode: "percent", value: percent });
-    if (next == null) return;
-    if (!(await confirmAction({ title: `Lower to ${formatMoney(next)}?`, message: `"${listing.title}" is ${listing.price != null ? formatMoney(listing.price) : "unpriced"} now.`, confirmLabel: "Lower price" }))) return;
-    setSavingPrice((prev) => new Set(prev).add(listing.listingId));
+  // Price sheet (swipe "Price" on one listing, or "Lower prices" on a
+  // selection). Changes run in the background queue, 2 at a time with a
+  // short pause between calls to stay well inside eBay's rate limits.
+  const [priceFor, setPriceFor] = useState<StoreListing[] | null>(null);
+  const [offerEligible, setOfferEligible] = useState<Set<string>>(new Set());
+  useEffect(() => {
+    if (tab !== "active") return;
+    fetch("/api/ebay/offers/watchers").then((r) => r.json()).then((d: { eligible?: string[] }) => setOfferEligible(new Set(d.eligible ?? []))).catch(() => {});
+  }, [tab]);
+
+  function applyPriceCut(rows: CutRow[]) {
+    const queue = getPublishQueue();
+    const byId = new Map(listings.map((l) => [l.listingId, l]));
+    for (const r of rows) {
+      const l = byId.get(r.id);
+      if (!l || r.to == null) continue;
+      const to = r.to;
+      queue.enqueueTask({
+        id: `price:${r.id}`,
+        title: l.title,
+        thumbnail: l.thumbnail,
+        kind: "price",
+        note: `${formatMoney(r.from as number)} → ${formatMoney(to)}`,
+        run: async () => {
+          await new Promise((res) => setTimeout(res, 350));
+          const res = await fetch("/api/ebay/update-price", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ listingId: l.listingId, price: to.toFixed(2), draftId: l.draftId }),
+          });
+          const data = (await res.json().catch(() => ({}))) as { error?: string };
+          if (!res.ok || data.error) return { error: data.error ?? `eBay didn't accept the price (HTTP ${res.status}).` };
+          setListings((prev) => prev.map((x) => (x.listingId === l.listingId ? { ...x, price: to } : x)));
+          return { success: true };
+        },
+      });
+    }
+    setSelected(new Set());
+    setSelectMode(false);
+  }
+
+  async function sendWatcherOffer(l: StoreListing, discount: number): Promise<string | null> {
     try {
-      const data = await apiFetch<{ error?: string }>("/api/ebay/update-price", {
+      const res = await fetch("/api/ebay/offers/watchers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ listingId: listing.listingId, price: next.toFixed(2), draftId: listing.draftId }),
+        body: JSON.stringify({ listingId: l.listingId, discountPercentage: discount }),
       });
-      if (data.error) throw new Error(data.error);
-      setListings((prev) => prev.map((x) => (x.listingId === listing.listingId ? { ...x, price: next } : x)));
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setSavingPrice((prev) => { const n = new Set(prev); n.delete(listing.listingId); return n; });
+      const data = (await res.json()) as { success?: boolean; error?: string; sent?: number };
+      if (!data.success) return data.error ?? "eBay didn't send the offer.";
+      return null;
+    } catch {
+      return "Couldn't reach eBay — try again.";
     }
   }
 
@@ -254,45 +297,6 @@ export default function StorePage() {
       setError((err as Error).message);
     } finally {
       setSavingPrice((prev) => { const next = new Set(prev); next.delete(listing.listingId); return next; });
-    }
-  }
-
-  async function handleBulkPrice() {
-    if (!bulkPrice || selected.size === 0) return;
-    setBulkSaving(true);
-    const targets = sorted.filter((l) => selected.has(l.listingId));
-    const change = { mode: bulkMode, value: parseFloat(bulkPrice) } as const;
-    let failed = 0;
-    for (const l of targets) {
-      // Same exact-cents rule as the Drafts bulk edit (never below $0.99).
-      const next = applyPrice(l.price, change);
-      if (next == null) { failed++; continue; }
-      try {
-        const data = await apiFetch<{ error?: string }>("/api/ebay/update-price", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ listingId: l.listingId, price: next.toFixed(2), draftId: l.draftId }),
-        });
-        if (!data.error) {
-          setListings((prev) => prev.map((x) =>
-            x.listingId === l.listingId ? { ...x, price: next } : x
-          ));
-        } else {
-          failed++;
-        }
-      } catch {
-        failed++;
-      }
-    }
-    setBulkSaving(false);
-    const succeeded = targets.length - failed;
-    setSelected(new Set());
-    setSelectMode(false);
-    setBulkPrice("");
-    if (failed > 0) setError(`${failed} item(s) failed to update`);
-    if (succeeded > 0) {
-      setBulkSuccessMsg(`Updated ${succeeded} item${succeeded !== 1 ? "s" : ""}`);
-      setTimeout(() => setBulkSuccessMsg(""), 3000);
     }
   }
 
@@ -386,7 +390,7 @@ export default function StorePage() {
         </div>
         {!loading && listings.length > 0 && tab === "active" && (
           selectMode ? (
-            <button onClick={() => { setSelectMode(false); setSelected(new Set()); setBulkPrice(""); }} className="text-sm text-[var(--text-secondary)]">Cancel</button>
+            <button onClick={() => { setSelectMode(false); setSelected(new Set()); }} className="text-sm text-[var(--text-secondary)]">Cancel</button>
           ) : (
             <button onClick={() => setSelectMode(true)} className="text-sm" style={{ color: "var(--accent)" }}>Select</button>
           )
@@ -497,6 +501,16 @@ export default function StorePage() {
               {staleOnly ? "Showing stale only" : `${staleCount} stale (${STALE_DAYS_THRESHOLD}+ days, no sale)`}
             </button>
           )}
+          {tab === "active" && staleOnly && sorted.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setPriceFor(sorted)}
+              className="tap self-stretch min-h-[48px] rounded-2xl text-sm font-semibold flex items-center justify-center gap-2"
+              style={{ background: "var(--accent)", color: "white" }}
+            >
+              <TrendingDown className="w-4 h-4" /> Lower prices on all {sorted.length.toLocaleString("en-US")} stale
+            </button>
+          )}
           {q && (
             <p className="text-xs text-[var(--text-secondary)]">
               {sorted.length} result{sorted.length !== 1 ? "s" : ""} for &ldquo;{search.trim()}&rdquo;
@@ -574,8 +588,7 @@ export default function StorePage() {
                   : l.status === "ended"
                     ? [{ label: "Relist", tone: "accent" as const, icon: <RefreshCw className="w-4 h-4" />, onAction: () => void handleRelist(l) }]
                     : [
-                        { label: "−10%", tone: "accent" as const, icon: <TrendingDown className="w-4 h-4" />, onAction: () => void quickMarkdown(l, -10) },
-                        { label: "End", tone: "danger" as const, icon: <Trash2 className="w-4 h-4" />, onAction: () => void handleDelist(l) },
+                        { label: l.price != null ? formatMoney(l.price) : "Price", tone: "accent" as const, icon: <TrendingDown className="w-4 h-4" />, onAction: () => setPriceFor([l]) },
                       ]
               }
             >
@@ -741,7 +754,7 @@ export default function StorePage() {
                       ) : (
                         <Trash2 className="w-3.5 h-3.5" />
                       )}
-                      {deleting.has(l.listingId) ? "Ending..." : "Delist"}
+                      {deleting.has(l.listingId) ? "Ending..." : "End listing"}
                     </button>
                   </>
                 )}
@@ -756,48 +769,26 @@ export default function StorePage() {
         <div className="fixed left-0 right-0 z-30 max-w-md mx-auto px-5" style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))" }}>
           <div className="card p-3 flex flex-col gap-2">
             <p className="text-xs text-[var(--text-secondary)]">{selected.size} item{selected.size !== 1 ? "s" : ""} selected</p>
-            <div className="grid grid-cols-3 gap-1.5">
-              {([["set", "Set to $"], ["add", "+/− $"], ["percent", "+/− %"]] as const).map(([m, t]) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setBulkMode(m)}
-                  className="rounded-xl text-xs font-semibold min-h-[40px]"
-                  style={{
-                    background: bulkMode === m ? "var(--accent-tint)" : "var(--glass)",
-                    border: `1px solid ${bulkMode === m ? "var(--accent)" : "var(--glass-line)"}`,
-                    color: bulkMode === m ? "var(--accent)" : "var(--text-secondary)",
-                  }}
-                >
-                  {t}
-                </button>
-              ))}
-            </div>
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">{bulkMode === "percent" ? "%" : "$"}</span>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  enterKeyHint="done"
-                  placeholder={bulkMode === "set" ? "New price" : bulkMode === "add" ? "-2 or 5" : "-10 or 15"}
-                  value={bulkPrice}
-                  onChange={(e) => setBulkPrice(e.target.value.replace(/[^0-9.\-]/g, ""))}
-                  className="input w-full pl-7"
-                  aria-label="Price change"
-                />
-              </div>
-              <button
-                onClick={handleBulkPrice}
-                disabled={!bulkPrice || !Number.isFinite(parseFloat(bulkPrice)) || (bulkMode === "set" && parseFloat(bulkPrice) < 0.99) || bulkSaving}
-                className="btn btn-primary px-4"
-              >
-                {bulkSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Update"}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => setPriceFor(sorted.filter((l) => selected.has(l.listingId)))}
+              className="btn btn-primary w-full min-h-[48px]"
+            >
+              <TrendingDown className="w-4 h-4" /> Lower prices ({selected.size})
+            </button>
           </div>
         </div>
       )}
+      <PriceSheet
+        open={priceFor !== null}
+        items={(priceFor ?? []).map((l) => ({ id: l.listingId, title: l.title, price: l.price, costBasis: l.costBasis ?? null }))}
+        thumbnail={priceFor?.length === 1 ? priceFor[0].thumbnail : null}
+        watchCount={priceFor?.length === 1 ? priceFor[0].watchCount ?? null : null}
+        offerEligible={priceFor?.length === 1 ? offerEligible.has(priceFor[0].listingId) : false}
+        onClose={() => setPriceFor(null)}
+        onApply={applyPriceCut}
+        onSendOffer={priceFor?.length === 1 ? (d) => sendWatcherOffer(priceFor[0], d) : undefined}
+      />
     </main>
   );
 }

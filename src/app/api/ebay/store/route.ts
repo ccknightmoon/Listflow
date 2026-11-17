@@ -41,8 +41,23 @@ export async function GET() {
     const activeListings = activeResult.items.map((item) => toListing(item, "active"));
     const unsoldListings = isListTypeError(unsoldResult) ? [] : unsoldResult.items.map((item) => toListing(item, "ended"));
 
+    // Join this seller's drafts (RLS-scoped) for the draft id and the item
+    // cost they entered -- price cuts never go below cost.
+    const all = [...activeListings, ...unsoldListings];
+    const ids = all.map((l) => l.listingId).filter(Boolean);
+    const draftInfo = new Map<string, { draftId: string; costBasis: number | null }>();
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data } = await auth.supabase
+        .from("drafts")
+        .select("id, ebay_listing_id, cost_basis")
+        .in("ebay_listing_id", ids.slice(i, i + 200));
+      for (const d of data ?? []) {
+        draftInfo.set(d.ebay_listing_id as string, { draftId: d.id as string, costBasis: d.cost_basis == null ? null : Number(d.cost_basis) });
+      }
+    }
+
     return NextResponse.json({
-      listings: [...activeListings, ...unsoldListings],
+      listings: all.map((l) => ({ ...l, draftId: draftInfo.get(l.listingId)?.draftId ?? null, costBasis: draftInfo.get(l.listingId)?.costBasis ?? null })),
       activeTotal: activeResult.total,
       unsoldTotal: isListTypeError(unsoldResult) ? 0 : unsoldResult.total,
     });

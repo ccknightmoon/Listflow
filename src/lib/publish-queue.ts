@@ -9,8 +9,16 @@
 
 export type PublishStatus = "queued" | "listing" | "listed" | "failed";
 
+export type QueueKind = "publish" | "price";
+
 export interface PublishItem {
+  /** draft id for publishes; any unique id for other tasks */
   draftId: string;
+  kind?: QueueKind;
+  /** Custom task (e.g. a price change). Publishes use the queue's publisher. */
+  run?: () => Promise<ListResponse>;
+  /** Short result line, e.g. "$27.99 → $23.79" */
+  note?: string;
   title: string;
   thumbnail: string | null;
   status: PublishStatus;
@@ -47,7 +55,7 @@ export function createPublishQueue(publish: Publisher, concurrency = PUBLISH_CON
     running++;
     update(item.draftId, { status: "listing", error: undefined });
     try {
-      const r = await publish(item.draftId);
+      const r = await (item.run ? item.run() : publish(item.draftId));
       if (r.error || r.connect || r.reconnect) {
         update(item.draftId, { status: "failed", error: r.error ?? "eBay didn't accept this listing.", needsConnect: !!r.connect, needsReconnect: !!r.reconnect });
       } else {
@@ -77,6 +85,17 @@ export function createPublishQueue(publish: Publisher, concurrency = PUBLISH_CON
       items = [
         ...items.filter((i) => i.draftId !== input.draftId),
         { draftId: input.draftId, title: input.title || "Untitled", thumbnail: input.thumbnail ?? null, status: "queued", addedAt: Date.now() },
+      ];
+      emit();
+      pump();
+    },
+    /** Queue any background task (shown in the same tray). */
+    enqueueTask(input: { id: string; title: string; thumbnail?: string | null; kind: QueueKind; note?: string; run: () => Promise<ListResponse> }) {
+      const existing = items.find((i) => i.draftId === input.id);
+      if (existing && (existing.status === "queued" || existing.status === "listing")) return;
+      items = [
+        ...items.filter((i) => i.draftId !== input.id),
+        { draftId: input.id, title: input.title || "Untitled", thumbnail: input.thumbnail ?? null, kind: input.kind, note: input.note, run: input.run, status: "queued", addedAt: Date.now() },
       ];
       emit();
       pump();
@@ -120,7 +139,8 @@ export function getPublishQueue(): PublishQueue {
   return appQueue;
 }
 
-export function summarizeQueue(items: PublishItem[]) {
+export function summarizeQueue(items: PublishItem[], kind?: QueueKind) {
+  if (kind) items = items.filter((i) => (i.kind ?? "publish") === kind);
   const total = items.length;
   const listed = items.filter((i) => i.status === "listed").length;
   const failed = items.filter((i) => i.status === "failed").length;

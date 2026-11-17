@@ -16,3 +16,10 @@ describe("needs-attention inbox", () => {
     expect(allCaughtUp({ ...zero, questions: 1 })).toBe(false);
   });
 });
+
+describe("stale deep link", () => {
+  it("opens Listings filtered to stale", () => {
+    const zero = { toShip: 0, offers: 0, questions: 0, failedListings: 0, draftsNeedPhoto: 0, draftsNeedPrice: 0, stale: 0 };
+    expect(attentionItems({ ...zero, stale: 898 })[0].href).toBe("/store?filter=stale");
+  });
+});

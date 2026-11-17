@@ -202,7 +202,8 @@ export async function getCategoryIdForTitle(title: string, itemType?: string | n
 export async function inventoryRequest(
   method: string,
   path: string,
-  body?: object
+  body?: object,
+  extraHeaders?: Record<string, string>,
 ): Promise<{ status: number; data: Record<string, unknown> }> {
   const token = await getAccessToken();
   return new Promise((resolve, reject) => {
@@ -215,6 +216,7 @@ export async function inventoryRequest(
       Accept: "application/json",
     };
     if (body) headers["Content-Length"] = buf.length;
+    if (extraHeaders) Object.assign(headers, extraHeaders);
 
     const req = https.request(
       { hostname: "api.ebay.com", path, method, headers },

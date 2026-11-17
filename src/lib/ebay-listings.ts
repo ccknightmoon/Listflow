@@ -149,5 +149,7 @@ export function toListing(item: string, status: "active" | "ended") {
   const sku = xmlFind(item, "SKU") || null;
   const startTime = xmlFind(item, "StartTime") || null;
   const endTime = xmlFind(item, "EndTime") || null;
-  return { listingId, title, price, thumbnail, sku, startTime, endTime, status };
+  const watchRaw = parseInt(xmlFind(item, "WatchCount") || "", 10);
+  const watchCount = Number.isFinite(watchRaw) ? watchRaw : null;
+  return { listingId, title, price, thumbnail, sku, startTime, endTime, status, watchCount };
 }

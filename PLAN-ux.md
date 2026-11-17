@@ -86,6 +86,25 @@
 | 2.6 | **Offers, messages and shipping polish** | Counter-offer presets (e.g. −5% / −10% / floor price), templated replies, and printing pick lists for ship-today orders. | M | Low | Unit tests on the offer maths; manual flows. |
 | 2.7 | **Sales follow-ups** | Make sure eBay's own totals check works (the live badge said "From eBay Finances", meaning eBay's summary wasn't used — confirm the response format against a real call). Sell-through trend once daily counts build up (migration 026). | S | Low | The badge shows "✓ Matches eBay" on live data. |
 
+### Nov 18 fixes (branch `fix/ship-messages-pricing`)
+
+- **To ship:** reconciles with eBay on open, refresh and pull-down. An order leaves the list on any of these:
+  - a ship date;
+  - tracking uploaded;
+  - an eBay label in Finances;
+  - a cancellation.
+- **Titles:** HTML entities are decoded everywhere.
+- **Buyer questions:** each card shows the real item photo, title and price, and links to the listing.
+- **Price drops:**
+  - **One listing:** swipe → Price sheet with −10/15/20%, a custom amount (set $, −$, −%), a floor that also never goes below your item cost, and a live preview.
+  - **Stale listings:** a "Lower prices on all stale" button, and the bulk "Lower prices" both run in the background tray at a rate-limited pace.
+  - **Duplicate buttons removed:** "End" from the swipe and "Delist" on the card were the same action, so only the card's "End listing" button is kept.
+- **Offers to watchers:** built on eBay's Negotiation API, in the Price sheet when eBay says the item has interested buyers.
+  - Not tried against Sel's account yet. If eBay refuses permission, the sheet asks for a reconnect.
+
+**Later:**
+- **eBay Fulfillment API for "To ship"** (`getOrders`, orderfulfillmentstatus filter). It's the most authoritative source, but needs the `sell.fulfillment` scope. Adding a scope forces every user to reconnect eBay, and an unconsented scope breaks token refresh, so do it together with a planned reconnect prompt. (S/M, Med risk)
+
 ## Phase 3: Foundations, cleanup and growth
 
 | # | Item | What changes and why it matters | Effort | Risk | How it's verified |

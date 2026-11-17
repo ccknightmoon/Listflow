@@ -45,6 +45,9 @@ export default function PublishTray() {
   if (!queue || items.length === 0) return null;
   const s = summarizeQueue(items);
   const busy = s.active > 0;
+  const activeKinds = new Set(items.filter((i) => i.status === "queued" || i.status === "listing").map((i) => i.kind ?? "publish"));
+  const verb = activeKinds.size === 1 && activeKinds.has("price") ? "Updating prices" : activeKinds.has("price") ? "Working" : "Listing";
+  const doneWord = items.every((i) => i.kind === "price") ? "updated" : items.every((i) => (i.kind ?? "publish") === "publish") ? "listed" : "done";
 
   return (
     <div
@@ -60,7 +63,7 @@ export default function PublishTray() {
       <button type="button" className="w-full flex items-center gap-2 px-3 min-h-[44px]" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
         {busy ? <Loader2 className="w-4 h-4 animate-spin" style={{ color: "var(--accent)" }} /> : s.failed ? <XCircle className="w-4 h-4" style={{ color: "var(--danger)" }} /> : <CheckCircle2 className="w-4 h-4" style={{ color: "var(--success)" }} />}
         <span className="flex-1 text-left font-semibold">
-          {busy ? `Listing ${Math.min(s.done + 1, s.total)} of ${s.total}…` : `${s.listed} listed${s.failed ? ` · ${s.failed} failed` : ""}`}
+          {busy ? `${verb} ${Math.min(s.done + 1, s.total)} of ${s.total}…` : `${s.listed} ${doneWord}${s.failed ? ` · ${s.failed} failed` : ""}`}
         </span>
         <div className="w-16 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--glass)" }}>
           <div className="h-full" style={{ width: `${(s.done / s.total) * 100}%`, background: s.failed ? "var(--danger)" : "var(--success)", transition: "width .3s" }} />
@@ -78,6 +81,7 @@ export default function PublishTray() {
               <span className="flex-1 min-w-0">
                 <span className="block truncate">{i.title}</span>
                 {i.status === "failed" && <span className="block truncate" style={{ color: "var(--danger)" }}>{i.error}</span>}
+                {i.status !== "failed" && i.note && <span className="block truncate tabular-nums" style={{ color: "var(--text-tertiary)" }}>{i.note}</span>}
               </span>
               {i.status === "listing" && <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--accent)" }} />}
               {i.status === "queued" && <span style={{ color: "var(--text-tertiary)" }}>queued</span>}

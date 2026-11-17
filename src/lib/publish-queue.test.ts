@@ -55,3 +55,16 @@ describe("background publish queue", () => {
     expect(q.getItems()).toHaveLength(0);
   });
 });
+
+describe("generic background tasks (price changes) share the queue", () => {
+  it("runs custom tasks with their own function and keeps the note", async () => {
+    const q = createPublishQueue(async () => ({ error: "should not be called" }));
+    let ran = 0;
+    q.enqueueTask({ id: "price:1", title: "Tee", kind: "price", note: "$27.99 → $23.79", run: async () => { ran++; return { success: true }; } });
+    await settle();
+    expect(ran).toBe(1);
+    expect(q.getItems()[0]).toMatchObject({ status: "listed", kind: "price", note: "$27.99 → $23.79" });
+    expect(summarizeQueue(q.getItems(), "price").listed).toBe(1);
+    expect(summarizeQueue(q.getItems(), "publish").total).toBe(0);
+  });
+});
