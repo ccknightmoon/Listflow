@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildOfferBody, isValidOfferDiscount } from "./watcher-offers";
+import { buildOfferBody, isValidOfferDiscount } from "./watcher-offers-shared";
 
 describe("offers to interested buyers", () => {
   it("builds eBay's request: no counter-offers, 2-day expiry, one item", () => {

@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Loader2, X, Eye } from "lucide-react";
 import { planPriceCut, summarizeCut, PRICE_CUT_PRESETS, type CutRow, type CutTarget } from "@/lib/price-cut";
-import { OFFER_DISCOUNTS } from "@/lib/watcher-offers";
+import { OFFER_DISCOUNTS } from "@/lib/watcher-offers-shared";
 import type { PriceChange } from "@/lib/bulk-edit";
 import { formatMoney } from "@/lib/format";
 

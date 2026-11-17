@@ -2,23 +2,10 @@
 // interested in a listing. Often a better first move on a stale item than
 // a public price cut -- only interested buyers see the lower price.
 import { inventoryRequest } from "./ebay-inventory";
+import { buildOfferBody } from "./watcher-offers-shared";
+export { OFFER_DISCOUNTS, isValidOfferDiscount, buildOfferBody } from "./watcher-offers-shared";
 
 const MARKET = { "X-EBAY-C-MARKETPLACE-ID": "EBAY_US" };
-export const OFFER_DISCOUNTS = [10, 15, 20] as const;
-
-export function isValidOfferDiscount(n: unknown): n is number {
-  return typeof n === "number" && Number.isInteger(n) && n >= 5 && n <= 80;
-}
-
-export function buildOfferBody(listingId: string, discountPercentage: number, message?: string) {
-  return {
-    allowCounterOffer: false,
-    message: (message ?? "Thanks for your interest — here's a special price, just for you.").slice(0, 2000),
-    offerDuration: { unit: "DAY", value: 2 },
-    offeredItems: [{ listingId, discountPercentage: String(discountPercentage), quantity: 1 }],
-  };
-}
-
 /** Listing ids eBay says can get an offer right now (they have interested buyers). null = not available. */
 export async function fetchEligibleListingIds(): Promise<Set<string> | null> {
   const ids = new Set<string>();
