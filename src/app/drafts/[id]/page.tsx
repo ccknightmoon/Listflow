@@ -1,5 +1,6 @@
 "use client";
 
+import { EditorSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
 import { use, useEffect, useRef, useState } from "react";
@@ -883,9 +884,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         <Link href="/drafts" className="inline-flex mb-4">
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <div className="card p-8 text-center">
-          <Loader2 className="w-6 h-6 mx-auto animate-spin" />
-        </div>
+        <EditorSkeleton />
       </main>
     );
   }

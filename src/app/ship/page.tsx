@@ -6,6 +6,9 @@ import Link from "next/link";
 import { ArrowLeft, ExternalLink, Loader2, Package, RefreshCw, Shirt } from "lucide-react";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
+import { getPageCache, setPageCache } from "@/lib/page-cache";
+
+const SHIP_CACHE_KEY = "ship:items";
 
 interface ShipItem {
   listingId: string;
@@ -37,8 +40,9 @@ function formatAddress(addr: ShipItem["address"]): string {
 }
 
 export default function ShipPage() {
-  const [items, setItems] = useState<ShipItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Instant repaint from this tab's last load, refreshed in the background.
+  const [items, setItems] = useState<ShipItem[]>(() => getPageCache<ShipItem[]>(SHIP_CACHE_KEY) ?? []);
+  const [loading, setLoading] = useState(() => getPageCache<ShipItem[]>(SHIP_CACHE_KEY) === undefined);
   const [error, setError] = useState<string | null>(null);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
@@ -46,7 +50,7 @@ export default function ShipPage() {
   useEffect(() => { load(); }, []);
 
   async function load() {
-    setLoading(true);
+    if (getPageCache<ShipItem[]>(SHIP_CACHE_KEY) === undefined) setLoading(true);
     setError(null);
     setNeedsConnect(false);
     setNeedsReconnect(false);
@@ -60,6 +64,7 @@ export default function ShipPage() {
         return;
       }
       setItems(data.items ?? []);
+      setPageCache(SHIP_CACHE_KEY, data.items ?? []);
     } catch {
       setError("Failed to load shipments");
     } finally {
@@ -97,7 +102,7 @@ export default function ShipPage() {
           )}
         </div>
         <button
-          onClick={load}
+          onClick={() => { setLoading(true); void load(); }}
           disabled={loading}
           className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
         >

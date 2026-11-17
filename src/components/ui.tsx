@@ -34,3 +34,20 @@ export function EmptyState({ icon, title, body, action }: { icon?: ReactNode; ti
     </div>
   );
 }
+
+/** Loading shape for an edit screen: photo strip + form fields (no layout jump when it fills in). */
+export function EditorSkeleton() {
+  return (
+    <div role="status" aria-label="Loading" className="flex flex-col gap-3 animate-pulse">
+      <div className="flex gap-3">
+        {[0, 1, 2].map((i) => <div key={i} className="w-24 h-24 rounded-xl flex-none" style={{ background: "var(--glass-strong)" }} />)}
+      </div>
+      {[80, 60, 70, 45].map((w, i) => (
+        <div key={i} className="card p-3 flex flex-col gap-2">
+          <div className="h-2.5 rounded-full w-1/4" style={{ background: "var(--glass)" }} />
+          <div className="h-3.5 rounded-full" style={{ width: `${w}%`, background: "var(--glass-strong)" }} />
+        </div>
+      ))}
+    </div>
+  );
+}
