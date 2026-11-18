@@ -10,6 +10,7 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
 import { useIsDesktop } from "@/lib/use-is-desktop";
+import Lightbox from "@/components/Lightbox";
 
 interface BuyerQuestion {
   messageId: string;
@@ -56,6 +57,7 @@ export default function MessagesPage() {
   // Desktop (lg): list on the left, the selected question + reply on the right.
   const isDesktop = useIsDesktop();
   const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [viewerSrc, setViewerSrc] = useState<string | null>(null);
 
   // Guards against out-of-order responses: the silent load fired on mount
   // and a manual refresh-button click can now overlap (e.g. tapping
@@ -307,7 +309,10 @@ export default function MessagesPage() {
                         {q.context === "general" ? <MessageCircle className="w-5 h-5 text-[var(--text-secondary)]" /> : <Shirt className="w-5 h-5 text-[var(--text-secondary)]" />}
                       </div>
                     );
-                    return q.url ? <a href={q.url} target="_blank" rel="noopener noreferrer" aria-label="Open listing on eBay">{thumb}</a> : thumb;
+                    // Tap the photo to view it full size; the title links to eBay.
+                    return q.thumbnail ? (
+                      <button type="button" className="flex-shrink-0 cursor-zoom-in" aria-label="View photo" onClick={() => setViewerSrc(q.thumbnail ?? null)}>{thumb}</button>
+                    ) : q.url ? <a href={q.url} target="_blank" rel="noopener noreferrer" aria-label="Open listing on eBay">{thumb}</a> : thumb;
                   })()}
 
                   <div className="flex-1 min-w-0">
@@ -375,6 +380,7 @@ export default function MessagesPage() {
           })}
         </div>
       )}
+      <Lightbox src={viewerSrc} onClose={() => setViewerSrc(null)} />
     </main>
   );
 }

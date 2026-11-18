@@ -6,7 +6,7 @@ import PhotoDropZone from "@/components/PhotoDropZone";
 import SpecificsEditor from "@/components/SpecificsEditor";
 import { sanitizeStoredSpecifics, type StoredSpecificsShape } from "@/lib/item-specifics";
 import { useIsDesktop } from "@/lib/use-is-desktop";
-import Lightbox from "@/components/Lightbox";
+import PhotoViewer from "@/components/PhotoViewer";
 import { Z } from "@/lib/z-layers";
 import { EditorSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
@@ -942,7 +942,13 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       )}
 
-      <Lightbox src={zoomedPhoto} onClose={() => setZoomedPhoto(null)} />
+      {/* Tap a photo: full-screen viewer over all of this draft's photos. */}
+      <PhotoViewer
+        photos={photoUrls.length ? photoUrls : zoomedPhoto ? [zoomedPhoto] : []}
+        index={zoomedPhoto ? Math.max(0, photoUrls.indexOf(zoomedPhoto)) : null}
+        onClose={() => setZoomedPhoto(null)}
+        alt={title || "Photo"}
+      />
 
       <Sheet
         open={showPublishReview}

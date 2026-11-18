@@ -6,6 +6,7 @@ import { takePendingPhotos } from "@/lib/pending-photos";
 import { groupingNoticeLines } from "@/lib/grouping-repair";
 import { buildGroupsFromDividers, countMarkedItems } from "@/lib/manual-dividers";
 import PhotoDropZone from "@/components/PhotoDropZone";
+import PhotoViewer from "@/components/PhotoViewer";
 import { getPublishQueue } from "@/lib/publish-queue";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -221,6 +222,9 @@ export default function BatchUploadPage() {
   const [step, setStep] = useState<Step>("upload");
   const [photos, setPhotos] = useState<SlotImage[]>([]);
   const [groups, setGroups] = useState<number[][]>([]);
+  // Full-screen photo viewer (tap any photo).
+  const [viewer, setViewer] = useState<{ photos: string[]; index: number } | null>(null);
+  const openViewer = (list: string[], index: number) => { if (list.length) setViewer({ photos: list, index: Math.max(0, Math.min(index, list.length - 1)) }); };
   // Non-blocking "check these" notes from grouping (photos the AI skipped
   // and the server auto-placed). Cleared when a new batch is grouped.
   const [groupingNotices, setGroupingNotices] = useState<string[]>([]);
@@ -2096,7 +2100,8 @@ export default function BatchUploadPage() {
                         alt={`Photo ${i + 1}`}
                         loading="lazy"
                         decoding="async"
-                        className="aspect-square object-cover rounded-md"
+                        className="aspect-square object-cover rounded-md cursor-zoom-in"
+                        onClick={() => openViewer(photos.map((x) => x.previewUrl), i)}
                         style={isDivider ? { outline: "2px solid var(--accent)", outlineOffset: 2, opacity: 0.55 } : isStart ? { outline: "2px solid var(--success)", outlineOffset: 2 } : undefined}
                       />
                       {isStart && (
@@ -2272,7 +2277,9 @@ export default function BatchUploadPage() {
                             alt={`Photo ${photoIdx + 1}`}
                             loading="lazy"
                             decoding="async"
-                            className="w-14 h-14 object-cover rounded-md"
+                            className="w-14 h-14 object-cover rounded-md cursor-zoom-in"
+                            // Click/tap = view; dragging still moves it between items.
+                            onClick={() => openViewer(group.map((idx) => photos[idx]?.previewUrl).filter(Boolean) as string[], posInGroup)}
                           />
                           <button
                             onClick={(e) => {
@@ -2648,7 +2655,8 @@ export default function BatchUploadPage() {
                           alt={`Photo ${pi + 1}`}
                           loading="lazy"
                           decoding="async"
-                          className="h-36 w-36 object-cover rounded-lg flex-shrink-0 snap-start opacity-60"
+                          className="h-36 w-36 object-cover rounded-lg flex-shrink-0 snap-start opacity-60 cursor-zoom-in"
+                          onClick={() => openViewer(groupPhotos, pi)}
                         />
                       ))}
                     </div>
@@ -2752,7 +2760,8 @@ export default function BatchUploadPage() {
                           alt={`Photo ${pi + 1}`}
                           loading="lazy"
                           decoding="async"
-                          className="w-full h-full object-cover rounded-lg"
+                          className="w-full h-full object-cover rounded-lg cursor-zoom-in"
+                          onClick={() => openViewer(groupPhotos, pi)}
                         />
                         <div className="absolute bottom-1 left-1 right-1 flex justify-between">
                           <button
@@ -3134,6 +3143,7 @@ export default function BatchUploadPage() {
           </div>
         </div>
       )}
+      <PhotoViewer photos={viewer?.photos ?? []} index={viewer ? viewer.index : null} onClose={() => setViewer(null)} />
     </main>
   );
 }

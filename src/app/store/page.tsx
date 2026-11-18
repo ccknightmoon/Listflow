@@ -4,6 +4,7 @@ import CurrencyInput from "@/components/CurrencyInput";
 import { Z } from "@/lib/z-layers";
 import SwipeRow from "@/components/SwipeRow";
 import DataTable from "@/components/DataTable";
+import Lightbox from "@/components/Lightbox";
 import type { RowAction } from "@/components/RowMenu";
 import { useIsDesktop } from "@/lib/use-is-desktop";
 import PriceSheet from "@/components/PriceSheet";
@@ -71,6 +72,7 @@ export default function StorePage() {
   // Desktop (lg+): a dense table with checkboxes, hover actions and a
   // right-click / "⋯" menu replaces the swipe cards; selection is always on.
   const isDesktop = useIsDesktop();
+  const [viewerSrc, setViewerSrc] = useState<string | null>(null);
 
   async function loadAll() {
     // No setLoading(true) here: the initial state above already reflects
@@ -632,7 +634,7 @@ export default function StorePage() {
                 <div className="flex items-center gap-3 min-w-0">
                   {l.thumbnail ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={l.thumbnail} alt="" loading="lazy" decoding="async" className="w-10 h-10 rounded-md object-cover flex-none" />
+                    <img src={l.thumbnail} alt="" loading="lazy" decoding="async" data-no-row-click="" onClick={() => setViewerSrc(l.thumbnail)} className="w-10 h-10 rounded-md object-cover flex-none cursor-zoom-in" />
                   ) : (
                     <div className="w-10 h-10 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-none"><Shirt className="w-5 h-5 text-[var(--text-secondary)]" /></div>
                   )}
@@ -709,7 +711,8 @@ export default function StorePage() {
                     alt={l.title}
                     loading="lazy"
                     decoding="async"
-                    className="w-14 h-14 rounded-md object-cover flex-shrink-0"
+                    onClick={(e) => { if (!selectMode) { e.stopPropagation(); setViewerSrc(l.thumbnail); } }}
+                    className="w-14 h-14 rounded-md object-cover flex-shrink-0 cursor-zoom-in"
                   />
                 ) : (
                   <div className="w-14 h-14 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-shrink-0">
@@ -877,6 +880,7 @@ export default function StorePage() {
         onApply={applyPriceCut}
         onSendOffer={priceFor?.length === 1 ? (d) => sendWatcherOffer(priceFor[0], d) : undefined}
       />
+      <Lightbox src={viewerSrc} onClose={() => setViewerSrc(null)} />
     </main>
   );
 }

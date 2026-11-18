@@ -108,7 +108,7 @@ export default function DataTable<T>({
                 style={{ borderBottom: "1px solid var(--border)", background: isSel ? "var(--accent-tint)" : undefined }}
                 onFocus={() => setFocusIdx(i)}
                 onClick={(e) => {
-                  if ((e.target as HTMLElement).closest("a,button,input,label")) return;
+                  if ((e.target as HTMLElement).closest("a,button,input,label,[data-no-row-click]")) return;
                   if (e.shiftKey || e.metaKey || e.ctrlKey) { toggle(id, e.shiftKey); return; }
                   onOpen?.(r);
                 }}

@@ -4,6 +4,7 @@ import CurrencyInput from "@/components/CurrencyInput";
 import Sheet from "@/components/Sheet";
 import { takePendingPhotos } from "@/lib/pending-photos";
 import PhotoDropZone from "@/components/PhotoDropZone";
+import PhotoViewer from "@/components/PhotoViewer";
 import { useIsDesktop } from "@/lib/use-is-desktop";
 import { getPublishQueue } from "@/lib/publish-queue";
 import { formatMoney } from "@/lib/format";
@@ -223,6 +224,7 @@ export default function NewListingPage() {
 
   const fileInput = useRef<HTMLInputElement | null>(null);
   const isDesktop = useIsDesktop();
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   // eBay item specifics for the chosen category (AI-filled, seller-editable)
   // and which required ones are still empty -- see SpecificsEditor.
   const [specifics, setSpecifics] = useState<StoredSpecifics | null>(null);
@@ -808,6 +810,7 @@ export default function NewListingPage() {
                 count={photos.length}
                 onRemove={() => removePhoto(index)}
                 onMove={(to) => movePhoto(index, to)}
+                onOpen={() => setViewerIndex(index)}
                 onLabelChange={(label) => setPhotoLabel(index, label)}
                 onDragStart={() => { rememberPhotoChange("Photo reordered"); draggedPhoto.current = index; }}
                 onPreviewReorder={(x, y) => {
@@ -841,6 +844,7 @@ export default function NewListingPage() {
           </button>
         )}
       </PhotoDropZone>
+      <PhotoViewer photos={photos.map((p) => p.previewUrl)} index={viewerIndex} onClose={() => setViewerIndex(null)} alt={title || "Photo"} />
 
       <div className="min-w-0">
       <AIDisclaimer className="mb-4" />
@@ -1230,6 +1234,7 @@ function PhotoCard({
   count,
   onRemove,
   onMove,
+  onOpen,
   onPreviewReorder,
   onLabelChange,
   onDragStart,
@@ -1240,6 +1245,7 @@ function PhotoCard({
   count: number;
   onRemove: () => void;
   onMove: (to: number) => void;
+  onOpen: () => void;
   onPreviewReorder: (x: number, y: number) => void;
   onLabelChange: (label: PhotoItem["label"]) => void;
   onDragStart: () => void;
@@ -1250,6 +1256,7 @@ function PhotoCard({
   const startPoint = useRef<{ x: number; y: number } | null>(null);
   const dropIndex = useRef<number | null>(null);
   const [touchDragging, setTouchDragging] = useState(false);
+  const justDragged = useRef(false);
 
   // The grip handle: a mouse grabs it straight away (no press-and-hold);
   // touch keeps the hold-to-drag so scrolling the strip still works.
@@ -1292,6 +1299,7 @@ function PhotoCard({
 
   function onPointerUp(e: React.PointerEvent<HTMLDivElement>) {
     if (dragTimer.current !== null) window.clearTimeout(dragTimer.current);
+    if (touchDragging) { justDragged.current = true; window.setTimeout(() => { justDragged.current = false; }, 350); }
     if (touchDragging && dropIndex.current !== null) onDrop(dropIndex.current);
     if (dragTarget.current?.hasPointerCapture(e.pointerId)) dragTarget.current.releasePointerCapture(e.pointerId);
     dragTimer.current = null;
@@ -1313,7 +1321,15 @@ function PhotoCard({
     >
       <div className="aspect-square relative">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={photo.previewUrl} alt={photo.label ?? `Photo ${index + 1}`} className="absolute inset-0 w-full h-full object-cover" draggable={false} />
+        <img
+          src={photo.previewUrl}
+          alt={photo.label ?? `Photo ${index + 1}`}
+          className="absolute inset-0 w-full h-full object-cover cursor-zoom-in"
+          draggable={false}
+          // Tap/click opens the full-screen viewer — but not right after a
+          // drag-to-reorder (buttons and the grip keep their own actions).
+          onClick={() => { if (!justDragged.current) onOpen(); }}
+        />
         <div
           role="button"
           tabIndex={0}
