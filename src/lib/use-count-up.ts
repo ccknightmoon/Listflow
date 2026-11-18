@@ -51,7 +51,6 @@ export function useCountUp(target: number | null, durationMs = 700): number | nu
     return () => {
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target, durationMs]);
 
   return display;

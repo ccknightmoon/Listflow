@@ -297,18 +297,6 @@ export default function NewListingPage() {
       });
     }
 
-    function movePhotoToSlot(from: number, slot: number) {
-      const insertionIndex = slot > from ? slot - 1 : slot;
-      if (insertionIndex === from || insertionIndex < 0 || insertionIndex >= photos.length) return;
-      rememberPhotoChange("Photo reordered");
-      setPhotos((prev) => {
-        const next = [...prev];
-        const [photo] = next.splice(from, 1);
-        next.splice(insertionIndex, 0, photo);
-        return next;
-      });
-    }
-
     function movePhotoDuringDrag(slot: number) {
       const from = draggedPhoto.current;
       if (from == null) return;
@@ -632,12 +620,10 @@ export default function NewListingPage() {
       setListStatus("error");
       return;
     }
-    const finalPrice = result?.suggestedPrice ?? (customPrice ? Number(customPrice) : null);
     setShowPublishReview(true);
   }
 
   async function handlePublish() {
-    const finalPrice = result?.suggestedPrice ?? (customPrice ? Number(customPrice) : null);
     setShowPublishReview(false);
     setListStatus("listing");
     setListError(null);
@@ -793,14 +779,13 @@ export default function NewListingPage() {
                 count={photos.length}
                 onRemove={() => removePhoto(index)}
                 onMove={(to) => movePhoto(index, to)}
-                onReorder={(from, to) => movePhoto(from, to)}
                 onLabelChange={(label) => setPhotoLabel(index, label)}
                 onDragStart={() => { rememberPhotoChange("Photo reordered"); draggedPhoto.current = index; }}
                 onPreviewReorder={(x, y) => {
                   startPhotoAutoScroll(x, y);
                   movePhotoAtPointer(x, y);
                 }}
-                onDrop={(slot) => {
+                onDrop={() => {
                   draggedPhoto.current = null;
                   stopPhotoAutoScroll();
                 }}
@@ -1214,7 +1199,6 @@ function PhotoCard({
   count,
   onRemove,
   onMove,
-  onReorder,
   onPreviewReorder,
   onLabelChange,
   onDragStart,
@@ -1225,7 +1209,6 @@ function PhotoCard({
   count: number;
   onRemove: () => void;
   onMove: (to: number) => void;
-  onReorder: (from: number, to: number) => void;
   onPreviewReorder: (x: number, y: number) => void;
   onLabelChange: (label: PhotoItem["label"]) => void;
   onDragStart: () => void;
@@ -1236,7 +1219,6 @@ function PhotoCard({
   const startPoint = useRef<{ x: number; y: number } | null>(null);
   const dropIndex = useRef<number | null>(null);
   const [touchDragging, setTouchDragging] = useState(false);
-  const [hoverSlot, setHoverSlot] = useState<number | null>(null);
 
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     startPoint.current = { x: e.clientX, y: e.clientY };
@@ -1287,7 +1269,6 @@ function PhotoCard({
       className={`card flex-none w-44 snap-start overflow-hidden relative${touchDragging ? " opacity-60 scale-95" : ""}`}
       style={{ touchAction: touchDragging ? "none" : "pan-x" }}
     >
-      {hoverSlot === index && <div className="absolute left-0 top-0 bottom-0 w-1 rounded-full bg-[var(--accent)] z-10" />}
       <div className="aspect-square relative">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={photo.previewUrl} alt={photo.label ?? `Photo ${index + 1}`} className="absolute inset-0 w-full h-full object-cover" draggable={false} />

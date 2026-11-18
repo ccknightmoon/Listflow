@@ -50,6 +50,12 @@ function localTimeStringToUtcHour(time: string): number {
   return Math.round(utcMinutes / 60) % 24;
 }
 
+// The daily-digest cron route exists, but nothing triggers it yet (Vercel
+// Hobby crons can't run hourly). Until a scheduler is set up, show the
+// section as "Coming soon" instead of a toggle that silently does nothing.
+// Flip to true once the digest actually sends.
+const EMAIL_DIGEST_LIVE = false;
+
 interface EbayPolicy {
   id: string;
   name: string;
@@ -881,10 +887,15 @@ export default function SettingsPage() {
 
       <SettingsSection
         delay="d8"
-        title="Email alerts"
+        title={EMAIL_DIGEST_LIVE ? "Email alerts" : "Email alerts (coming soon)"}
         description="Once a day, if something needs your attention -- an order to ship, a pending offer, an unanswered buyer question, or a listing sitting 30+ days with no sale -- Listflow sends you one summary email. No email if there's nothing to report."
         icon={Mail}
       >
+        {!EMAIL_DIGEST_LIVE ? (
+          <p className="text-xs text-[var(--text-secondary)]">
+            Coming soon. Daily emails aren&apos;t being sent yet, so there&apos;s nothing to turn on here for now.
+          </p>
+        ) : (<>
         <div className="flex flex-col gap-3">
           <OptionCard
             icon={Mail}
@@ -930,6 +941,7 @@ export default function SettingsPage() {
             <Check className="w-3 h-3" /> Saved
           </p>
         )}
+        </>)}
       </SettingsSection>
 
       <SettingsSection delay="d8" title="Account" icon={UserCircle}>

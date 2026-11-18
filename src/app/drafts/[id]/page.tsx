@@ -9,7 +9,7 @@ import { formatMoney } from "@/lib/format";
 import { use, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Shirt, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { ArrowLeft, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
 import { uploadThumbnail } from "@/lib/storage";
@@ -762,7 +762,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
     const start = pointerStart.current;
     const moved = start && (Math.abs(e.clientX - start.x) > 8 || Math.abs(e.clientY - start.y) > 8);
-    const from = photoDragIdx.current;
     const original = photoDragOriginal.current;
     const finalOrder = photoDragWorking.current;
     const wasDragging = activePhotoDrag.current;
@@ -786,64 +785,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     pointerStart.current = null;
     photoDragTarget.current = null;
     photoPointerId.current = null;
-    activePhotoDrag.current = false;
-    photoDragOriginal.current = null;
-    photoDragWorking.current = [];
-  }
-
-  function onPhotoDragStart(e: React.DragEvent, index: number) {
-    photoDragIdx.current = index;
-    photoDragOriginal.current = [...photoUrls];
-    photoDragWorking.current = [...photoUrls];
-    activePhotoDrag.current = true;
-    setDragIdx(index);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", String(index));
-  }
-
-  function onPhotoDragOver(e: React.DragEvent, index: number) {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const from = photoDragIdx.current;
-    const slot = e.clientX < rect.left + rect.width / 2 ? index : index + 1;
-    const insertionIndex = from !== null && slot > from ? slot - 1 : slot;
-    if (from !== null && insertionIndex !== from) {
-      const next = [...photoDragWorking.current];
-      const [item] = next.splice(from, 1);
-      next.splice(insertionIndex, 0, item);
-      photoDragWorking.current = next;
-      photoDragIdx.current = insertionIndex;
-      setPhotoUrls(next);
-      setDraft((prev) => prev ? { ...prev, photo_urls: next, thumbnail_url: next[0] ?? null } : prev);
-    }
-    photoDropIdx.current = insertionIndex;
-    setDropIdx(insertionIndex);
-  }
-
-  function onPhotoDrop(e: React.DragEvent) {
-    e.preventDefault();
-    const original = photoDragOriginal.current;
-    const finalOrder = photoDragWorking.current;
-    if (original && JSON.stringify(finalOrder) !== JSON.stringify(original)) {
-      void savePhotoUrls(finalOrder, original).catch((err) => {
-        setError((err as Error).message);
-      });
-    }
-    photoDragIdx.current = null;
-    photoDropIdx.current = null;
-    setDragIdx(null);
-    setDropIdx(null);
-    activePhotoDrag.current = false;
-    photoDragOriginal.current = null;
-    photoDragWorking.current = [];
-  }
-
-  function onPhotoDragEnd() {
-    photoDragIdx.current = null;
-    photoDropIdx.current = null;
-    setDragIdx(null);
-    setDropIdx(null);
     activePhotoDrag.current = false;
     photoDragOriginal.current = null;
     photoDragWorking.current = [];
