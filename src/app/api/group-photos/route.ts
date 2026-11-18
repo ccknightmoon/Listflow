@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
 import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
+import { checkGrouping, repairGroups, groupsFromStarts } from "@/lib/grouping-repair";
 
 export const runtime = "nodejs";
 
@@ -72,8 +73,7 @@ clear front-view shot appears.
 There are ${images.length} photos, indexed 0 to ${images.length - 1} in the
 order shown above.
 
-Group them into items. Respond with ONLY a JSON object (no markdown, no
-extra text) in this exact shape:
+Group them into items. Respond with a JSON object like:
 
 {
   "groups": [[0,1,2],[3,4],[5,6,7,8]]
@@ -81,94 +81,100 @@ extra text) in this exact shape:
 
 Each inner array lists the photo indices belonging to one item, in
 ascending order. Every index from 0 to ${images.length - 1} must appear
-in exactly one group. Order the groups by the index of their first photo.`;
+in exactly one group -- do not skip any photo, even a blurry or
+close-up one (it belongs to the item before it). Order the groups by the
+index of their first photo.`;
+
+  // Strict retry: one answer per photo ("does it start a new item?"), so
+  // the model has to look at every index and can't silently drop one.
+  const strictPrompt = `${prompt.split("Group them into items.")[0]}
+For EVERY photo index from 0 to ${images.length - 1} (that is ${images.length} entries, in order, none skipped),
+say whether that photo starts a new item (a clear full front view of a new garment).
+Photo 0 always starts a new item. Respond with JSON like:
+{ "photos": [ { "index": 0, "startsNewItem": true }, { "index": 1, "startsNewItem": false }, ... ] }`;
 
   let lastError: string | null = null;
 
   // gpt-4o-mini, not gpt-4o: deciding "does this photo start a new item"
-  // is an easier call than the full per-item analysis below it (which also
-  // runs on gpt-4o-mini), and grouping was the only step still paying
-  // full gpt-4o pricing -- roughly 17x gpt-4o-mini's per-token rate --
-  // for the simpler of the two tasks. Mini is also typically faster,
-  // which matters here since chunks process strictly one after another
-  // (each chunk needs to know where the previous one's last group got cut
-  // off, so they can't run concurrently). Re-check grouping accuracy on a
-  // real batch after this ships; if mini visibly mis-groups more often,
-  // reverting this one line is the whole rollback.
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      const data = await openAIPost(apiKey, {
-        model: "gpt-4o-mini",
-        max_tokens: 1000,
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: prompt }, ...imageContent],
-          },
-        ],
-      }) as { choices?: { message?: { content?: string } }[] };
-
-      const rawText = data.choices?.[0]?.message?.content ?? "";
-      const cleaned = rawText.replace(/```json|```/g, "").trim();
-
-      let parsed: { groups?: number[][] };
+  // is an easier call than the full per-item analysis (which also runs on
+  // mini), and mini is cheaper and faster.
+  //
+  // Network / rate-limit failures retry (up to MAX_ATTEMPTS). A complete
+  // but imperfect answer (a photo missing or listed twice) gets ONE strict
+  // retry, then is repaired in code (src/lib/grouping-repair.ts) -- one
+  // dropped photo never fails the whole batch any more (Nov 2026: Sel's
+  // first real 28-photo batch failed on "missing: [9]").
+  async function ask(content: string, schema: object): Promise<unknown> {
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        parsed = JSON.parse(cleaned);
-      } catch {
-        return NextResponse.json(
-          { error: "Could not parse grouping response.", raw: rawText },
-          { status: 502 }
-        );
-      }
-
-      if (!parsed.groups || !Array.isArray(parsed.groups)) {
-        return NextResponse.json(
-          { error: "Grouping response missing 'groups' array.", raw: rawText },
-          { status: 502 }
-        );
-      }
-
-      // The whole point of a bulk grouping tool is "don't miss items" — a
-      // group response that drops or duplicates an index used to fail
-      // silently (photos just vanished from the batch with no indication).
-      // Verify every input index is accounted for exactly once before
-      // trusting the response; if not, retry rather than return partial data.
-      const seen = new Map<number, number>();
-      for (const group of parsed.groups) {
-        for (const idx of group) seen.set(idx, (seen.get(idx) ?? 0) + 1);
-      }
-      const missing: number[] = [];
-      const duplicated: number[] = [];
-      for (let i = 0; i < images.length; i++) {
-        const count = seen.get(i) ?? 0;
-        if (count === 0) missing.push(i);
-        else if (count > 1) duplicated.push(i);
-      }
-      if (missing.length > 0 || duplicated.length > 0) {
-        lastError = `Grouping response did not account for every photo (missing: [${missing.join(",")}], duplicated: [${duplicated.join(",")}]).`;
-        if (attempt < MAX_ATTEMPTS) {
-          await delay(RETRY_DELAY_MS * attempt);
-          continue;
+        const data = (await openAIPost(apiKey!, {
+          model: "gpt-4o-mini",
+          max_tokens: 4000,
+          response_format: { type: "json_schema", json_schema: { name: "photo_grouping", strict: true, schema } },
+          messages: [{ role: "user", content: [{ type: "text", text: content }, ...imageContent] }],
+        })) as { choices?: { message?: { content?: string } }[] };
+        const rawText = data.choices?.[0]?.message?.content ?? "";
+        try {
+          return JSON.parse(rawText.replace(/```json|```/g, "").trim());
+        } catch {
+          lastError = "Could not parse grouping response.";
+          return null;
         }
-        return NextResponse.json(
-          { error: `${lastError} Try regrouping, or group this batch in smaller parts.`, raw: rawText },
-          { status: 502 }
-        );
-      }
-
-      return NextResponse.json({ groups: parsed.groups });
-    } catch (err) {
-      lastError = (err as Error).message;
-      const isRateLimit = (err as { isRateLimit?: boolean }).isRateLimit;
-
-      if (attempt < MAX_ATTEMPTS) {
-        await delay(isRateLimit ? RATE_LIMIT_DELAY_MS : RETRY_DELAY_MS * attempt);
+      } catch (err) {
+        lastError = (err as Error).message;
+        const isRateLimit = (err as { isRateLimit?: boolean }).isRateLimit;
+        if (attempt < MAX_ATTEMPTS) await delay(isRateLimit ? RATE_LIMIT_DELAY_MS : RETRY_DELAY_MS * attempt);
       }
     }
+    throw new Error(`Request failed after ${MAX_ATTEMPTS} attempts: ${lastError}`);
   }
 
-  return NextResponse.json(
-    { error: `Request failed after ${MAX_ATTEMPTS} attempts: ${lastError}` },
-    { status: 500 }
-  );
+  const groupsSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["groups"],
+    properties: { groups: { type: "array", items: { type: "array", items: { type: "integer" } } } },
+  };
+  const strictSchema = {
+    type: "object",
+    additionalProperties: false,
+    required: ["photos"],
+    properties: {
+      photos: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["index", "startsNewItem"],
+          properties: { index: { type: "integer" }, startsNewItem: { type: "boolean" } },
+        },
+      },
+    },
+  };
+
+  try {
+    const first = (await ask(prompt, groupsSchema)) as { groups?: unknown } | null;
+    const firstCheck = checkGrouping(first?.groups, images.length);
+    if (firstCheck.ok) return NextResponse.json({ groups: first!.groups });
+
+    // One strict retry. Its per-photo answer always covers every photo.
+    let strict: { photos?: unknown } | null = null;
+    try {
+      strict = (await ask(strictPrompt, strictSchema)) as { photos?: unknown } | null;
+    } catch {
+      strict = null;
+    }
+    if (strict && Array.isArray(strict.photos) && strict.photos.length > 0) {
+      return NextResponse.json({ groups: groupsFromStarts(strict.photos, images.length), retried: true });
+    }
+
+    // Fall back: repair the first answer and tell the seller what moved.
+    const r = repairGroups(first?.groups, images.length);
+    return NextResponse.json({
+      groups: r.groups,
+      repairs: { autoPlaced: r.autoPlaced, duplicatesRemoved: r.duplicatesRemoved, unusable: r.unusable },
+    });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
 }

@@ -2,6 +2,8 @@
 
 import { confirmAction } from "@/lib/confirm";
 import { takePendingPhotos } from "@/lib/pending-photos";
+import { groupingNoticeLines } from "@/lib/grouping-repair";
+import { buildGroupsFromDividers, countMarkedItems } from "@/lib/manual-dividers";
 import PhotoDropZone from "@/components/PhotoDropZone";
 import { getPublishQueue } from "@/lib/publish-queue";
 import { useState, useRef, useEffect } from "react";
@@ -29,6 +31,7 @@ import {
   ListChecks,
   ArrowUpToLine,
   Scissors,
+  SquarePlus,
   AlertTriangle,
 } from "lucide-react";
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
@@ -181,29 +184,6 @@ function resizeImage(file: File): Promise<{ dataUrl: string; mediaType: string }
   });
 }
 
-// Builds groups from photo indices the seller explicitly tapped as "this
-// is my SKU/number photo -- end this item here" on the upload screen.
-// Same exclusion rule as buildGroupsFromMarkers below: the tapped photo is
-// treated as a throwaway marker (a card, tag, or bag shot with the item's
-// number on it), not real item content, so it's left out of the group it
-// closes -- the seller never has to remember to delete it before listing.
-function buildGroupsFromManualDividers(dividerIndices: Set<number>, totalPhotos: number): number[][] {
-  const sorted = Array.from(dividerIndices).sort((a, b) => a - b);
-  const groups: number[][] = [];
-  let start = 0;
-  for (const d of sorted) {
-    if (d < start || d >= totalPhotos) continue;
-    if (d > start) {
-      groups.push(Array.from({ length: d - start }, (_, k) => start + k));
-    }
-    start = d + 1;
-  }
-  if (start < totalPhotos) {
-    groups.push(Array.from({ length: totalPhotos - start }, (_, k) => start + k));
-  }
-  return groups;
-}
-
 // Builds groups from AI-detected number-marker photos (Settings -> "Batch
 // upload: item dividers" -> On). The marker photo itself is a throwaway
 // (a card/tag/bag shot, not the item), so unlike a manual divider it is
@@ -239,6 +219,10 @@ export default function BatchUploadPage() {
   const [step, setStep] = useState<Step>("upload");
   const [photos, setPhotos] = useState<SlotImage[]>([]);
   const [groups, setGroups] = useState<number[][]>([]);
+  // Non-blocking "check these" notes from grouping (photos the AI skipped
+  // and the server auto-placed). Cleared when a new batch is grouped.
+  const [groupingNotices, setGroupingNotices] = useState<string[]>([]);
+  const [autoPlacedPhotos, setAutoPlacedPhotos] = useState<Set<number>>(new Set());
   const [results, setResults] = useState<AiResult[]>([]);
   const [retrying, setRetrying] = useState<Record<number, boolean>>({});
   const [retryingPricing, setRetryingPricing] = useState<Record<number, boolean>>({});
@@ -285,6 +269,10 @@ export default function BatchUploadPage() {
   // it's the most explicit signal available, costs nothing, and can't be
   // wrong the way an AI guess can.
   const [manualDividers, setManualDividers] = useState<Set<number>>(new Set());
+  // "New item starts here" markers: like ✂ but the photo is KEPT (no SKU
+  // card needed). See src/lib/manual-dividers.ts.
+  const [newItemStarts, setNewItemStarts] = useState<Set<number>>(new Set());
+  const anyManualMarks = manualDividers.size > 0 || newItemStarts.size > 0;
   // Settings -> "Batch upload: item dividers" -> On. Fetched once on
   // mount; see /api/detect-item-dividers and buildGroupsFromMarkers above.
   const [autoDetectDividers, setAutoDetectDividers] = useState(false);
@@ -503,12 +491,24 @@ export default function BatchUploadPage() {
       else next.add(photoIndex);
       return next;
     });
+    setNewItemStarts((prev) => { const n = new Set(prev); n.delete(photoIndex); return n; });
+  }
+
+  function toggleNewItemStart(photoIndex: number) {
+    setNewItemStarts((prev) => {
+      const next = new Set(prev);
+      if (next.has(photoIndex)) next.delete(photoIndex);
+      else next.add(photoIndex);
+      return next;
+    });
+    setManualDividers((prev) => { const n = new Set(prev); n.delete(photoIndex); return n; });
   }
 
   async function handleFilesSelected(files: FileList | File[] | null) {
     if (!files || files.length === 0) return;
     setError(null);
     setManualDividers(new Set());
+    setNewItemStarts(new Set());
 
     // Appends to whatever's already selected instead of replacing it --
     // re-opening the picker (a second album/folder, or the OS dialog
@@ -709,9 +709,12 @@ export default function BatchUploadPage() {
     // can't be mis-grouped) instead of the two AI-based paths below. Each
     // tapped photo is excluded from its item's listing photos, same as an
     // AI-detected marker -- see buildGroupsFromManualDividers.
-    if (manualDividers.size > 0) {
-      const finalGroups = buildGroupsFromManualDividers(manualDividers, photos.length);
+    setGroupingNotices([]);
+    setAutoPlacedPhotos(new Set());
+    if (anyManualMarks) {
+      const finalGroups = buildGroupsFromDividers(manualDividers, newItemStarts, photos.length);
       setManualDividers(new Set());
+      setNewItemStarts(new Set());
       setGroups(finalGroups);
       setStep("review");
       return;
@@ -786,6 +789,12 @@ export default function BatchUploadPage() {
       const finalGroups: number[][] = [];
       let pending: number[] = [];
       let cursor = 0;
+      // Photos the server had to auto-place (AI skipped them) and any
+      // "AI couldn't group this part" chunks -- shown as a non-blocking
+      // notice on the review step instead of failing the whole batch.
+      const autoPlacedGlobal: number[] = [];
+      const duplicateGlobal: number[] = [];
+      let anyUnusable = false;
       // Large batches take several sequential AI calls (see the chunking
       // below) with a deliberate pause between each to stay under OpenAI's
       // rate limit — that's real wait time, not wasted time, but it reads
@@ -807,7 +816,7 @@ export default function BatchUploadPage() {
         const chunkGlobalIndices = [...pending, ...newIndices];
         const chunkImages = chunkGlobalIndices.map((gi) => thumbnails[gi]);
 
-        const data = await apiFetch<{ groups?: number[][]; error?: string }>("/api/group-photos", {
+        const data = await apiFetch<{ groups?: number[][]; error?: string; repairs?: { autoPlaced: { photo: number; group: number }[]; duplicatesRemoved: number[]; unusable: boolean } }>("/api/group-photos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ images: chunkImages }),
@@ -820,6 +829,11 @@ export default function BatchUploadPage() {
         const remapped: number[][] = data.groups.map((g: number[]) =>
           g.map((localIdx: number) => chunkGlobalIndices[localIdx])
         );
+        if (data.repairs) {
+          autoPlacedGlobal.push(...data.repairs.autoPlaced.map((a) => chunkGlobalIndices[a.photo]));
+          duplicateGlobal.push(...data.repairs.duplicatesRemoved.map((d) => chunkGlobalIndices[d]));
+          if (data.repairs.unusable) anyUnusable = true;
+        }
 
         cursor += newIndices.length;
         const isLastChunk = cursor >= totalPhotos;
@@ -842,6 +856,8 @@ export default function BatchUploadPage() {
       }
 
       setGroups(finalGroups);
+      setGroupingNotices(groupingNoticeLines(finalGroups, autoPlacedGlobal, duplicateGlobal, anyUnusable));
+      setAutoPlacedPhotos(new Set(autoPlacedGlobal));
       setStep("review");
     } catch (err) {
       setError((err as Error).message);
@@ -897,6 +913,21 @@ export default function BatchUploadPage() {
     } else if (gIdx < groups.length - 1) {
       movePhoto(photoIndex, gIdx, gIdx + 1);
     }
+  }
+
+  // "Move to item…" picker under each photo (phone and desktop): any item,
+  // or a brand-new item right after this one.
+  function movePhotoToItem(photoIndex: number, fromGroup: number, target: string) {
+    if (target === "new") {
+      setGroups((prev) => {
+        const next = prev.map((g) => g.filter((i) => i !== photoIndex));
+        next.splice(fromGroup + 1, 0, [photoIndex]);
+        return next.filter((g) => g.length > 0);
+      });
+    } else {
+      movePhoto(photoIndex, fromGroup, Number(target));
+    }
+    setAutoPlacedPhotos((prev) => { const n = new Set(prev); n.delete(photoIndex); return n; });
   }
 
   function addNewGroup() {
@@ -2024,28 +2055,33 @@ export default function BatchUploadPage() {
               <p className="text-sm text-[var(--text-secondary)] mb-2">
                 {photos.length} photo{photos.length !== 1 ? "s" : ""} selected
               </p>
-              {photos.length > LARGE_BATCH_NOTICE_THRESHOLD && manualDividers.size === 0 && (
+              {photos.length > LARGE_BATCH_NOTICE_THRESHOLD && !anyManualMarks && (
                 <p className="text-xs mb-2" style={{ color: "var(--text-tertiary)" }}>
                   Large batch — AI grouping will take a few minutes across
                   several rounds. Tapping dividers instead (below) skips
                   that wait entirely.
                 </p>
               )}
-              <p className="text-xs text-[var(--text-tertiary)] mb-2">
-                Optional: tap <Scissors className="inline w-3 h-3 -mt-0.5" /> on
-                your item&apos;s SKU/number photo (a card, tag, or bag shot with
-                the number on it) to mark the end of that item — this skips
-                AI grouping for this batch, and the marked photo is left
-                out of the listing so it never gets posted by accident.
-              </p>
-              {manualDividers.size > 0 && (
+              <div className="text-xs text-[var(--text-tertiary)] mb-2 flex flex-col gap-1">
+                <p>Optional — group it yourself and skip the AI grouping:</p>
+                <p>
+                  <SquarePlus className="inline w-3.5 h-3.5 -mt-0.5" /> <b>New item starts here</b>: tap it on the first photo of each item
+                  (usually the front view). The photo stays in the listing.
+                </p>
+                <p>
+                  <Scissors className="inline w-3 h-3 -mt-0.5" /> <b>SKU photo</b>: tap it on a number card/tag/bag shot that ends an item.
+                  That photo is left out of the listing.
+                </p>
+              </div>
+              {anyManualMarks && (
                 <p className="text-xs mb-2" style={{ color: "var(--accent)" }}>
-                  {manualDividers.size + 1} item{manualDividers.size > 0 ? "s" : ""} marked
+                  {countMarkedItems(manualDividers, newItemStarts, photos.length)} items marked
                 </p>
               )}
               <div className="grid grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
                 {photos.map((p, i) => {
                   const isDivider = manualDividers.has(i);
+                  const isStart = newItemStarts.has(i);
                   return (
                     <div key={i} className="relative">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2055,8 +2091,28 @@ export default function BatchUploadPage() {
                         loading="lazy"
                         decoding="async"
                         className="aspect-square object-cover rounded-md"
-                        style={isDivider ? { outline: "2px solid var(--accent)", outlineOffset: 2 } : undefined}
+                        style={isDivider ? { outline: "2px solid var(--accent)", outlineOffset: 2, opacity: 0.55 } : isStart ? { outline: "2px solid var(--success)", outlineOffset: 2 } : undefined}
                       />
+                      {isStart && (
+                        <span className="absolute top-1 left-1 rounded px-1 text-[9px] font-bold text-white" style={{ background: "var(--success)" }}>New item</span>
+                      )}
+                      {isDivider && (
+                        <span className="absolute top-1 left-1 rounded px-1 text-[9px] font-bold text-white" style={{ background: "var(--accent)" }}>SKU · not listed</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => toggleNewItemStart(i)}
+                        className="absolute bottom-1 left-1 w-6 h-6 rounded-full flex items-center justify-center"
+                        style={{
+                          background: isStart ? "var(--success)" : "color-mix(in srgb, black 55%, transparent)",
+                          color: "white",
+                        }}
+                        aria-pressed={isStart}
+                        aria-label={isStart ? `Photo ${i + 1}: unmark new item start` : `Photo ${i + 1}: a new item starts here`}
+                        title="New item starts here (photo kept)"
+                      >
+                        <SquarePlus className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         type="button"
                         onClick={() => toggleDivider(i)}
@@ -2065,7 +2121,9 @@ export default function BatchUploadPage() {
                           background: isDivider ? "var(--accent)" : "color-mix(in srgb, black 55%, transparent)",
                           color: "white",
                         }}
-                        aria-label={isDivider ? "Unmark as SKU/number photo" : "Mark as this item's SKU/number photo"}
+                        aria-pressed={isDivider}
+                        title="SKU photo: ends the item, not listed"
+                        aria-label={isDivider ? `Photo ${i + 1}: unmark SKU photo` : `Photo ${i + 1}: SKU/number photo (ends the item, not listed)`}
                       >
                         <Scissors className="w-3.5 h-3.5" />
                       </button>
@@ -2075,7 +2133,7 @@ export default function BatchUploadPage() {
               </div>
               <button onClick={handleGroupPhotos} className="btn btn-primary w-full">
                 <Sparkles className="w-4 h-4" />
-                {manualDividers.size > 0 ? "Split into items" : "Group photos into items"}
+                {anyManualMarks ? "Split into items" : "Group photos into items"}
               </button>
             </>
           )}
@@ -2094,16 +2152,29 @@ export default function BatchUploadPage() {
       {step === "review" && (
         <>
           <p className="text-sm text-[var(--text-secondary)] mb-4">
-            Fix any mistakes before analyzing: drag a photo into a
-            different group, or use the arrows under a photo to nudge it
-            into the previous/next item. If the AI split one item into two
+            Fix any mistakes before analyzing: use &ldquo;Move to&rdquo; under a
+            photo to put it in another item (or a new one), drag it on a
+            computer, or use the arrows to nudge it into the previous/next item. If the AI split one item into two
             groups, tap <ArrowUpToLine className="inline w-3 h-3 -mt-0.5" /> on
             the second group to merge them. If it merged two items
-            together, tap <Scissors className="inline w-3 h-3 -mt-0.5" /> on
+            together, tap <SquarePlus className="inline w-3 h-3 -mt-0.5" /> (new item starts here) on
             the photo where the second item starts to split them apart.
             Only the first {MAX_PHOTOS_PER_ITEM} photos per item will be
             used for analysis, in the order shown.
           </p>
+
+          {groupingNotices.length > 0 && (
+            <div role="status" className="card p-3 mb-4 flex items-start gap-3" style={{ background: "var(--warning-bg)", border: "1px solid var(--warning-border)" }}>
+              <div className="flex-1 min-w-0 text-sm">
+                <p className="font-semibold mb-0.5">Quick check</p>
+                {groupingNotices.map((n) => <p key={n}>{n}</p>)}
+                <p className="text-xs mt-1" style={{ color: "var(--text-secondary)" }}>Photos marked &ldquo;Check&rdquo; below were placed automatically. Use &ldquo;Move to&rdquo; under a photo if it&apos;s in the wrong item.</p>
+              </div>
+              <button type="button" onClick={() => setGroupingNotices([])} aria-label="Dismiss" className="tap p-0.5 flex-none">
+                <X className="w-3.5 h-3.5" style={{ color: "var(--text-tertiary)" }} />
+              </button>
+            </div>
+          )}
 
           {undoGroups && (
             <div className="card p-3 mb-4 flex items-center justify-between gap-3">
@@ -2211,6 +2282,11 @@ export default function BatchUploadPage() {
                             className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-white rounded-full p-0.5"
                             style={{ color: "var(--text-tertiary)" }}
                           />
+                          {autoPlacedPhotos.has(photoIdx) && (
+                            <span className="absolute bottom-0.5 left-0.5 right-0.5 text-center rounded text-[9px] font-bold" style={{ background: "var(--warning-bg)", color: "var(--danger)", border: "1px solid var(--warning-border)" }}>
+                              Check
+                            </span>
+                          )}
                         </div>
                         {/* Tap-to-move controls — drag-and-drop above needs a mouse and
                             doesn't work on a phone. At either end of a group these spill
@@ -2231,11 +2307,12 @@ export default function BatchUploadPage() {
                             type="button"
                             onClick={() => splitGroupAt(gIdx, photoIdx)}
                             disabled={posInGroup === 0}
-                            title={posInGroup === 0 ? "Already the start of this item" : "Split into a new item starting here"}
+                            title={posInGroup === 0 ? "Already the start of this item" : "New item starts here (split)"}
+                            aria-label={`Photo ${photoIdx + 1}: start a new item here`}
                             className="tap w-5 h-5 rounded flex items-center justify-center disabled:opacity-25"
                             style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
                           >
-                            <Scissors className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
+                            <SquarePlus className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
                           </button>
                           <button
                             type="button"
@@ -2248,6 +2325,17 @@ export default function BatchUploadPage() {
                             <ChevronRight className="w-3 h-3" style={{ color: "var(--text-secondary)" }} />
                           </button>
                         </div>
+                        <select
+                          value=""
+                          onChange={(e) => { if (e.target.value) movePhotoToItem(photoIdx, gIdx, e.target.value); }}
+                          aria-label={`Move photo ${photoIdx + 1} to another item`}
+                          className="w-14 text-[10px] rounded px-0.5 py-0.5"
+                          style={{ background: "var(--glass)", border: "1px solid var(--glass-line)", color: "var(--text-secondary)" }}
+                        >
+                          <option value="">Move to</option>
+                          {groups.map((_, t) => t !== gIdx && <option key={t} value={t}>Item {t + 1}</option>)}
+                          <option value="new">New item</option>
+                        </select>
                       </div>
                     );
                   })}
