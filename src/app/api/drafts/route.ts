@@ -44,7 +44,7 @@ function normalizeCustomSku(value: unknown): string | null {
 // itself is kept (only this one array) since the list needs its length for
 // the "needs-photo" filter and readiness check below.
 const DRAFTS_SELECT_COLUMNS =
-  "id, title, suggested_price, sell_odds, condition, thumbnail_url, photo_urls, created_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode";
+  "id, title, suggested_price, sell_odds, condition, thumbnail_url, photo_urls, created_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode, custom_sku";
 
 const SORT_KEYS = new Set(["newest", "oldest", "price-desc", "price-asc"]);
 const FILTER_KEYS = new Set(["all", "ready", "needs-photo", "needs-price"]);

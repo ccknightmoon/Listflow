@@ -60,7 +60,7 @@ export default function BottomNav() {
     <>
       {showWarning && !overlayOpen && (
         <div
-          className="fixed left-3 right-3 max-w-md mx-auto flex items-center gap-2 py-2 px-3 rounded-xl text-xs"
+          className="lg:hidden fixed left-3 right-3 max-w-md mx-auto flex items-center gap-2 py-2 px-3 rounded-xl text-xs"
           style={{
             bottom: `calc(${NAV_BAR_HEIGHT + 20}px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))`,
             zIndex: Z.nav,
@@ -79,7 +79,7 @@ export default function BottomNav() {
       <nav
         aria-label="Main"
         aria-hidden={overlayOpen || undefined}
-        className="fixed left-3 right-3 max-w-md mx-auto grid grid-cols-5 items-center px-1.5 rounded-2xl"
+        className="lg:hidden fixed left-3 right-3 max-w-md mx-auto grid grid-cols-5 items-center px-1.5 rounded-2xl"
         style={{
           bottom: "calc(12px + env(safe-area-inset-bottom))",
           height: NAV_BAR_HEIGHT,

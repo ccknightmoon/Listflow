@@ -824,7 +824,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   if (loading) {
     return (
-      <main className="min-h-screen max-w-md mx-auto px-5 pt-6" style={{ viewTransitionName: "draft-detail" }}>
+      <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8" style={{ viewTransitionName: "draft-detail" }}>
         <Link href="/drafts" className="inline-flex mb-4">
           <ArrowLeft className="w-5 h-5" />
         </Link>
@@ -835,7 +835,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
   if (error && !draft) {
     return (
-      <main className="min-h-screen max-w-md mx-auto px-5 pt-6" style={{ viewTransitionName: "draft-detail" }}>
+      <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8" style={{ viewTransitionName: "draft-detail" }}>
         <Link href="/drafts" className="inline-flex mb-4">
           <ArrowLeft className="w-5 h-5" />
         </Link>
@@ -845,7 +845,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-32" style={{ viewTransitionName: "draft-detail" }}>
+    <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-32" style={{ viewTransitionName: "draft-detail" }}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Link href={draft?.ebay_listing_id ? "/store" : "/drafts"}>

@@ -1,5 +1,6 @@
 import PublishTray from "@/components/PublishTray";
 import BottomNav from "@/components/BottomNav";
+import Sidebar from "@/components/Sidebar";
 import ConfirmHost from "@/components/ConfirmHost";
 import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
@@ -77,6 +78,7 @@ export default async function RootLayout({
       </head>
       <body>
         {children}
+        <Sidebar />
         <BottomNav />
         <PublishTray />
         <ConfirmHost />

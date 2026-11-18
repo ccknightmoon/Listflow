@@ -3,7 +3,7 @@ import { ArrowLeft, Feather, Rocket, Building2, Check, X } from "lucide-react";
 
 export default function MembershipPage() {
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
+    <main className="min-h-screen max-w-md lg:max-w-4xl mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-24">
       <div className="flex items-center gap-3 mb-6">
         <Link href="/dashboard">
           <ArrowLeft className="w-5 h-5" />

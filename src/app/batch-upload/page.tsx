@@ -1874,7 +1874,7 @@ export default function BatchUploadPage() {
   }
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-24 overflow-hidden" style={{ viewTransitionName: "batch-panel" }}>
+    <main className="relative min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-24 overflow-hidden" style={{ viewTransitionName: "batch-panel" }}>
       <div
         className="bloom d1 stagger"
         style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}

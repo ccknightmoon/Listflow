@@ -55,7 +55,7 @@ export default function PublishTray() {
   return (
     <div
       ref={ref}
-      className="fixed left-3 right-3 max-w-md mx-auto rounded-2xl text-xs"
+      className={`fixed left-3 right-3 max-w-md mx-auto rounded-2xl text-xs lg:left-auto lg:right-6 lg:mx-0 lg:w-[380px] lg:bottom-6 ${navShown ? "bottom-[calc(84px+env(safe-area-inset-bottom))]" : "bottom-[calc(12px+env(safe-area-inset-bottom))]"}`}
       aria-hidden={overlayOpen || undefined}
       style={{
         zIndex: Z.tray,
@@ -63,8 +63,6 @@ export default function PublishTray() {
         opacity: overlayOpen ? 0 : 1,
         pointerEvents: overlayOpen ? "none" : undefined,
         transition: "opacity .15s ease",
-        // Just above the bottom nav where it shows; otherwise at the bottom edge.
-        bottom: navShown ? "calc(84px + env(safe-area-inset-bottom))" : "calc(12px + env(safe-area-inset-bottom))",
         background: "var(--glass-strong)", border: "1px solid var(--glass-line)", backdropFilter: "blur(20px)", WebkitBackdropFilter: "blur(20px)", boxShadow: "var(--shadow-card)" }}
       role="status"
       aria-live="polite"

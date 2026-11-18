@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
+import { RowMenu } from "@/components/RowMenu";
 import { dragOffset, isHorizontalIntent, settleOffset, SWIPE_ACTION_WIDTH } from "@/lib/swipe";
 
 export interface SwipeAction {
@@ -21,12 +22,19 @@ export default function SwipeRow({ actions, children, className }: { actions: Sw
   const [dragging, setDragging] = useState(false);
   const g = useRef<{ x: number; y: number; t: number; start: number; horizontal: boolean | null; lastX: number; lastT: number } | null>(null);
   const suppressClick = useRef(false);
+  // Mouse users (a narrow desktop window still gets these cards): the same
+  // actions via right-click, since a mouse can't swipe.
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   const colors = { accent: "var(--accent)", danger: "var(--danger)", neutral: "var(--text-tertiary)" };
   if (actions.length === 0) return <div className={className}>{children}</div>;
 
   return (
-    <div className={`relative overflow-hidden rounded-[18px] ${className ?? ""}`}>
+    <div
+      className={`relative overflow-hidden rounded-[18px] ${className ?? ""}`}
+      onContextMenu={(e) => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}
+    >
+      <RowMenu at={menuAt} onClose={() => setMenuAt(null)} actions={actions.map((a) => ({ label: a.label, icon: a.icon, tone: a.tone, onAction: a.onAction }))} />
       {/* Only drawn while revealed: cards are translucent glass, so a
           hidden panel underneath would show through. */}
       {offset < 0 && (

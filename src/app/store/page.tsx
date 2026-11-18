@@ -2,6 +2,9 @@
 
 import { Z } from "@/lib/z-layers";
 import SwipeRow from "@/components/SwipeRow";
+import DataTable from "@/components/DataTable";
+import type { RowAction } from "@/components/RowMenu";
+import { useIsDesktop } from "@/lib/use-is-desktop";
 import PriceSheet from "@/components/PriceSheet";
 import { getPublishQueue } from "@/lib/publish-queue";
 import type { CutRow } from "@/lib/price-cut";
@@ -64,6 +67,9 @@ export default function StorePage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkSuccessMsg, setBulkSuccessMsg] = useState("");
+  // Desktop (lg+): a dense table with checkboxes, hover actions and a
+  // right-click / "⋯" menu replaces the swipe cards; selection is always on.
+  const isDesktop = useIsDesktop();
 
   async function loadAll() {
     // No setLoading(true) here: the initial state above already reflects
@@ -354,12 +360,34 @@ export default function StorePage() {
   // Extra bottom clearance while the bulk-price bar is floating above
   // BottomNav (bottom-20, plus its own card height) — pb-24 alone isn't
   // enough room and the last listing row ends up hidden behind it.
-  const bulkBarActive = selectMode && selected.size > 0;
+  const bulkBarActive = (selectMode || isDesktop) && selected.size > 0;
+
+  // Desktop row actions: the same things the phone card offers (swipe
+  // "Price"/"Relist", plus the card's footer links), as hover buttons and
+  // the "⋯" / right-click menu.
+  function listingQuickActions(l: StoreListing): RowAction[] {
+    return l.status === "ended"
+      ? [{ label: relisting.has(l.listingId) ? "Relisting…" : "Relist", tone: "accent", icon: <RotateCcw className="w-3.5 h-3.5" />, disabled: relisting.has(l.listingId), onAction: () => void handleRelist(l) }]
+      : [{ label: "Price", tone: "accent", icon: <TrendingDown className="w-3.5 h-3.5" />, onAction: () => setPriceFor([l]) }];
+  }
+  function listingMenuActions(l: StoreListing): RowAction[] {
+    const view: RowAction = { label: "View on eBay", icon: <ExternalLink className="w-3.5 h-3.5" />, href: `https://www.ebay.com/itm/${l.listingId}`, external: true };
+    if (l.status === "ended") {
+      return [{ label: "Relist", tone: "accent", icon: <RotateCcw className="w-3.5 h-3.5" />, disabled: relisting.has(l.listingId), onAction: () => void handleRelist(l) }, view];
+    }
+    return [
+      { label: "Change price…", tone: "accent", icon: <TrendingDown className="w-3.5 h-3.5" />, onAction: () => setPriceFor([l]) },
+      ...(l.draftId ? [{ label: "Edit in Listflow", icon: <ChevronRight className="w-3.5 h-3.5" />, href: `/drafts/${l.draftId}` } as RowAction] : []),
+      { label: "Edit on eBay", icon: <Pencil className="w-3.5 h-3.5" />, href: `https://www.ebay.com/sh/edit-item/${l.listingId}`, external: true },
+      view,
+      { label: "End listing", tone: "danger", icon: <Trash2 className="w-3.5 h-3.5" />, disabled: deleting.has(l.listingId), onAction: () => void handleDelist(l) },
+    ];
+  }
   const displayCount = useCountUp(listings.length);
 
   return (
     <main
-      className={`relative min-h-screen max-w-md mx-auto px-5 pt-6 overflow-hidden ${bulkBarActive ? "pb-40" : "pb-8"}`}
+      className={`relative min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 overflow-hidden ${bulkBarActive ? "pb-40" : "pb-8"}`}
       style={{ viewTransitionName: "store-panel" }}
     >
       <div
@@ -391,13 +419,14 @@ export default function StorePage() {
         </div>
         {!loading && listings.length > 0 && tab === "active" && (
           selectMode ? (
-            <button onClick={() => { setSelectMode(false); setSelected(new Set()); }} className="text-sm text-[var(--text-secondary)]">Cancel</button>
+            <button onClick={() => { setSelectMode(false); setSelected(new Set()); }} className="text-sm text-[var(--text-secondary)] lg:hidden">Cancel</button>
           ) : (
-            <button onClick={() => setSelectMode(true)} className="text-sm" style={{ color: "var(--accent)" }}>Select</button>
+            <button onClick={() => setSelectMode(true)} className="text-sm lg:hidden" style={{ color: "var(--accent)" }}>Select</button>
           )
         )}
       </div>
 
+      <div className="lg:grid lg:grid-cols-2 lg:gap-3">
       {!loading && !error && (
         <Link
           href="/offers"
@@ -435,9 +464,10 @@ export default function StorePage() {
           <ChevronRight className="w-4 h-4 text-[var(--text-tertiary)] flex-shrink-0" />
         </Link>
       )}
+      </div>
 
       {!loading && !error && listings.length > 0 && (
-        <div className="flex gap-1 p-1 rounded-xl mb-4" style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}>
+        <div className="flex gap-1 p-1 rounded-xl mb-4 lg:max-w-sm" style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}>
           <button
             onClick={() => { setTab("active"); setSelectMode(false); setSelected(new Set()); setStaleOnly(false); }}
             className="flex-1 text-sm py-1.5 rounded-lg transition-colors"
@@ -458,7 +488,7 @@ export default function StorePage() {
       {!loading && listings.length > 0 && (
         <div className="flex flex-col gap-2 mb-4">
           <div className="flex items-center gap-2">
-            <div className="relative flex-1 min-w-0">
+            <div className="relative flex-1 min-w-0 lg:max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)] pointer-events-none" />
               <input
                 type="search"
@@ -506,7 +536,7 @@ export default function StorePage() {
             <button
               type="button"
               onClick={() => setPriceFor(sorted)}
-              className="tap self-stretch min-h-[48px] rounded-2xl text-sm font-semibold flex items-center justify-center gap-2"
+              className="tap self-stretch lg:self-start lg:px-6 min-h-[48px] rounded-2xl text-sm font-semibold flex items-center justify-center gap-2"
               style={{ background: "var(--accent)", color: "white" }}
             >
               <TrendingDown className="w-4 h-4" /> Lower prices on all {sorted.length.toLocaleString("en-US")} stale
@@ -578,7 +608,63 @@ export default function StorePage() {
         </div>
       )}
 
-      {!loading && sorted.length > 0 && (
+      {!loading && sorted.length > 0 && isDesktop && (
+        <DataTable
+          caption={tab === "active" ? "Active listings" : "Ended listings"}
+          rows={sorted}
+          rowId={(l) => l.listingId}
+          rowLabel={(l) => l.title}
+          selected={selected}
+          onSelectionChange={setSelected}
+          onOpen={(l) => { if (l.status === "active") setPriceFor([l]); }}
+          quickActions={(l) => listingQuickActions(l)}
+          menuActions={(l) => listingMenuActions(l)}
+          columns={[
+            {
+              id: "item",
+              header: "Item",
+              className: "w-full max-w-0",
+              cell: (l) => (
+                <div className="flex items-center gap-3 min-w-0">
+                  {l.thumbnail ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={l.thumbnail} alt="" loading="lazy" decoding="async" className="w-10 h-10 rounded-md object-cover flex-none" />
+                  ) : (
+                    <div className="w-10 h-10 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-none"><Shirt className="w-5 h-5 text-[var(--text-secondary)]" /></div>
+                  )}
+                  <span className="truncate font-medium" title={l.title}>{l.title}</span>
+                  {l.status !== "ended" && isStale(l.startTime) && (
+                    <span className="flex-none px-1.5 py-0.5 rounded-full text-[10px] font-semibold" style={{ background: "var(--warning-bg)", color: "var(--danger)", border: "1px solid var(--warning-border)" }}>Stale</span>
+                  )}
+                </div>
+              ),
+            },
+            {
+              id: "price",
+              header: "Price",
+              className: "text-right whitespace-nowrap",
+              cell: (l) =>
+                l.status === "ended" ? (
+                  <span className="tabular-nums">{l.price != null ? formatMoney(l.price) : "—"}</span>
+                ) : (
+                  <button type="button" tabIndex={-1} onClick={() => setPriceFor([l])} title="Change price" className="tabular-nums font-semibold rounded-md px-1.5 py-0.5 hover:bg-[var(--accent-tint)] hover:text-[var(--accent)]">
+                    {l.price != null ? formatMoney(l.price) : "Set price"}
+                  </button>
+                ),
+            },
+            { id: "sku", header: "SKU", className: "whitespace-nowrap tabular-nums text-[var(--text-secondary)]", cell: (l) => l.sku ?? "—" },
+            {
+              id: "age",
+              header: tab === "active" ? "Listed" : "Ended",
+              className: "whitespace-nowrap text-[var(--text-secondary)]",
+              cell: (l) => (l.status === "ended" ? (l.endTime ? timeAgo(l.endTime) : "—") : l.startTime ? timeAgo(l.startTime) : "—"),
+            },
+            { id: "watchers", header: "Watchers", className: "text-right whitespace-nowrap tabular-nums", cell: (l) => (l.watchCount != null ? l.watchCount : "—") },
+          ]}
+        />
+      )}
+
+      {!loading && sorted.length > 0 && !isDesktop && (
         <div className="flex flex-col gap-2">
           {sorted.map((l, rowIndex) => (
             <SwipeRow
@@ -766,8 +852,8 @@ export default function StorePage() {
         </div>
       )}
 
-      {selectMode && selected.size > 0 && (
-        <div className="fixed left-0 right-0 max-w-md mx-auto px-5" style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))", zIndex: Z.actionBar }}>
+      {(selectMode || isDesktop) && selected.size > 0 && (
+        <div className="content-bar fixed left-0 right-0 max-w-md mx-auto px-5" style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))", zIndex: Z.actionBar }}>
           <div className="card p-3 flex flex-col gap-2">
             <p className="text-xs text-[var(--text-secondary)]">{selected.size} item{selected.size !== 1 ? "s" : ""} selected</p>
             <button

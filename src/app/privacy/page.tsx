@@ -12,7 +12,7 @@ const CONTACT_EMAIL = "funkyvaultvintage+listflow@gmail.com";
 
 export default function PrivacyPage() {
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 py-8 text-[var(--text-primary)]">
+    <main className="min-h-screen max-w-md lg:max-w-3xl mx-auto px-5 py-8 lg:py-16 text-[var(--text-primary)]">
       <Link href="/" className="inline-flex items-center gap-2 text-sm text-[var(--text-secondary)] mb-4">
         <ArrowLeft className="w-4 h-4" /> Back
       </Link>

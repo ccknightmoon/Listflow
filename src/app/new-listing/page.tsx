@@ -725,7 +725,7 @@ export default function NewListingPage() {
   }
 
   return (
-    <main className="min-h-screen max-w-md mx-auto px-5 pt-6 pb-24">
+    <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-24">
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dashboard"

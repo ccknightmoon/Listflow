@@ -9,6 +9,9 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X, Copy, Pencil } from "lucide-react";
 import BulkEditSheet from "@/components/BulkEditSheet";
 import SwipeRow from "@/components/SwipeRow";
+import DataTable from "@/components/DataTable";
+import type { RowAction } from "@/components/RowMenu";
+import { useIsDesktop } from "@/lib/use-is-desktop";
 import { getPublishQueue } from "@/lib/publish-queue";
 import type { BulkEdit } from "@/lib/bulk-edit";
 import Toast from "@/components/Toast";
@@ -42,6 +45,7 @@ interface Draft {
   shipping_cost: number | null;
   shipping_mode: ShippingMode | null;
   photo_urls: string[] | null;
+  custom_sku?: string | null;
 }
 
 type ListStatus = "idle" | "listing" | "done";
@@ -93,6 +97,7 @@ export default function DraftsPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const isDesktop = useIsDesktop();
   const [bulkEditOpen, setBulkEditOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [listStatus, setListStatus] = useState<ListStatus>("idle");
@@ -463,11 +468,29 @@ export default function DraftsPage() {
   }
 
   const allSelected = drafts.length > 0 && drafts.every((d) => selected.has(d.id));
+
+  // Desktop table actions -- the same as the phone swipe (List / Copy /
+  // Delete) plus opening the editor.
+  const noEvent = { stopPropagation() {} } as React.MouseEvent;
+  function draftMenuActions(d: Draft): RowAction[] {
+    return [
+      { label: "Open editor", icon: <Pencil className="w-3.5 h-3.5" />, href: `/drafts/${d.id}` },
+      { label: "List on eBay", tone: "accent", icon: <Upload className="w-3.5 h-3.5" />, onAction: () => listOneInBackground(d) },
+      { label: "Duplicate", icon: <Copy className="w-3.5 h-3.5" />, disabled: duplicatingId === d.id, onAction: () => void handleDuplicate(noEvent, d.id) },
+      { label: "Delete", tone: "danger", icon: <Trash2 className="w-3.5 h-3.5" />, onAction: () => void deleteOne(d) },
+    ];
+  }
+  function draftQuickActions(d: Draft): RowAction[] {
+    return [
+      { label: "List", tone: "accent", icon: <Upload className="w-3.5 h-3.5" />, onAction: () => listOneInBackground(d) },
+      { label: "Copy", icon: <Copy className="w-3.5 h-3.5" />, disabled: duplicatingId === d.id, onAction: () => void handleDuplicate(noEvent, d.id) },
+    ];
+  }
   const hasSelection = selected.size > 0;
 
 
   return (
-    <main className="relative min-h-screen max-w-md mx-auto px-5 pt-6 pb-8 overflow-hidden" style={{ viewTransitionName: "drafts-panel" }}>
+    <main className="relative min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-8 overflow-hidden" style={{ viewTransitionName: "drafts-panel" }}>
       <div
         className="bloom d1 stagger"
         style={{ width: 240, height: 240, top: -70, left: -60, background: "var(--glow-primary)" }}
@@ -574,6 +597,51 @@ export default function DraftsPage() {
 
       {!loading && drafts.length > 0 && (
         <>
+          {isDesktop && (
+            <div className="mb-4">
+              <DataTable
+                caption="Drafts"
+                rows={drafts}
+                rowId={(d) => d.id}
+                rowLabel={(d) => d.title ?? "Untitled item"}
+                selected={selected}
+                onSelectionChange={setSelected}
+                onOpen={(d) => router.push(`/drafts/${d.id}`)}
+                quickActions={draftQuickActions}
+                menuActions={draftMenuActions}
+                columns={[
+                  {
+                    id: "item",
+                    header: "Item",
+                    className: "w-full max-w-0",
+                    cell: (d) => (
+                      <Link href={`/drafts/${d.id}`} tabIndex={-1} className="flex items-center gap-3 min-w-0 hover:text-[var(--accent)]">
+                        {d.thumbnail_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={d.thumbnail_url} alt="" loading="lazy" decoding="async" className="w-10 h-10 rounded-md object-cover flex-none" />
+                        ) : (
+                          <div className="w-10 h-10 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-none"><Shirt className="w-5 h-5 text-[var(--text-secondary)]" /></div>
+                        )}
+                        <span className="truncate font-medium">{d.title ?? "Untitled item"}</span>
+                      </Link>
+                    ),
+                  },
+                  {
+                    id: "price",
+                    header: "Price",
+                    className: "text-right whitespace-nowrap tabular-nums",
+                    cell: (d) => (d.suggested_price != null ? `$${d.suggested_price}` : <span style={{ color: "var(--warning-border)" }}>No price</span>),
+                  },
+                  { id: "sku", header: "SKU", className: "whitespace-nowrap tabular-nums text-[var(--text-secondary)]", cell: (d) => d.custom_sku ?? "—" },
+                  { id: "condition", header: "Condition", className: "whitespace-nowrap text-[var(--text-secondary)]", cell: (d) => d.condition ?? "—" },
+                  { id: "photos", header: "Photos", className: "text-right whitespace-nowrap tabular-nums", cell: (d) => (d.photo_urls?.length ? d.photo_urls.length : <span style={{ color: "var(--warning-border)" }}>None</span>) },
+                  { id: "age", header: "Created", className: "whitespace-nowrap text-[var(--text-secondary)]", cell: (d) => timeAgo(d.created_at) || "—" },
+                ]}
+              />
+            </div>
+          )}
+
+          {!isDesktop && (<>
           <div className="flex items-center justify-between mb-3">
             <button
               onClick={toggleSelectAll}
@@ -679,6 +747,7 @@ export default function DraftsPage() {
               );
             })}
           </div>
+          </>)}
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between mb-6 text-sm">
@@ -708,7 +777,7 @@ export default function DraftsPage() {
 
       {hasSelection && (
         <div
-          className="fixed left-0 right-0 px-5 max-w-md mx-auto"
+          className="content-bar fixed left-0 right-0 px-5 max-w-md mx-auto"
           style={{ bottom: "calc(88px + env(safe-area-inset-bottom) + var(--tray-offset, 0px))", zIndex: Z.actionBar }}
         >
           <div className="card p-3 flex gap-2">
