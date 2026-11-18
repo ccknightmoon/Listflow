@@ -1,5 +1,6 @@
 "use client";
 
+import CurrencyInput from "@/components/CurrencyInput";
 import Sheet from "@/components/Sheet";
 import { takePendingPhotos } from "@/lib/pending-photos";
 import PhotoDropZone from "@/components/PhotoDropZone";
@@ -1102,19 +1103,7 @@ export default function NewListingPage() {
               {result.noData ? (
                 <div className="py-2 mb-3">
                   <p className="text-sm text-[var(--text-secondary)] mb-2">No eBay comps found. Set your own price:</p>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min="0.99"
-                      step="0.01"
-                      placeholder="0.00"
-                      value={customPrice}
-                      onChange={(e) => setCustomPrice(e.target.value)}
-                      className="input w-full pl-6"
-                    />
-                  </div>
+                  <CurrencyInput value={customPrice} onChange={setCustomPrice} placeholder="0.00" aria-label="Your price" />
                 </div>
               ) : (
                 <>
@@ -1150,19 +1139,7 @@ export default function NewListingPage() {
                 <label className="text-xs text-[var(--text-secondary)] mb-1 block">
                   Cost (what you paid) — optional
                 </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
-                  <input
-                    type="number"
-                      inputMode="decimal"
-                    min="0"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={cost}
-                    onChange={(e) => setCost(e.target.value)}
-                    className="input w-full pl-6"
-                  />
-                </div>
+                <CurrencyInput value={cost} onChange={setCost} placeholder="0.00" aria-label="What you paid" />
               </div>
 
               {listError && (

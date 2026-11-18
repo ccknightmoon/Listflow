@@ -1,5 +1,6 @@
 "use client";
 
+import CurrencyInput from "@/components/CurrencyInput";
 import { Z } from "@/lib/z-layers";
 import SwipeRow from "@/components/SwipeRow";
 import DataTable from "@/components/DataTable";
@@ -720,15 +721,12 @@ export default function StorePage() {
                   <p className="text-sm font-medium truncate">{l.title}</p>
                   {editingPrice.has(l.listingId) ? (
                     <div className="flex items-center gap-1 mt-1">
-                      <span className="text-xs text-[var(--text-secondary)]">$</span>
-                      <input
-                        type="number"
-                      inputMode="decimal"
-                        step="0.01"
-                        min="0.99"
-                        value={editingPrice.get(l.listingId)}
-                        onChange={(e) => setEditingPrice((prev) => new Map(prev).set(l.listingId, e.target.value))}
-                        className="w-20 text-xs border border-[var(--border)] rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+                      <CurrencyInput
+                        size="sm"
+                        className="w-24"
+                        value={editingPrice.get(l.listingId) ?? ""}
+                        onChange={(v) => setEditingPrice((prev) => new Map(prev).set(l.listingId, v))}
+                        aria-label={`New price for ${l.title}`}
                         autoFocus
                         onKeyDown={(e) => {
                           if (e.key === "Enter") handleUpdatePrice(l);

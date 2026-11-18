@@ -1,5 +1,6 @@
 "use client";
 
+import CurrencyInput from "@/components/CurrencyInput";
 import { useMemo, useState } from "react";
 import { Loader2, Eye } from "lucide-react";
 import Sheet from "@/components/Sheet";
@@ -149,28 +150,27 @@ export default function PriceSheet({
           ))}
         </div>
         {mode !== "preset" && (
-          <input
-            className="input w-full mb-2"
-            type="text"
-            inputMode="decimal"
+          <CurrencyInput
+            className="mb-2"
+            prefix={mode === "minus%" ? null : "$"}
+            suffix={mode === "minus%" ? "%" : null}
             enterKeyHint="done"
             autoFocus
             placeholder={mode === "set" ? "New price, e.g. 19.99" : mode === "minus$" ? "Amount off, e.g. 5" : "Percent off, e.g. 25"}
             value={custom}
-            onChange={(e) => setCustom(e.target.value.replace(/[^0-9.]/g, ""))}
+            onChange={setCustom}
             onKeyDown={enterApplies}
             aria-label="Custom amount"
           />
         )}
         <label className="flex items-center gap-2 mb-3 text-xs" style={{ color: "var(--text-secondary)" }}>
-          <span className="flex-none">Don&apos;t go below $</span>
-          <input
-            className="input flex-1 py-1.5"
-            type="text"
-            inputMode="decimal"
+          <span className="flex-none">Don&apos;t go below</span>
+          <CurrencyInput
+            className="flex-1"
+            inputClassName="py-1.5"
             placeholder="optional floor"
             value={floor}
-            onChange={(e) => setFloor(e.target.value.replace(/[^0-9.]/g, ""))}
+            onChange={setFloor}
             onKeyDown={enterApplies}
             aria-label="Minimum price"
           />

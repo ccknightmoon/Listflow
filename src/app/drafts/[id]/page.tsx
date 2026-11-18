@@ -1,5 +1,6 @@
 "use client";
 
+import CurrencyInput from "@/components/CurrencyInput";
 import Sheet from "@/components/Sheet";
 import PhotoDropZone from "@/components/PhotoDropZone";
 import SpecificsEditor from "@/components/SpecificsEditor";
@@ -1231,30 +1232,13 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             <input className="input w-full" value={size} onChange={(e) => setSize(e.target.value)} />
           </div>
           <div>
-            <label className="text-xs text-[var(--text-secondary)] mb-1 block">List price ($)</label>
-            <input
-              className="input w-full"
-              type="number"
-                      inputMode="decimal"
-              min="0.99"
-              step="0.01"
-              value={price}
-              onChange={(e) => setPrice(e.target.value)}
-            />
+            <label className="text-xs text-[var(--text-secondary)] mb-1 block">List price</label>
+            <CurrencyInput value={price} onChange={setPrice} placeholder="0.00" aria-label="List price" />
           </div>
         </div>
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Cost (what you paid, optional)</label>
-          <input
-            className="input w-full"
-            type="number"
-                      inputMode="decimal"
-            min="0"
-            step="0.01"
-            placeholder="0.00"
-            value={cost}
-            onChange={(e) => setCost(e.target.value)}
-          />
+          <CurrencyInput value={cost} onChange={setCost} placeholder="0.00" aria-label="What you paid" />
         </div>
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">SKU (optional — alphanumeric only)</label>

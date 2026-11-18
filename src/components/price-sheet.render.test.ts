@@ -11,7 +11,7 @@ describe("PriceSheet", () => {
       open: true, items: [{ id: "1", title: "Tee", price: 27.99 }], thumbnail: "https://x/y.jpg", watchCount: 3, offerEligible: true,
       onClose: () => {}, onApply: () => {}, onSendOffer: async () => null,
     })));
-    for (const t of ["−10%", "−15%", "−20%", "Set $", "Don&#x27;t go below $", "$23.79", "send an offer to interested buyers"]) expect(html).toContain(t);
+    for (const t of ["−10%", "−15%", "−20%", "Set $", "Don&#x27;t go below", "$23.79", "send an offer to interested buyers"]) expect(html).toContain(t);
   });
   it("bulk: summary instead of a single price, no watcher section", () => {
     const html = strip(renderToString(createElement(PriceSheet, {

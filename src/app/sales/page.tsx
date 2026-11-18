@@ -6,6 +6,7 @@
 // locally by deriveView() in src/lib/sales-analytics.ts. Switching tabs never
 // waits on eBay.
 
+import CurrencyInput from "@/components/CurrencyInput";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -613,12 +614,13 @@ export default function SalesPage() {
                         <span className="text-[10px] text-right max-w-[110px]" style={{ color: "var(--text-tertiary)" }}>Needs DB update (025)</span>
                       ) : (
                         <>
-                          <input
-                            type="number" inputMode="decimal" min="0" step="0.01" placeholder="$0.00"
+                          <CurrencyInput
+                            size="sm"
+                            className="w-24"
+                            placeholder="0.00"
                             value={costInputs[s.key] ?? ""}
-                            onChange={(e) => setCostInputs((p) => ({ ...p, [s.key]: e.target.value }))}
+                            onChange={(v) => setCostInputs((p) => ({ ...p, [s.key]: v }))}
                             onKeyDown={(e) => { if (e.key === "Enter" && (costInputs[s.key] ?? "").trim() && costSaving !== s.key) { e.preventDefault(); void saveCost(s); } }}
-                            className="input w-20 text-xs py-1 px-2"
                             aria-label={`Cost for ${s.title}`}
                           />
                           <button

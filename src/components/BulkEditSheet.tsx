@@ -1,5 +1,6 @@
 "use client";
 
+import CurrencyInput from "@/components/CurrencyInput";
 import { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import Sheet from "@/components/Sheet";
@@ -116,15 +117,15 @@ export default function BulkEditSheet({
               ))}
             </div>
             {priceMode && (
-              <input onKeyDown={enterApplies}
-                type="text"
-                inputMode="decimal"
+              <CurrencyInput onKeyDown={enterApplies}
+                prefix={priceMode === "percent" ? null : "$"}
+                suffix={priceMode === "percent" ? "%" : null}
+                allowNegative={priceMode !== "set"}
                 enterKeyHint="done"
                 autoFocus
                 placeholder={priceMode === "set" ? "24.99" : priceMode === "add" ? "-2.00 or 5" : "-10 or 15"}
                 value={priceValue}
-                onChange={(e) => setPriceValue(e.target.value.replace(/[^0-9.\-]/g, ""))}
-                className="input w-full"
+                onChange={setPriceValue}
                 aria-label="Price change"
               />
             )}

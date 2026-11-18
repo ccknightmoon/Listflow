@@ -1,5 +1,6 @@
 "use client";
 
+import CurrencyInput from "@/components/CurrencyInput";
 import { confirmAction } from "@/lib/confirm";
 import { takePendingPhotos } from "@/lib/pending-photos";
 import { groupingNoticeLines } from "@/lib/grouping-repair";
@@ -2596,17 +2597,8 @@ export default function BatchUploadPage() {
                         </label>
                         {bulkHeavy && (
                           <div className="flex items-center gap-1">
-                            <span className="text-xs text-[var(--text-secondary)]">— shipping $</span>
-                            <input
-                              type="number"
-                      inputMode="decimal"
-                              min="0"
-                              step="0.01"
-                              placeholder="0.00"
-                              value={bulkShippingCost}
-                              onChange={(e) => setBulkShippingCost(e.target.value)}
-                              className="input w-16 text-xs py-0.5 px-1.5"
-                            />
+                            <span className="text-xs text-[var(--text-secondary)]">— shipping</span>
+                            <CurrencyInput size="sm" className="w-20" value={bulkShippingCost} onChange={setBulkShippingCost} placeholder="0.00" aria-label="Shipping cost" />
                           </div>
                         )}
                         <button onClick={applyBulkShipping} className="btn text-xs px-3 py-1.5 whitespace-nowrap ml-auto">
@@ -3024,38 +3016,25 @@ export default function BatchUploadPage() {
                   </div>
 
                   {pricingNoData && (
-                    <div className="relative mb-3">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
-                      <input
-                        type="number"
-                      inputMode="decimal"
-                        min="0.99"
-                        step="0.01"
-                        placeholder="Set your price"
-                        value={customPrices[i] ?? ""}
-                        onChange={(e) => setCustomPrices((prev) => ({ ...prev, [i]: e.target.value }))}
-                        className="input w-full pl-6"
-                      />
-                    </div>
+                    <CurrencyInput
+                      className="mb-3"
+                      value={customPrices[i] ?? ""}
+                      onChange={(v) => setCustomPrices((prev) => ({ ...prev, [i]: v }))}
+                      placeholder="Set your price"
+                      aria-label="Your price"
+                    />
                   )}
 
                   <div className="mb-3">
                     <label className="text-xs text-[var(--text-secondary)] mb-1 block">
                       Cost (what you paid) — optional
                     </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
-                      <input
-                        type="number"
-                      inputMode="decimal"
-                        min="0"
-                        step="0.01"
-                        placeholder="0.00"
-                        value={costs[i] ?? ""}
-                        onChange={(e) => setCosts((prev) => ({ ...prev, [i]: e.target.value }))}
-                        className="input w-full pl-6"
-                      />
-                    </div>
+                    <CurrencyInput
+                      value={costs[i] ?? ""}
+                      onChange={(v) => setCosts((prev) => ({ ...prev, [i]: v }))}
+                      placeholder="0.00"
+                      aria-label="What you paid"
+                    />
                   </div>
 
                   <div className="grid grid-cols-3 gap-2 mb-3">

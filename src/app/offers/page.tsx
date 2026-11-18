@@ -1,5 +1,6 @@
 "use client";
 
+import CurrencyInput from "@/components/CurrencyInput";
 import { formatMoney } from "@/lib/format";
 import { counterPresets } from "@/lib/counter-presets";
 import { ListSkeleton } from "@/components/ui";
@@ -358,24 +359,18 @@ export default function OffersPage() {
                 )}
                 {counterOpen && !isResponding && (
                   <div className="flex items-center gap-2 mt-2">
-                    <div className="relative flex-1">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-[var(--text-secondary)]">$</span>
-                      <input
-                        type="number"
-                      inputMode="decimal"
-                        min="0.01"
-                        step="0.01"
+                    <CurrencyInput
+                        className="flex-1"
+                        inputClassName="text-sm"
                         placeholder="Counter price"
                         value={counterPrices[key] ?? ""}
-                        onChange={(e) => setCounterPrices((prev) => ({ ...prev, [key]: e.target.value }))}
+                        onChange={(v) => setCounterPrices((prev) => ({ ...prev, [key]: v }))}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") { e.preventDefault(); void handleCounterSubmit(offer); }
                           if (e.key === "Escape") { e.preventDefault(); setCounterOpenKey(null); }
                         }}
                         aria-label={`Counter price for ${offer.title || "this listing"}`}
-                        className="input w-full pl-6 text-sm"
                       />
-                    </div>
                     <button
                       onClick={() => handleCounterSubmit(offer)}
                       className="text-xs font-medium px-3 py-2 tap rounded-lg flex-shrink-0"
