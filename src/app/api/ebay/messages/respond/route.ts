@@ -3,6 +3,7 @@ import { isValidEbayItemId } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
+import { invalidateDashboardSummary } from "@/lib/dashboard-summary";
 import { respondToQuestion } from "@/lib/ebay-messages";
 
 export const runtime = "nodejs";
@@ -68,6 +69,7 @@ export async function POST(req: Request) {
       console.error("POST /api/ebay/messages/respond: eBay rejected the reply:", result.error);
       return NextResponse.json({ error: result.error ?? "eBay rejected the reply." }, { status: 502 });
     }
+    invalidateDashboardSummary(auth.user.id);
     return NextResponse.json({ success: true });
   });
 }

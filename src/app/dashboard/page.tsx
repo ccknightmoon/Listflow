@@ -12,7 +12,6 @@ import { bucketRevenue, type BucketableSale } from "@/lib/sales-buckets";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { useCountUp } from "@/lib/use-count-up";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
-import { isStale } from "@/lib/stale-listings";
 
 // See src/lib/page-cache.ts. Each of this page's four independent fetches
 // gets its own entry so the hero tile can show last session's numbers the
@@ -27,11 +26,24 @@ const STALE_LISTINGS_CACHE_KEY = "dashboard:staleListings";
 const DRAFT_GAPS_CACHE_KEY = "dashboard:draftGaps";
 const NO_ITEMS: PublishItem[] = [];
 
+interface DashboardSummaryResponse {
+  connected?: boolean;
+  drafts?: number | null;
+  active?: number | null;
+  weeklyRevenue?: number | null;
+  weeklySales?: number | null;
+  trendSales?: BucketableSale[] | null;
+  shipCount?: number | null;
+  pendingOffers?: number | null;
+  buyerQuestions?: number | null;
+  staleListings?: number | null;
+}
+
 interface Stats {
-  drafts: number;
-  active: number;
-  weeklyRevenue: number;
-  weeklySales: number;
+  drafts: number | null;
+  active: number | null;
+  weeklyRevenue: number | null;
+  weeklySales: number | null;
 }
 
 // How far back the hero tile's trend sparkline looks — 4 whole weeks,
@@ -93,37 +105,38 @@ export default function DashboardPage() {
   useEffect(() => {
     setEyebrow(greeting(new Date().getHours()));
 
-    // Independent requests — fire together instead of one after the other,
-    // so the page isn't waiting on stats before it even starts asking eBay
-    // for the ship count (this used to be a plain sequential await chain).
+    // One cached server summary for every eBay-backed number on this page
+    // (src/lib/dashboard-summary.ts) instead of six separate eBay-backed
+    // requests per visit. Any number eBay couldn't supply comes back null,
+    // and we keep showing whatever we had (cached) rather than a false 0.
     void (async () => {
       try {
-        const statsData = await apiFetch<{ drafts: number; active: number; weeklyRevenue: number; weeklySales: number }>("/api/dashboard/stats");
-        setStats(statsData);
-        setPageCache(STATS_CACHE_KEY, statsData);
+        const s = await apiFetch<DashboardSummaryResponse>("/api/dashboard/summary");
+        const prev = getPageCache<Stats>(STATS_CACHE_KEY);
+        const keep = (v: number | null | undefined, old: number | null | undefined) =>
+          s.connected === false ? (v ?? null) : (v ?? old ?? null);
+        const nextStats: Stats = {
+          drafts: s.drafts ?? prev?.drafts ?? null,
+          active: keep(s.active, prev?.active),
+          weeklyRevenue: keep(s.weeklyRevenue, prev?.weeklyRevenue),
+          weeklySales: keep(s.weeklySales, prev?.weeklySales),
+        };
+        setStats(nextStats);
+        setPageCache(STATS_CACHE_KEY, nextStats);
+        const apply = <T,>(v: T | null | undefined, set: (v: T) => void, key: string) => {
+          if (v === null || v === undefined) return;
+          set(v);
+          setPageCache(key, v);
+        };
+        apply(s.shipCount, setShipCount, SHIP_COUNT_CACHE_KEY);
+        apply(s.trendSales, setTrendSales, TREND_SALES_CACHE_KEY);
+        apply(s.pendingOffers, setPendingOffersCount, PENDING_OFFERS_CACHE_KEY);
+        apply(s.buyerQuestions, setBuyerQuestionsCount, BUYER_QUESTIONS_CACHE_KEY);
+        apply(s.staleListings, setStaleListingsCount, STALE_LISTINGS_CACHE_KEY);
       } catch {
-        // A transient failure shouldn't blank out numbers we already have
-        // (from a successful load a moment ago, or the cache from last
-        // visit) — leave `stats` exactly as it was rather than nulling it.
+        // Transient failure: keep whatever (cached) numbers are showing.
       } finally {
         setStatsLoaded(true);
-      }
-    })();
-
-    void (async () => {
-      try {
-        // count-only — see the thumbnails=0 comment in api/ebay/ship/route.ts
-        const shipData = await apiFetch<{ count?: number; error?: string }>("/api/ebay/ship?thumbnails=0");
-        if (!shipData.error) {
-          const count = shipData.count ?? 0;
-          setShipCount(count);
-          setPageCache(SHIP_COUNT_CACHE_KEY, count);
-        }
-        // On a reported error, leave shipCount as whatever it already was
-        // (cached or null) — same reasoning as the catch block below.
-      } catch {
-        // Transient failure — don't blank out a count we may already be
-        // showing from cache; just leave it alone.
       }
     })();
 
@@ -154,67 +167,6 @@ export default function DashboardPage() {
       }
     })();
 
-    // Same eBay sales endpoint the Sales page itself uses, just a fourth
-    // independent request alongside the three above — fills the hero
-    // tile's previously-empty space with a real trend instead of leaving
-    // it blank.
-    void (async () => {
-      try {
-        const salesData = await apiFetch<{ sales?: BucketableSale[]; error?: string }>(`/api/ebay/sales?days=${TREND_DAYS}&thumbnails=0`);
-        if (!salesData.error) {
-          const trendData = salesData.sales ?? [];
-          setTrendSales(trendData);
-          setPageCache(TREND_SALES_CACHE_KEY, trendData);
-        }
-        // On a reported error, leave trendSales as whatever it already was
-        // (cached sparkline or null) rather than yanking it away.
-      } catch {
-        // Transient failure — leave the sparkline (cached or none) as-is
-        // instead of blanking it.
-      }
-    })();
-
-    void (async () => {
-      try {
-        const offersData = await apiFetch<{ offers?: unknown[]; error?: string }>("/api/ebay/offers");
-        if (!offersData.error) {
-          const count = offersData.offers?.length ?? 0;
-          setPendingOffersCount(count);
-          setPageCache(PENDING_OFFERS_CACHE_KEY, count);
-        }
-        // On a reported error (including "not connected"), leave the count
-        // as whatever it already was — same reasoning as every other tile
-        // here.
-      } catch {
-        // Transient failure — leave the cached count (or null) alone.
-      }
-    })();
-
-    void (async () => {
-      try {
-        const questionsData = await apiFetch<{ questions?: unknown[]; error?: string }>("/api/ebay/messages");
-        if (!questionsData.error) {
-          const count = questionsData.questions?.length ?? 0;
-          setBuyerQuestionsCount(count);
-          setPageCache(BUYER_QUESTIONS_CACHE_KEY, count);
-        }
-      } catch {
-        // Transient failure — leave the cached count (or null) alone.
-      }
-    })();
-
-    void (async () => {
-      try {
-        const storeData = await apiFetch<{ listings?: Array<{ status: string; startTime: string | null }>; error?: string }>("/api/ebay/store");
-        if (!storeData.error) {
-          const count = (storeData.listings ?? []).filter((l) => l.status !== "ended" && isStale(l.startTime)).length;
-          setStaleListingsCount(count);
-          setPageCache(STALE_LISTINGS_CACHE_KEY, count);
-        }
-      } catch {
-        // Transient failure — leave the cached count (or null) alone.
-      }
-    })();
   }, [supabase]);
 
   const trend = trendSales ? bucketRevenue(trendSales, TREND_DAYS) : null;

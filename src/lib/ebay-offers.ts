@@ -229,3 +229,15 @@ export async function fetchPendingOffers(): Promise<FetchPendingOffersOutcome> {
 
   return { offers, listingsChecked: toCheck.length, truncated };
 }
+
+/**
+ * Just the number of pending offers, for the dashboard. Uses the
+ * seller-wide call alone (no full active-listings pull); falls back to the
+ * full lookup only if eBay refuses the seller-wide call.
+ */
+export async function countPendingOffers(): Promise<number | null> {
+  const sellerWide = await fetchSellerWideOffers().catch(() => null);
+  if (sellerWide) return sellerWide.length;
+  const full = await fetchPendingOffers();
+  return "offers" in full ? full.offers.length : null;
+}

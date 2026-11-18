@@ -3,6 +3,7 @@ import { tradingRequest, isValidEbayItemId } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
+import { invalidateDashboardSummary } from "@/lib/dashboard-summary";
 import { xmlFind } from "@/lib/ebay-listings";
 
 export const runtime = "nodejs";
@@ -84,7 +85,8 @@ export async function POST(req: Request) {
       const { body: respBody } = await tradingRequest("RespondToBestOffer", xml);
 
       if (respBody.includes("<Ack>Success</Ack>") || respBody.includes("<Ack>Warning</Ack>")) {
-        return NextResponse.json({ success: true });
+        invalidateDashboardSummary(auth.user.id);
+    return NextResponse.json({ success: true });
       }
 
       const errMsg = xmlFind(respBody, "LongMessage") || xmlFind(respBody, "ShortMessage") || "eBay rejected the request.";
