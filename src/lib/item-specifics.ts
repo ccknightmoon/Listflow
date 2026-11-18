@@ -16,6 +16,8 @@ export interface AspectDef {
   values: string[]; // allowed / suggested values
   /** The browser copy only has part of eBay's list (long free-text lists like Brand). */
   valuesTruncated?: boolean;
+  /** Values are Listflow's curated suggestions (eBay lists none; free text only). */
+  curated?: boolean;
 }
 
 /** eBay Taxonomy getItemAspectsForCategory → AspectDef[] (required first, then recommended, then the rest, eBay order kept). */
@@ -194,7 +196,34 @@ function cleanValues(values: unknown): string[] {
  * snap every value to eBay's allowed values for the category, and report
  * required aspects that are still empty.
  */
-export function mergeAspects(sources: Aspects[], defs: AspectDef[]): { aspects: Aspects; missingRequired: string[]; dropped: Array<{ name: string; value: string }> } {
+/**
+ * "Fall/Winter", "Spring & Summer", "Cotton + Polyester" → parts. Only used
+ * when the whole value isn't itself an allowed value (so real values with
+ * "&" like "Big & Tall" or "Hook & Loop" stay whole).
+ */
+export function splitCombined(v: string): string[] {
+  const parts = v.split(/\s*(?:\/|&|\+|,|\band\b)\s*/i).map((x) => x.trim()).filter(Boolean);
+  return parts.length > 1 ? parts : [v];
+}
+
+/** Values for one aspect: whole value if eBay knows it, else its valid parts. */
+function matchWithSplit(v: string, def: AspectDef): string[] {
+  const whole = matchAllowedValue(v, def);
+  const listed = (x: string | null) => !!x && def.values.some((a) => a === x);
+  // Whole value is an eBay value (or free text with no list): keep it.
+  if (whole && (listed(whole) || def.values.length === 0)) return [whole];
+  // Single-value free text keeps the seller's combined wording ("Cotton/Polyester").
+  if (!def.multi && def.mode !== "SELECTION_ONLY") return whole ? [whole] : [];
+  const parts = splitCombined(v);
+  if (parts.length > 1) {
+    const matched = parts.map((p) => matchAllowedValue(p, def)).filter((x): x is string => !!x && (listed(x) || def.mode !== "SELECTION_ONLY"));
+    // Use the split only if every part is a real eBay value.
+    if (matched.length === parts.length && matched.every(listed)) return [...new Set(matched)];
+  }
+  return whole ? [whole] : [];
+}
+
+export function mergeAspects(sources: Aspects[], defs: AspectDef[], opts: { onlyKnown?: boolean } = {}): { aspects: Aspects; missingRequired: string[]; dropped: Array<{ name: string; value: string }> } {
   const byLower = new Map(defs.map((d) => [d.name.toLowerCase(), d]));
   const merged = new Map<string, { name: string; values: string[] }>();
   for (const src of sources) {
@@ -211,11 +240,17 @@ export function mergeAspects(sources: Aspects[], defs: AspectDef[]): { aspects: 
   const dropped: Array<{ name: string; value: string }> = [];
   for (const [key, { name, values }] of merged) {
     const def = byLower.get(key);
-    if (!def) { aspects[name] = values.map((v) => v.slice(0, 65)); continue; }
+    if (!def) {
+      // Not one of this category's aspects: when we have the category's
+      // list, it isn't offered in any dropdown and isn't sent to eBay.
+      if (opts.onlyKnown && defs.length > 0) { values.forEach((v) => dropped.push({ name, value: v })); continue; }
+      aspects[name] = values.map((v) => capLength(v));
+      continue;
+    }
     const out: string[] = [];
     for (const v of values) {
-      const m = matchAllowedValue(v, def);
-      if (m) { if (!out.includes(m)) out.push(m); } else dropped.push({ name, value: v });
+      const m = matchWithSplit(v, def);
+      if (m.length) { for (const x of m) if (!out.includes(x)) out.push(x); } else dropped.push({ name, value: v });
     }
     const final = def.multi ? out.slice(0, 30) : out.slice(0, 1);
     if (final.length) aspects[def.name] = final;

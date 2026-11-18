@@ -4,6 +4,7 @@
 // seller, so it's cached by category id (12h), in memory per instance.
 import { inventoryRequest } from "@/lib/ebay-inventory";
 import { parseAspectDefs, CONDITION_ID_TO_ENUM, type AspectDef } from "@/lib/item-specifics";
+import { optionsFor } from "@/lib/aspect-fallbacks";
 
 const TTL_MS = 12 * 60 * 60 * 1000;
 const aspectCache = new Map<string, { at: number; defs: AspectDef[] }>();
@@ -71,7 +72,11 @@ export function parseConditionPolicy(data: unknown): string[] | null {
  */
 export function defsForClient(defs: AspectDef[], maxFreeTextValues = 120, maxSelectionValues = 1500): AspectDef[] {
   return defs.map((d) => {
-    const cap = d.mode === "SELECTION_ONLY" ? maxSelectionValues : maxFreeTextValues;
-    return d.values.length > cap ? { ...d, values: d.values.slice(0, cap), valuesTruncated: true } : d;
+    // Free-text aspects eBay lists no values for get a curated list (any
+    // text is accepted there); selection-only lists are never invented.
+    const opts = optionsFor(d);
+    const base = opts.curated ? { ...d, values: opts.values, curated: true } : d;
+    const cap = base.mode === "SELECTION_ONLY" ? maxSelectionValues : maxFreeTextValues;
+    return base.values.length > cap ? { ...base, values: base.values.slice(0, cap), valuesTruncated: true } : base;
   });
 }

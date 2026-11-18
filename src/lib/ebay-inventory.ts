@@ -3,11 +3,8 @@ import { getAccessToken } from "./ebay-oauth";
 import { getEbayContext } from "./ebay-request-context";
 import { buildPackageWeightAndSize, type PackageVariant, type ShippingMode } from "./shipping";
 import { fetchAspectDefs, fetchAllowedConditions } from "./ebay-aspects";
-import {
-  aspectsFromDraft, conditionNote, fitTitle, listingDescriptionHtml, measurementAspects, measurementsFromDescription, mergeAspects,
-  pickCondition, sanitizeStoredSpecifics,
-} from "./item-specifics";
-import { aspectFitsKind, classifyGarment, dedupeAspects, measurementKeysFor, sanitizeForItem } from "./garment";
+import { conditionNote, fitTitle, listingDescriptionHtml, pickCondition } from "./item-specifics";
+import { buildPublishAspects } from "./publish-aspects";
 
 export const CONDITION_MAP: Record<string, string> = {
   "New with tags": "NEW",
@@ -290,24 +287,10 @@ export async function upsertInventoryItem(sku: string, draft: {
   // values for THIS category. Required aspects still empty are reported so
   // the review screen flags them (nothing is invented to fill them).
   const defs = await fetchAspectDefs(categoryId);
-  const stored = sanitizeStoredSpecifics(draft.item_specifics);
-  const measurements = stored?.measurements?.length ? stored.measurements : measurementsFromDescription(draft.description);
-  // Garment guard (Nov 2026): nothing from the wrong kind of garment
-  // reaches eBay (no Inseam on a jersey, no player as "Character").
-  const kind = classifyGarment(draft.item_type, draft.title);
-  const keys = measurementKeysFor(kind);
-  const ms = measurements.filter((m) => keys.size === 0 || keys.has(m.key));
-  const fittingDefs = defs.filter((d) => aspectFitsKind(d.name, kind));
-  const vintageOk = /^y/i.test(draft.vintage ?? "") && !!draft.year_manufactured;
-  const merged = mergeAspects([aspectsFromDraft(draft), measurementAspects(ms, fittingDefs), stored?.aspects ?? {}], fittingDefs);
-  // Same validation as at analyze time: every value matched to eBay's list
-  // for this category (mergeAspects), garment guard, then extras that only
-  // repeat a category aspect are dropped — nothing invalid reaches eBay.
-  const aspects = dedupeAspects(
-    sanitizeForItem(merged.aspects, kind, { vintageEvidence: vintageOk || !!stored?.aspects?.["Vintage"]?.length }).aspects,
-    fittingDefs.map((d) => d.name),
-  );
-  const missingRequiredAspects = mergeAspects([aspects], fittingDefs).missingRequired;
+  // Same validation as analyze time (src/lib/publish-aspects.ts): only the
+  // category's own aspects, values matched to eBay's lists, garment guard,
+  // duplicates removed — nothing invalid reaches eBay.
+  const { aspects, missingRequired: missingRequiredAspects, measurements: ms } = buildPublishAspects(draft, defs);
 
   // Condition: the category's own accepted value for the seller's tier
   // (eBay Metadata API), else the known apparel/general mapping.

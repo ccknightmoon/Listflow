@@ -9,7 +9,7 @@
 // Runs inside an eBay request context (taxonomy calls use the seller's token).
 import { openAIPost } from "@/lib/openai-request";
 import { chooseCategory } from "@/lib/ebay-category";
-import { aspectFitsKind, classifyGarment, consistencyIssues, dedupeAspects, measurementKeysFor, PHOTO_ONLY_ASPECTS, sanitizeForItem, type GarmentKind } from "@/lib/garment";
+import { classifyGarment, consistencyIssues, dedupeAspects, defsForKind, measurementKeysFor, PHOTO_ONLY_ASPECTS, sanitizeForItem, type GarmentKind } from "@/lib/garment";
 import { fetchAspectDefs, defsForClient } from "@/lib/ebay-aspects";
 import {
   aspectsFromDraft, aspectsToAsk, composeTitle, fitTitle, measurementAspects, measurementLines, measurementsFrom,
@@ -145,7 +145,10 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
     .catch(() => null);
   const categoryId = cat?.categoryId ?? null;
   const defsAll = categoryId ? await fetchAspectDefs(categoryId) : [];
-  const defs = defsAll.filter((d) => aspectFitsKind(d.name, kind));
+  // Only this category's aspects that fit the garment (required ones always kept).
+  const defs = defsForKind(defsAll, kind);
+  const required = defs.filter((d) => d.required).map((d) => d.name);
+  const only = { onlyKnown: defs.length > 0 };
 
   // Measurements only for this kind of garment (no inseam on a top).
   const allowedKeys = measurementKeysFor(kind);
@@ -153,8 +156,8 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
   const evidence = vintageEvidence(v);
 
   const photoFeatures = [...(visionSpecifics(v)["Features"] ?? []), ...(visionSpecifics(v)["Accents"] ?? [])];
-  const baseMerge = mergeAspects([aspectsFromDraft(facts), visionSpecifics(v), measurementAspects(ms, defs)], defs);
-  const base = sanitizeForItem(baseMerge.aspects, kind, { vintageEvidence: evidence, photoFeatures }).aspects;
+  const baseMerge = mergeAspects([aspectsFromDraft(facts), visionSpecifics(v), measurementAspects(ms, defs)], defs, only);
+  const base = sanitizeForItem(baseMerge.aspects, kind, { vintageEvidence: evidence, photoFeatures, requiredAspects: required }).aspects;
 
   let ai: Aspects = {};
   const ask = aspectsToAsk(defs, base);
@@ -177,7 +180,7 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
       // aspects (features, color, closure…) the photos didn't show.
       const raw = parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}"));
       for (const k of Object.keys(raw)) if (PHOTO_ONLY_ASPECTS.has(k.toLowerCase())) delete raw[k];
-      ai = sanitizeForItem(raw, kind, { vintageEvidence: evidence, photoFeatures }).aspects;
+      ai = sanitizeForItem(raw, kind, { vintageEvidence: evidence, photoFeatures, requiredAspects: required }).aspects;
     } catch {
       ai = {};
     }
@@ -185,7 +188,7 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
 
   // Photo-read facts win over the text model's mapping. Every value is
   // validated against eBay's list for this category (server = source of truth).
-  const merged0 = mergeAspects([ai, base], defs);
+  const merged0 = mergeAspects([ai, base], defs, only);
   const merged = { ...merged0, aspects: dedupeAspects(merged0.aspects, defs.map((d) => d.name)) };
   const rejected = [...baseMerge.dropped, ...merged0.dropped]
     .filter((d) => defs.some((x) => x.name === d.name && x.mode === "SELECTION_ONLY"))
@@ -250,9 +253,11 @@ export async function refillForCategory(
 ): Promise<Pick<EnrichedListing, "categoryId" | "categoryPath" | "categoryNeedsReview" | "garmentKind" | "issues" | "itemSpecifics" | "missingRequired" | "aspectDefs">> {
   const first = (k: string) => input.aspects[k]?.[0] ?? null;
   const kind = classifyGarment(input.itemType ?? first("Type"), input.title, { team: first("Team"), league: first("League"), player: first("Player") });
-  const defs = (await fetchAspectDefs(input.categoryId)).filter((d) => aspectFitsKind(d.name, kind));
+  const defs = defsForKind(await fetchAspectDefs(input.categoryId), kind);
+  const required = defs.filter((d) => d.required).map((d) => d.name);
+  const only = { onlyKnown: defs.length > 0 };
   const evidence = !!input.aspects["Vintage"]?.length;
-  const base = sanitizeForItem(mergeAspects([input.aspects], defs).aspects, kind, { vintageEvidence: evidence }).aspects;
+  const base = sanitizeForItem(mergeAspects([input.aspects], defs, only).aspects, kind, { vintageEvidence: evidence, requiredAspects: required }).aspects;
   let ai: Aspects = {};
   const ask = aspectsToAsk(defs, base);
   if (apiKey && ask.length) {
@@ -265,12 +270,12 @@ export async function refillForCategory(
       })) as { choices?: { message?: { content?: string } }[] };
       const raw = parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}"));
       for (const k of Object.keys(raw)) if (PHOTO_ONLY_ASPECTS.has(k.toLowerCase())) delete raw[k];
-      ai = sanitizeForItem(raw, kind, { vintageEvidence: evidence }).aspects;
+      ai = sanitizeForItem(raw, kind, { vintageEvidence: evidence, requiredAspects: required }).aspects;
     } catch {
       ai = {};
     }
   }
-  const merged0 = mergeAspects([ai, base], defs);
+  const merged0 = mergeAspects([ai, base], defs, only);
   const merged = { ...merged0, aspects: dedupeAspects(merged0.aspects, defs.map((d) => d.name)) };
   return {
     categoryId: input.categoryId,

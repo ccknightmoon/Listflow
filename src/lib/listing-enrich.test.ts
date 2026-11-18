@@ -45,8 +45,9 @@ describe("enrichListing", () => {
     expect(r.itemSpecifics).toMatchObject({
       Brand: ["Carhartt"], Size: ["XL"], Department: ["Men"], Type: ["Jacket"], Color: ["Brown"],
       Closure: ["Zip"], "Lining Material": ["Blanket"], "Country/Region of Manufacture": ["United States"],
-      "Product Line": ["Detroit Jacket"], Model: ["J97"], Vintage: ["Yes"],
     });
+    // Only this category's own aspects are kept (so every value is one eBay knows here).
+    for (const k of ["Product Line", "Model", "Vintage"]) expect(r.itemSpecifics[k]).toBeUndefined();
     expect(r.missingRequired).toEqual([]);
     expect(r.suggestedTitle.length).toBeLessThanOrEqual(80);
     expect(r.measurementsList).toEqual([{ key: "pitToPit", inches: 26, approx: false }, { key: "length", inches: 28, approx: true }]);

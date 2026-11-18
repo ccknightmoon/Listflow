@@ -4,6 +4,7 @@ import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { fetchAspectDefs, defsForClient } from "@/lib/ebay-aspects";
 import { chooseCategory } from "@/lib/ebay-category";
+import { classifyGarment, defsForKind } from "@/lib/garment";
 
 export const runtime = "nodejs";
 
@@ -23,7 +24,9 @@ export async function GET(req: Request) {
       : await chooseCategory({ title: sp.get("title"), itemType: sp.get("itemType") }).catch(() => null);
     const categoryId = given && /^\d+$/.test(given) ? given : pick?.categoryId ?? null;
     if (!categoryId) return NextResponse.json({ categoryId: null, defs: [] });
-    const defs = await fetchAspectDefs(categoryId);
+    // Only aspects that fit the garment (required ones always kept), same as analysis.
+    const kind = classifyGarment(sp.get("itemType"), sp.get("title"));
+    const defs = defsForKind(await fetchAspectDefs(categoryId), kind);
     return NextResponse.json(
       { categoryId, categoryPath: pick?.categoryPath ?? null, categoryNeedsReview: pick?.needsReview ?? false, defs: defsForClient(defs) },
       { headers: { "Cache-Control": "private, max-age=3600" } },

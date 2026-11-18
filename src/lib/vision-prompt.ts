@@ -55,7 +55,7 @@ Respond with ONLY a JSON object (no markdown) in this exact shape:
   "character": "a fictional/cartoon/movie character printed on the item (e.g. 'Mickey Mouse'). NEVER a real person, athlete or team — those go in specifics.Player/Team. Empty if none.",
   "characterFamily": "that character's franchise, e.g. 'Disney', 'Marvel'. Never a sports team. Empty if none.",
   "yearManufactured": "decade range only if a date/copyright/date code is visible — one of: Pre-1960, 1960-1969, 1970-1979, 1980-1989, 1990-1999, 2000-2009, 2010-2019, 2020-2029. Else empty.",
-  "season": "All Seasons, Fall, Spring, Summer or Winter (outerwear is usually Fall/Winter)",
+  "season": "comma-separated, each one of: Fall, Winter, Spring, Summer, All Seasons — e.g. 'Fall, Winter' for outerwear. Never combine with a slash.",
   "measurements": {
     "pitToPit": "TOPS — armpit to armpit from the tape, e.g. '22' (inches). Add ' approx' if the tape is hard to read. Empty if no tape photo.",
     "length": "TOPS — top of shoulder/collar seam to bottom hem",

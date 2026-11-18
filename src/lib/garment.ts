@@ -145,7 +145,7 @@ const FEATURE_CONFLICTS: Partial<Record<GarmentKind, RegExp>> = {
   hat: /^(pockets?|belt loops?|hood(ed)?)$/i,
 };
 
-export function sanitizeForItem(aspects: AspectMap, kind: GarmentKind, opts: { vintageEvidence?: boolean; photoFeatures?: string[] } = {}): { aspects: AspectMap; removed: Array<{ name: string; value: string; why: string }> } {
+export function sanitizeForItem(aspects: AspectMap, kind: GarmentKind, opts: { vintageEvidence?: boolean; photoFeatures?: string[]; requiredAspects?: string[] } = {}): { aspects: AspectMap; removed: Array<{ name: string; value: string; why: string }> } {
   const out: AspectMap = {};
   const removed: Array<{ name: string; value: string; why: string }> = [];
   const people = [...get(aspects, "Player"), ...get(aspects, "Team"), ...get(aspects, "League"), ...get(aspects, "Athlete")]
@@ -153,7 +153,7 @@ export function sanitizeForItem(aspects: AspectMap, kind: GarmentKind, opts: { v
   const sports = kind === "sports-jersey" || people.length > 0;
   for (const [name, values] of Object.entries(aspects)) {
     const n = lc(name);
-    if (!aspectFitsKind(name, kind)) { values.forEach((v) => removed.push({ name, value: v, why: "doesn't apply to this kind of item" })); continue; }
+    if (!aspectFitsKind(name, kind) && !(opts.requiredAspects ?? []).some((r) => lc(r) === n)) { values.forEach((v) => removed.push({ name, value: v, why: "doesn't apply to this kind of item" })); continue; }
     const keep: string[] = [];
     for (const v of values) {
       if (valueContradictsKind(name, v, kind)) { removed.push({ name, value: v, why: "contradicts the item type" }); continue; }
@@ -221,3 +221,11 @@ export function dedupeAspects(aspects: AspectMap, categoryAspectNames: string[])
 
 // Aspects only the photos can tell (the text-only fill step must not invent them).
 export const PHOTO_ONLY_ASPECTS = new Set(["features", "accents", "closure", "pattern", "color", "neckline", "sleeve length", "fabric type", "collar style", "lining material", "jersey number", "signed"]);
+
+/**
+ * The category's aspects that make sense for this garment. eBay-required
+ * aspects are always kept (so a required one is never silently hidden).
+ */
+export function defsForKind<T extends { name: string; required: boolean }>(defs: T[], kind: GarmentKind): T[] {
+  return defs.filter((d) => d.required || aspectFitsKind(d.name, kind));
+}

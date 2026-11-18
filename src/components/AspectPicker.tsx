@@ -5,6 +5,7 @@ import { Check, ChevronDown, Loader2, Search, X } from "lucide-react";
 import Sheet from "@/components/Sheet";
 import { apiFetch } from "@/lib/api";
 import { offerCustom, rankOptions, toggleValue, windowRange } from "@/lib/combobox";
+import { optionsFor } from "@/lib/aspect-fallbacks";
 import type { AspectDef } from "@/lib/item-specifics";
 
 const ROW = 44;
@@ -59,7 +60,10 @@ export default function AspectPicker({
   }, [open, query, def.valuesTruncated, def.name, categoryId]);
 
   const useRemote = !!def.valuesTruncated && !!categoryId && query.trim().length >= 2;
-  const options = useMemo(() => (useRemote && remote) ? remote : rankOptions(def.values, query, 5000), [useRemote, remote, def.values, query]);
+  // eBay's list for this aspect; curated suggestions only for free-text
+  // aspects eBay lists nothing for (also covers older saved analyses).
+  const base = useMemo(() => optionsFor(def).values, [def]);
+  const options = useMemo(() => (useRemote && remote) ? remote : rankOptions(base, query, 5000), [useRemote, remote, base, query]);
   const custom = offerCustom(query, options, freeText);
   const rows: Array<{ kind: "custom"; value: string } | { kind: "opt"; value: string }> = useMemo(
     () => [...(custom ? [{ kind: "custom" as const, value: query.trim() }] : []), ...options.map((v) => ({ kind: "opt" as const, value: v }))],

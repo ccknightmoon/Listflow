@@ -50,8 +50,14 @@ export default function SpecificsEditor({
   const [pickError, setPickError] = useState<string | null>(null);
   const [showMore, setShowMore] = useState(false);
   const [open, setOpen] = useState(true);
-  const defs = useMemo(() => givenDefs ?? fetched?.defs ?? [], [givenDefs, fetched]);
-  const catId = categoryId ?? fetched?.categoryId ?? null;
+  // After "Change category" the new category's list wins until the parent
+  // passes it back in — never a stale list from the previous category.
+  const [changed, setChanged] = useState<{ categoryId: string; defs: AspectDef[] } | null>(null);
+  const catId = changed?.categoryId ?? categoryId ?? fetched?.categoryId ?? null;
+  const defs = useMemo(
+    () => (changed && changed.categoryId === catId ? changed.defs : givenDefs ?? (fetched && (!categoryId || fetched.categoryId === categoryId) ? fetched.defs : [])),
+    [changed, catId, givenDefs, fetched, categoryId],
+  );
 
   // Load eBay's aspect list when the analysis didn't include it (older drafts).
   useEffect(() => {
@@ -81,16 +87,19 @@ export default function SpecificsEditor({
     metaRef.current?.({ categoryId: catId, missingRequired: missingKey ? missingKey.split("|") : [] });
   }, [catId, missingKey]);
   const filled = Object.values(aspects).filter((v) => v?.length).length;
-  const byLower = new Map(defs.map((d) => [d.name.toLowerCase(), d]));
   const valueOf = (name: string) => {
     const key = Object.keys(aspects).find((k) => k.toLowerCase() === name.toLowerCase());
     return key ? aspects[key] ?? [] : [];
   };
 
   const required = defs.filter((d) => d.required);
+  // Only this category's aspects are shown (and sent to eBay). Older saved
+  // extras without eBay metadata appear only while the list isn't loaded.
   const filledOther = [
     ...defs.filter((d) => !d.required && valueOf(d.name).length),
-    ...Object.keys(aspects).filter((k) => !byLower.has(k.toLowerCase()) && aspects[k]?.length).map((k): AspectDef => ({ name: k, required: false, recommended: false, mode: "FREE_TEXT", multi: true, values: [] })),
+    ...(defs.length === 0
+      ? Object.keys(aspects).filter((k) => aspects[k]?.length).map((k): AspectDef => ({ name: k, required: false, recommended: false, mode: "FREE_TEXT", multi: true, values: [] }))
+      : []),
   ];
   const emptyRecommended = defs.filter((d) => !d.required && d.recommended && !valueOf(d.name).length);
 
@@ -165,6 +174,7 @@ export default function SpecificsEditor({
         body: JSON.stringify({ categoryId: c.id, categoryPath: c.path, title, itemType, aspects }),
       });
       setFetched({ categoryId: c.id, categoryPath: c.path, categoryNeedsReview: false, defs: r.aspectDefs ?? [] });
+      setChanged({ categoryId: c.id, defs: r.aspectDefs ?? [] });
       onCategoryChange?.({ categoryId: c.id, categoryPath: c.path, aspects: r.itemSpecifics ?? {}, missingRequired: r.missingRequired ?? [], defs: r.aspectDefs ?? [], issues: r.issues ?? [] });
       setPicking(false);
       setOptions(null);
