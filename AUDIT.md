@@ -300,3 +300,21 @@
 16. Clean up orphaned pre-uploaded photos (periodic sweep). *(S)*
 17. Split Batch Upload into steps (PLAN-ux 3.1). *(L)*
 18. Per-seller SKU uniqueness (LAUNCH-READINESS P0 #2). *(S, migration)*
+
+---
+
+## Fix status (Nov 17, 2026 — branch `fix/audit-p1-p2`)
+
+| Item | Status |
+|---|---|
+| P1 Offers coverage | ✅ Seller-wide `GetBestOffers` (no ItemID), 200/page, every page. Falls back to the old per-listing lookup (flagged "partial") only if eBay refuses. Known eBay caveat: offers already countered by the seller may not appear in the seller-wide call. |
+| P2 Buyer questions | ✅ `GetMemberMessages` asks for 200/page and reads every page (cap 10 pages = 2,000 questions). |
+| update-price floor | ✅ Server rejects < $0.99 and < the draft's cost; draft update scoped to `user_id`. |
+| `/api/sentry-test` | ✅ Deleted. |
+| Email digest toggle | ✅ Shown as "Email alerts (coming soon)"; flip `EMAIL_DIGEST_LIVE` in settings/page.tsx once a scheduler exists. |
+| Unused drag-and-drop code | ✅ Removed (lint warnings 28 → 15). |
+| Legacy heavy/flat-rate state in Batch Upload | ⏸ Left in place: it still feeds the price suggestion, the saved-session restore and two API payloads, so removing it isn't low-risk. Do it with the Batch Upload split (PLAN-ux 3.1). |
+| P2 Dashboard | ✅ One `/api/dashboard/summary` request, cached per seller for 2 minutes (bypass with `?fresh=1`, cleared after answering an offer or question). Stale count uses an oldest-first sorted binary search (~7 tiny calls) instead of pulling every listing. `/api/dashboard/stats` is no longer used by the app. |
+| Route tests | ✅ `/api/ebay/list` (auth, validation, user scoping, idempotent retry, never calls eBay on bad input), `/api/ebay/offers` (450 listings, offers past the old cap, fallback), `/api/ebay/update-price` (floors, scoping). |
+| Rate limiting | Code ready; also accepts Vercel's `KV_REST_API_*` names. Needs Sel to create the Upstash database. |
+| Password reset redirect | Needs Sel (Supabase dashboard; no connector tool for auth URL settings). |
