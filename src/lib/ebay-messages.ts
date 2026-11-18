@@ -21,10 +21,20 @@ export interface BuyerQuestion {
   itemPrice?: number | null;
 }
 
-function makeGetMemberMessagesXml(): string {
-  const now = new Date();
+// eBay returns 25 messages per page by default; ask for the max (200) and
+// walk every page so a busy week doesn't silently hide questions.
+const MESSAGES_PAGE_SIZE = 200;
+const MESSAGES_MAX_PAGES = 10;
+
+export function makeGetMemberMessagesXml(page = 1, now = new Date()): string {
   const start = new Date(now.getTime() - QUESTION_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  return `<?xml version="1.0" encoding="utf-8"?><GetMemberMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents"><MailMessageType>AskSellerQuestion</MailMessageType><MessageStatus>Unanswered</MessageStatus><StartCreationTime>${start.toISOString()}</StartCreationTime><EndCreationTime>${now.toISOString()}</EndCreationTime></GetMemberMessagesRequest>`;
+  return `<?xml version="1.0" encoding="utf-8"?><GetMemberMessagesRequest xmlns="urn:ebay:apis:eBLBaseComponents"><MailMessageType>AskSellerQuestion</MailMessageType><MessageStatus>Unanswered</MessageStatus><StartCreationTime>${start.toISOString()}</StartCreationTime><EndCreationTime>${now.toISOString()}</EndCreationTime><Pagination><EntriesPerPage>${MESSAGES_PAGE_SIZE}</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination></GetMemberMessagesRequest>`;
+}
+
+/** TotalNumberOfPages from a paginated Trading response (1 if absent). */
+export function parseTotalPages(body: string): number {
+  const n = parseInt(xmlFind(xmlFind(body, "PaginationResult"), "TotalNumberOfPages") || "1", 10);
+  return Number.isFinite(n) && n > 0 ? n : 1;
 }
 
 // Single call covering every listing at once (unlike GetBestOffers, which
@@ -58,7 +68,8 @@ export function parseMemberMessages(body: string): BuyerQuestion[] {
 }
 
 export async function fetchUnansweredQuestions(): Promise<{ questions: BuyerQuestion[]; error?: string; reconnect?: boolean }> {
-  const { body } = await tradingRequest("GetMemberMessages", makeGetMemberMessagesXml());
+  const now = new Date();
+  const { body } = await tradingRequest("GetMemberMessages", makeGetMemberMessagesXml(1, now));
 
   if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) {
     const errMsg = xmlFind(body, "LongMessage") || xmlFind(body, "ShortMessage") || "Couldn't load buyer questions.";
@@ -71,7 +82,14 @@ export async function fetchUnansweredQuestions(): Promise<{ questions: BuyerQues
   }
 
   const questions = parseMemberMessages(body);
-  return { questions };
+  const pages = Math.min(parseTotalPages(body), MESSAGES_MAX_PAGES);
+  for (let page = 2; page <= pages; page++) {
+    const next = await tradingRequest("GetMemberMessages", makeGetMemberMessagesXml(page, now));
+    if (!next.body.includes("<Ack>Success</Ack>") && !next.body.includes("<Ack>Warning</Ack>")) break;
+    questions.push(...parseMemberMessages(next.body));
+  }
+  const seen = new Set<string>();
+  return { questions: questions.filter((q) => (seen.has(q.messageId) ? false : (seen.add(q.messageId), true))) };
 }
 
 interface RespondToQuestionArgs {
