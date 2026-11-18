@@ -28,7 +28,8 @@ import {
 import { Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
 import { apiFetch } from "@/lib/api";
-import { AiResult, formatMeasurements } from "@/lib/ai-result";
+import { AiResult, formatMeasurements, storedSpecificsFrom, type StoredSpecifics } from "@/lib/ai-result";
+import SpecificsEditor from "@/components/SpecificsEditor";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
@@ -221,6 +222,10 @@ export default function NewListingPage() {
 
   const fileInput = useRef<HTMLInputElement | null>(null);
   const isDesktop = useIsDesktop();
+  // eBay item specifics for the chosen category (AI-filled, seller-editable)
+  // and which required ones are still empty -- see SpecificsEditor.
+  const [specifics, setSpecifics] = useState<StoredSpecifics | null>(null);
+  const [missingSpecifics, setMissingSpecifics] = useState<string[]>([]);
   const draggedPhoto = useRef<number | null>(null);
   const photoEditorRef = useRef<HTMLDivElement | null>(null);
   const dragPointer = useRef<{ x: number; y: number } | null>(null);
@@ -432,6 +437,8 @@ export default function NewListingPage() {
         data.description = measLine;
       }
       setAiResult(data);
+      setSpecifics(storedSpecificsFrom(data));
+      setMissingSpecifics(data.missingRequired ?? []);
       setTitle(data.suggestedTitle ?? title);
       setCondition(data.condition ?? condition);
       setFlaws(data.flaws ?? flaws);
@@ -570,6 +577,7 @@ export default function NewListingPage() {
         characterFamily: aiResult?.characterFamily ?? null,
         yearManufactured: aiResult?.yearManufactured ?? null,
         season: aiResult?.season ?? null,
+        ...(specifics ? { itemSpecifics: specifics } : {}),
         storeCategoryId,
         storeCategoryName,
         costBasis: cost ? Number(cost) : null,
@@ -617,6 +625,7 @@ export default function NewListingPage() {
       price: result?.suggestedPrice ?? (customPrice ? Number(customPrice) : null),
       condition,
       shippingMode,
+      missingRequiredSpecifics: missingSpecifics,
     });
     if (!readiness.ready) {
       setListError(`Before listing: ${readiness.blockers.join(" • ")}`);
@@ -702,6 +711,8 @@ export default function NewListingPage() {
     setFlaws("");
     setResult(null);
     setAiResult(null);
+    setSpecifics(null);
+    setMissingSpecifics([]);
     setError(null);
     setSaveStatus("idle");
     setSavedDraftId(null);
@@ -1049,6 +1060,20 @@ export default function NewListingPage() {
           )}
         </div>
       )}
+
+      {aiResult && (specifics || aiResult.aspectDefs?.length) ? (
+        <SpecificsEditor
+          aspects={specifics?.aspects ?? {}}
+          defs={aiResult.aspectDefs ?? null}
+          categoryId={specifics?.categoryId ?? aiResult.categoryId ?? null}
+          title={title}
+          itemType={aiResult.itemType}
+          onChange={(aspects, meta) => {
+            setSpecifics((prev) => ({ categoryId: meta.categoryId ?? prev?.categoryId ?? null, aspects, measurements: prev?.measurements ?? [] }));
+            setMissingSpecifics(meta.missingRequired);
+          }}
+        />
+      ) : null}
 
       {(pricingLoading || result) && (
         <div className="card p-4">

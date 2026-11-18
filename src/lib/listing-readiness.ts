@@ -5,6 +5,8 @@ export type ListingReadinessInput = {
   condition?: string | null;
   shippingMode?: string | null;
   shippingPolicyConfigured?: boolean;
+  /** eBay-required item specifics still empty for the chosen category. */
+  missingRequiredSpecifics?: string[];
 };
 
 export type ListingReadiness = {
@@ -26,6 +28,9 @@ export function getListingReadiness(input: ListingReadinessInput): ListingReadin
   }
   if (!input.condition?.trim()) blockers.push("Choose a condition");
   if (!input.shippingMode) blockers.push("Choose a shipping method");
+  if (input.missingRequiredSpecifics && input.missingRequiredSpecifics.length > 0) {
+    blockers.push(`Fill eBay's required specifics: ${input.missingRequiredSpecifics.join(", ")}`);
+  }
   if (input.shippingPolicyConfigured === false) {
     blockers.push("Finish the shipping policy in eBay settings");
   }
