@@ -469,6 +469,9 @@ export default function SalesPage() {
 
       {view && c && feed && (
         <>
+          {/* Desktop (lg): 3 columns — profit | where the money goes | KPIs + chart. Phones: one column, same order as before. */}
+          <div className="lg:grid lg:grid-cols-3 lg:gap-4 lg:items-start">
+          <div className="min-w-0">
           {/* Hero: profit first, money from eBay Finances */}
           {fin && (
             <div className="card p-4 mb-3">
@@ -614,6 +617,7 @@ export default function SalesPage() {
                             type="number" inputMode="decimal" min="0" step="0.01" placeholder="$0.00"
                             value={costInputs[s.key] ?? ""}
                             onChange={(e) => setCostInputs((p) => ({ ...p, [s.key]: e.target.value }))}
+                            onKeyDown={(e) => { if (e.key === "Enter" && (costInputs[s.key] ?? "").trim() && costSaving !== s.key) { e.preventDefault(); void saveCost(s); } }}
                             className="input w-20 text-xs py-1 px-2"
                             aria-label={`Cost for ${s.title}`}
                           />
@@ -634,6 +638,8 @@ export default function SalesPage() {
             </div>
           )}
 
+          </div>
+          <div className="min-w-0">
           {/* Where the money goes — tap a line to see the transactions behind it */}
           {fin && (() => {
             type WRow = { key: string; label: string; cents: number; detail: "ledger" | "costs" | null; txIds?: string[]; part?: boolean; note?: string };
@@ -752,6 +758,8 @@ export default function SalesPage() {
             );
           })()}
 
+          </div>
+          <div className="min-w-0">
           {/* KPI tiles */}
           <div className="grid grid-cols-2 gap-2 mb-3">
             {[
@@ -833,8 +841,10 @@ export default function SalesPage() {
                         key={b.start}
                         type="button"
                         onClick={() => setSelectedBar(active ? null : idx)}
-                        className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0 h-full"
+                        className="flex-1 flex flex-col items-center justify-end gap-1 min-w-0 h-full rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
                         aria-label={`${shortDate(b.start)}: ${money(b.total)}`}
+                        aria-pressed={active}
+                        title={`${shortDate(b.start)}: ${money(b.total)} — click for details`}
                       >
                         {showLabel && (
                           <span className="text-[10px] font-semibold tabular-nums whitespace-nowrap" style={{ color: active ? "var(--accent)" : "var(--text-secondary)" }}>
@@ -876,6 +886,10 @@ export default function SalesPage() {
             );
           })()}
 
+          </div>
+          </div>
+          <div className="lg:grid lg:grid-cols-3 lg:gap-4 lg:items-start">
+          <div className="min-w-0">
           {/* Shipping: legacy free-shipping vs calculated, no nagging */}
           {fin?.hasLedger && view.sales.length > 0 && (
             <div className="card p-4 mb-3">
@@ -940,6 +954,8 @@ export default function SalesPage() {
             </div>
           )}
 
+          </div>
+          <div className="min-w-0">
           {/* Profit by category */}
           {fin && fin.cats.length > 0 && (() => {
             const anyMargin = fin.cats.some((r) => r.marginPercent != null);
@@ -1009,6 +1025,8 @@ export default function SalesPage() {
             </div>
           )}
 
+          </div>
+          <div className="min-w-0">
           {/* Stale listings */}
           {fin && feed.active.length > 0 && (() => {
             const total = fin.stale.bands.reduce((a, b) => a + b.count, 0) || 1;
@@ -1047,6 +1065,8 @@ export default function SalesPage() {
             );
           })()}
 
+          </div>
+          </div>
           {view.sales.length === 0 && (
             <div className="card p-8 text-center mb-4">
               <p className="text-sm text-[var(--text-secondary)]">No sales in the last {days} days.</p>
