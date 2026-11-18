@@ -24,6 +24,7 @@ export default function SwipeRow({ actions, children, className }: { actions: Sw
   const suppressClick = useRef(false);
   // Mouse users (a narrow desktop window still gets these cards): the same
   // actions via right-click, since a mouse can't swipe.
+  const lastPointer = useRef<string>("");
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
 
   const colors = { accent: "var(--accent)", danger: "var(--danger)", neutral: "var(--text-tertiary)" };
@@ -32,7 +33,12 @@ export default function SwipeRow({ actions, children, className }: { actions: Sw
   return (
     <div
       className={`relative overflow-hidden rounded-[18px] ${className ?? ""}`}
-      onContextMenu={(e) => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }); }}
+      onPointerDownCapture={(e) => { lastPointer.current = e.pointerType; }}
+      onContextMenu={(e) => {
+        if (lastPointer.current !== "mouse") return; // phones: long-press untouched
+        e.preventDefault();
+        setMenuAt({ x: e.clientX, y: e.clientY });
+      }}
     >
       <RowMenu at={menuAt} onClose={() => setMenuAt(null)} actions={actions.map((a) => ({ label: a.label, icon: a.icon, tone: a.tone, onAction: a.onAction }))} />
       {/* Only drawn while revealed: cards are translucent glass, so a
