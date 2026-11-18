@@ -2,6 +2,7 @@
 
 import { confirmAction } from "@/lib/confirm";
 import { takePendingPhotos } from "@/lib/pending-photos";
+import PhotoDropZone from "@/components/PhotoDropZone";
 import { getPublishQueue } from "@/lib/publish-queue";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -1991,9 +1992,13 @@ export default function BatchUploadPage() {
             </div>
           )}
 
+          <PhotoDropZone onFiles={(files) => void handleFilesSelected(files)} label="Drop photos to add them to this batch">
           <div
             onClick={() => fileInput.current?.click()}
-            className="card border-dashed text-center py-10 mb-4 cursor-pointer"
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.current?.click(); } }}
+            className="card border-dashed text-center py-10 lg:py-16 mb-4 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
           >
             <input
               ref={fileInput}
@@ -2009,8 +2014,10 @@ export default function BatchUploadPage() {
               <br />
               Upload in order: front of item 1, its other shots, then front
               of item 2, and so on
+              <span className="hidden lg:block mt-2">On a computer: click to choose files, drag them here, or paste with ⌘V / Ctrl+V</span>
             </p>
           </div>
+          </PhotoDropZone>
 
           {photos.length > 0 && (
             <>
@@ -2036,7 +2043,7 @@ export default function BatchUploadPage() {
                   {manualDividers.size + 1} item{manualDividers.size > 0 ? "s" : ""} marked
                 </p>
               )}
-              <div className="grid grid-cols-4 gap-2 mb-4">
+              <div className="grid grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
                 {photos.map((p, i) => {
                   const isDivider = manualDividers.has(i);
                   return (
@@ -2122,7 +2129,7 @@ export default function BatchUploadPage() {
             </div>
           )}
 
-          <div className="flex flex-col gap-4 mb-4">
+          <div className="flex flex-col gap-4 mb-4 lg:grid lg:grid-cols-2 lg:items-start">
             {groups.map((group, gIdx) => (
               <div
                 key={gIdx}
@@ -2536,6 +2543,8 @@ export default function BatchUploadPage() {
               </div>
             );
           })()}
+          {/* Desktop (lg): item cards two-up. Phones: same single column. */}
+          <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:items-start">
           {results.map((result, i) => {
             const group = groups[i] ?? [];
             const groupPhotos = group.map((idx) => photos[idx]?.previewUrl).filter(Boolean) as string[];
@@ -3026,6 +3035,7 @@ export default function BatchUploadPage() {
               </div>
             );
           })}
+          </div>
         </div>
       )}
     </main>
