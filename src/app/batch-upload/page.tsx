@@ -37,7 +37,8 @@ import {
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
 import { apiFetch } from "@/lib/api";
-import { AiResult as BaseAiResult, formatMeasurements } from "@/lib/ai-result";
+import { AiResult as BaseAiResult, formatMeasurements, storedSpecificsFrom } from "@/lib/ai-result";
+import SpecificsEditor from "@/components/SpecificsEditor";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import { estimateIsHeavy, estimateShipping, type ShippingMode } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
@@ -1498,6 +1499,7 @@ export default function BatchUploadPage() {
         characterFamily: result.characterFamily ?? null,
         yearManufactured: result.yearManufactured ?? null,
         season: result.season ?? null,
+        ...(storedSpecificsFrom(result) ? { itemSpecifics: storedSpecificsFrom(result) } : {}),
         storeCategoryId: storeCategoryChoice[index]?.id ?? null,
         storeCategoryName: storeCategoryChoice[index]?.path ?? null,
         isHeavy: shippingModes[index] === "buyer_pays",
@@ -1621,6 +1623,7 @@ export default function BatchUploadPage() {
       price: customPrices[index] ? Number(customPrices[index]) : suggestedPrice,
       condition: result.condition,
       shippingMode: shippingModes[index] ?? defaultShippingMode,
+      missingRequiredSpecifics: result.missingRequired,
     });
     if (!readiness.ready) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
@@ -2707,6 +2710,7 @@ export default function BatchUploadPage() {
               price: customPrices[i] ? Number(customPrices[i]) : suggestion.suggestedPrice,
               condition: result.condition,
               shippingMode: shippingModes[i] ?? defaultShippingMode,
+              missingRequiredSpecifics: result.missingRequired,
             });
 
             return (
@@ -2961,6 +2965,20 @@ export default function BatchUploadPage() {
                       }}
                     />
                   </div>
+
+                  {(result.itemSpecifics || result.aspectDefs?.length) ? (
+                    <SpecificsEditor
+                      aspects={result.itemSpecifics ?? {}}
+                      defs={result.aspectDefs ?? null}
+                      categoryId={result.categoryId ?? null}
+                      title={result.suggestedTitle}
+                      itemType={result.itemType}
+                      disabled={saveStatus[i] === "saved"}
+                      onChange={(aspects, meta) =>
+                        setResults((prev) => prev.map((r, j) => (j === i ? { ...r, itemSpecifics: aspects, missingRequired: meta.missingRequired, categoryId: meta.categoryId ?? r.categoryId } : r)))
+                      }
+                    />
+                  ) : null}
 
                   <div className="flex items-baseline gap-2 mb-2 flex-wrap">
                     <p className="text-2xl font-medium">${suggestion.suggestedPrice}</p>
