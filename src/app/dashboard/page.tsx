@@ -205,10 +205,13 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="relative grid flex-1 grid-cols-[1.3fr_1fr] gap-2.5 mb-2.5">
+      {/* Phone: the familiar 2-column stack. Desktop (lg): KPI tiles in one
+          row, a wide weekly chart under them, actions below, and Needs
+          attention as a side panel on the right. */}
+      <div className="relative grid flex-1 grid-cols-[1.3fr_1fr] gap-2.5 mb-2.5 lg:flex-none lg:grid-cols-12 lg:gap-4 lg:content-start">
         <Link
           href="/sales"
-          className="card d1 stagger row-span-2 p-4 flex flex-col active:scale-[.97]"
+          className="card d1 stagger row-span-2 p-4 flex flex-col active:scale-[.97] lg:row-span-1 lg:col-start-1 lg:col-span-2 lg:row-start-1 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
           <div>
@@ -225,7 +228,7 @@ export default function DashboardPage() {
               once data loads); it only draws bars once there's real trend
               data to show, and stays an empty spacer otherwise — same look
               as before for a brand-new or not-yet-loaded store. */}
-          <div className="flex-1 flex flex-col justify-center min-h-0 my-1">
+          <div className="flex-1 flex flex-col justify-center min-h-0 my-1 lg:hidden">
             {trend && trend.totals.some((t) => t > 0) && (
               <>
                 <p className="text-[9px] font-bold mb-1.5" style={{ color: "var(--text-tertiary)" }}>
@@ -261,15 +264,22 @@ export default function DashboardPage() {
           </div>
 
           {weeklySales !== null && weeklySales > 0 && (
-            <p className="text-[11.5px] font-bold mt-2 flex items-center gap-1" style={{ color: "var(--success)" }}>
+            <p className="text-[11.5px] font-bold mt-2 flex items-center gap-1 lg:hidden" style={{ color: "var(--success)" }}>
               <TrendingUp className="w-3.5 h-3.5" /> {weeklySales} sold this week
             </p>
           )}
         </Link>
 
         <Link
+          href="/sales"
+          className="hidden lg:block card d2 stagger p-4 lg:col-start-3 lg:col-span-2 lg:row-start-1 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+        >
+          <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }}>Sold this week</p>
+          <p className="font-display font-extrabold text-3xl mt-1.5">{weeklySales !== null ? weeklySales : "—"}</p>
+        </Link>
+        <Link
           href="/drafts"
-          className="card d2 stagger p-3.5 active:scale-[.97]"
+          className="card d2 stagger p-3.5 active:scale-[.97] lg:p-4 lg:col-start-5 lg:col-span-2 lg:row-start-1 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
           <p className="text-[10px] font-bold" style={{ color: "var(--text-tertiary)" }}>DRAFTS</p>
@@ -277,29 +287,32 @@ export default function DashboardPage() {
         </Link>
         <Link
           href="/store"
-          className="card d3 stagger p-3.5 active:scale-[.97]"
+          className="card d3 stagger p-3.5 active:scale-[.97] lg:p-4 lg:col-start-7 lg:col-span-2 lg:row-start-1 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
           <p className="text-[10px] font-bold" style={{ color: "var(--text-tertiary)" }}>ACTIVE</p>
           <p className="font-display font-extrabold text-xl mt-1.5">{active !== null ? active : "—"}</p>
         </Link>
 
+        <WeeklyChart trend={trend} trendMax={trendMax} />
+
         <Link
           href="/new-listing"
-          className="btn btn-primary d4 stagger col-span-2 py-3.5 text-[14.5px]"
+          className="btn btn-primary d4 stagger col-span-2 py-3.5 text-[14.5px] lg:col-start-1 lg:col-span-3 lg:row-start-3 lg:h-full"
           style={{ boxShadow: "0 16px 28px -16px var(--accent-tint)" }}
         >
           <Plus className="w-4 h-4" />
           New listing
         </Link>
 
-        <div className="col-span-2 grid grid-cols-4 gap-2">
+        <div className="col-span-2 grid grid-cols-4 gap-2 lg:col-start-4 lg:col-span-5 lg:row-start-3">
           <ActionTile href="/batch-upload" viewTransitionName="batch-panel" icon={ImagePlus} title="Batch upload" delay="d5" />
           <ActionTile href="/drafts" viewTransitionName="drafts-panel" icon={FileText} title="Review drafts" delay="d6" />
           <ActionTile href="/store" viewTransitionName="store-panel" icon={BarChart2} title="View store" delay="d6" />
           <ActionTile href="/sales" viewTransitionName="sales-panel" icon={TrendingUp} title="Sales history" delay="d6" />
         </div>
 
+        <div className="col-span-2 lg:col-start-9 lg:col-span-4 lg:row-start-1 lg:row-span-3 lg:self-start">
         <NeedsAttention
           counts={{
             toShip: shipCount,
@@ -311,12 +324,52 @@ export default function DashboardPage() {
             stale: staleListingsCount,
           }}
         />
+        </div>
       </div>
 
       {!statsLoaded && (
         <p className="text-center text-xs mt-3" style={{ color: "var(--text-tertiary)" }}>Loading your store…</p>
       )}
     </main>
+  );
+}
+
+// Desktop-only: the weekly revenue trend at full width, with week labels.
+// Hover (or keyboard focus) on a bar shows that week's exact total.
+function WeeklyChart({ trend, trendMax }: { trend: ReturnType<typeof bucketRevenue> | null; trendMax: number }) {
+  const has = !!trend && trend.totals.some((t) => t > 0);
+  return (
+    <Link
+      href="/sales"
+      className="hidden lg:flex card d4 stagger p-5 flex-col lg:col-start-1 lg:col-span-8 lg:row-start-2 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+      aria-label="Revenue by week — open Sales"
+    >
+      <div className="flex items-baseline justify-between mb-4">
+        <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }}>Revenue by week</p>
+        <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>Last {trend?.totals.length ?? 4} weeks · open Sales for details</p>
+      </div>
+      {has ? (
+        <div className="flex items-end gap-4 h-44">
+          {trend!.totals.map((t, i) => {
+            const isCurrent = i === trend!.totals.length - 1;
+            const start = new Date(trend!.bucketStarts[i]);
+            const label = isCurrent ? "This week" : start.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            return (
+              <div key={i} className="group flex-1 flex flex-col items-center justify-end gap-1.5 h-full min-w-0" title={`${label}: ${formatMoney(t)}`}>
+                <span className="text-xs font-semibold tabular-nums" style={{ color: isCurrent ? "var(--accent)" : "var(--text-secondary)" }}>{formatMoneyShort(t)}</span>
+                <div
+                  className="w-full max-w-[120px] rounded-t-md transition-opacity group-hover:opacity-100"
+                  style={{ height: `${Math.max(4, (t / trendMax) * 130)}px`, background: "var(--accent)", opacity: isCurrent ? 1 : 0.5 }}
+                />
+                <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{label}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="h-44 flex items-center justify-center text-sm" style={{ color: "var(--text-tertiary)" }}>No sales in the last 4 weeks yet.</div>
+      )}
+    </Link>
   );
 }
 
