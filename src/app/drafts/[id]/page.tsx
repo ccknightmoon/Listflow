@@ -1125,7 +1125,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           ))}
           {reanalyzePhotos.length < 3 && (
-            <label className="w-16 h-16 rounded-lg border-2 border-dashed border-[var(--border)] flex flex-col items-center justify-center cursor-pointer hover:border-[var(--accent)] transition-colors">
+            <label tabIndex={0} role="button" aria-label="Add a photo to re-analyze" onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.querySelector("input")?.click(); } }} className="w-16 h-16 rounded-lg border-2 border-dashed border-[var(--border)] flex flex-col items-center justify-center cursor-pointer hover:border-[var(--accent)] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]">
               <Camera className="w-5 h-5 text-[var(--text-tertiary)]" />
               <input type="file" accept="image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleAddReanalyzePhoto(e.target.files[0])} />
             </label>
