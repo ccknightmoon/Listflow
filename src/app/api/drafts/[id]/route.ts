@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { sanitizeStoredSpecifics, isMissingColumnError } from "@/lib/item-specifics";
 import { isValidCostBasis } from "@/lib/profit";
 
 // Same guard as POST /api/drafts -- see that file for why isHeavy/
@@ -77,9 +78,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Invalid draft version." }, { status: 400 });
   }
 
-  let updateQuery = auth.supabase
-    .from("drafts")
-    .update({
+  const specifics = body.itemSpecifics !== undefined ? sanitizeStoredSpecifics(body.itemSpecifics) : undefined;
+  const patch = {
       ...(body.title !== undefined && { title: body.title }),
       ...(body.brand !== undefined && { brand: body.brand }),
       ...(body.color !== undefined && { color: body.color }),
@@ -115,11 +115,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.isHeavy !== undefined && { is_heavy: body.isHeavy }),
       ...(body.shippingCost !== undefined && { shipping_cost: body.shippingCost }),
       ...(body.shippingMode !== undefined && { shipping_mode: "calculated" }), // calculated-only
-    })
-    .eq("id", id)
-    .eq("user_id", auth.user.id);
-  if (expectedUpdatedAt) updateQuery = updateQuery.eq("updated_at", expectedUpdatedAt);
-  const { data, error } = await updateQuery.select().maybeSingle();
+      ...(specifics !== undefined && { item_specifics: specifics }),
+  };
+  const run = (values: Record<string, unknown>) => {
+    let q = auth.supabase.from("drafts").update(values).eq("id", id).eq("user_id", auth.user!.id);
+    if (expectedUpdatedAt) q = q.eq("updated_at", expectedUpdatedAt);
+    return q.select().maybeSingle();
+  };
+  let { data, error } = await run(patch);
+  // Migration 027 not applied yet: save the rest instead of failing.
+  if (error && isMissingColumnError(error, "item_specifics")) {
+    const { item_specifics: _drop, ...rest } = patch as typeof patch & { item_specifics?: unknown };
+    void _drop;
+    ({ data, error } = await run(rest));
+  }
 
   if (error) {
     if (error.code === "23505" && error.message.toLowerCase().includes("custom_sku")) {

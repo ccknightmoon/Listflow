@@ -3,8 +3,13 @@ import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
 import { ITEM_VISION_PROMPT } from "@/lib/vision-prompt";
 import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
+import { requireEbayConnection } from "@/lib/ebay-connection";
+import { ebayContext } from "@/lib/ebay-request-context";
+import { enrichVisionResult } from "@/lib/listing-enrich";
 
 export const runtime = "nodejs";
+// Vision + category specifics fill can take a while on big photo sets.
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
@@ -49,7 +54,8 @@ export async function POST(req: NextRequest) {
   try {
     const data = await openAIPost(apiKey, {
       model: "gpt-4o-mini",
-      max_tokens: 1000,
+      max_tokens: 2000,
+      response_format: { type: "json_object" },
       messages: [
         {
           role: "user",
@@ -71,7 +77,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json(parsed);
+    // Category item specifics, measurements, fitted title (listing quality).
+    const connection = await requireEbayConnection(auth).catch(() => null);
+    const enriched = await enrichVisionResult(
+      apiKey,
+      parsed,
+      connection ? (fn) => ebayContext.run(connection, fn) : null,
+    );
+    return NextResponse.json(enriched);
   } catch (err) {
     return NextResponse.json(
       { error: `Request failed: ${(err as Error).message}` },

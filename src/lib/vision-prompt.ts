@@ -13,41 +13,79 @@
 // types, the eBay aspect mapping, the drafts table — needed to change),
 // only the per-field guidance now branches on what kind of item this
 // actually is, with clothing fields explicitly left empty for non-garments.
-export const ITEM_VISION_PROMPT = `You are helping a reseller list a secondhand item on eBay.
-This reseller handles clothing as well as jewelry and accessories (necklaces,
-earrings, rings, bracelets, belts, wallets, hats, sunglasses, scarves) — first
-work out which of those this actually is, then fill in the fields below
-accordingly. Several fields only make sense for clothing; leave those as an
-empty string for jewelry/accessories rather than forcing a garment-style
-answer onto them.
+//
+// Nov 2026 (listing quality): also returns department, a transcription of
+// every readable tag, structured measurements (with "approx" when the tape
+// is unclear), and a "specifics" object of common eBay aspects. The rule
+// throughout: only what is VISIBLE in the photos — leave it empty rather
+// than guess. A second, text-only step (src/lib/listing-enrich.ts) maps
+// these facts onto the exact aspects eBay wants for the chosen category.
+export const ITEM_VISION_PROMPT = `You are an expert eBay reseller writing a listing for a secondhand item.
+The reseller sells clothing plus jewelry and accessories (necklaces, earrings,
+rings, bracelets, belts, wallets, hats, sunglasses, scarves). First work out
+what the item is, then fill the fields below.
 
-Look at these photos (front/back, measurements or close-ups, and any flaw
-close-ups) and respond with ONLY a JSON object (no markdown, no extra text)
-in this exact shape:
+GOLDEN RULE: only state what you can SEE in the photos (item, tags, labels,
+prints, tape measure). If something isn't visible, use an empty string. Never
+guess a brand, size, material %, country, era, team or player.
+
+Photos usually come as: front, back, tag/label close-ups, measurements laid
+flat with a tape measure, then flaw close-ups.
+
+Respond with ONLY a JSON object (no markdown) in this exact shape:
 
 {
-  "itemType": "eBay Type value — clothing e.g. 'T-Shirt', 'Hoodie', 'Jeans', 'Jacket', 'Shorts', 'Sweatshirt', 'Polo', 'Vest'; jewelry/accessories e.g. 'Necklace', 'Pendant Necklace', 'Stud Earrings', 'Bracelet', 'Ring', 'Belt', 'Wallet', 'Sunglasses', 'Baseball Cap', 'Scarf'",
-  "brand": "brand name visible on item/tag, or 'Unbranded' if none",
-  "color": "primary color, e.g. White, Black, Blue, Red, Grey, Green, Brown, Beige, Gold, Silver",
-  "size": "CLOTHING/SHOES: size from tag/label if visible, e.g. S, M, L, XL, XXL, 32x30, or a shoe size like 9.5. JEWELRY/ACCESSORIES: ring size or adjustable-length if marked (e.g. 'Size 7', 'Adjustable'), otherwise 'One Size'. 'Unknown' if nothing is visible or size doesn't apply (e.g. a necklace with no marked length).",
-  "condition": "one of: New with tags, New without tags, Excellent used, Good - minor flaws, Fair - notable flaws",
-  "flaws": "specific visible flaws — fabric: stains, holes, fading, pilling; jewelry/accessories: scratches, tarnish, missing stones, broken clasp, scuffed leather. Empty string if none.",
-  "vintage": "'Yes' if the item appears to be from before 2000, otherwise 'No'",
-  "style": "CLOTHING ONLY — eBay Style value, one of: Graphic Tee, Polo, Henley, V-Neck, Crewneck, Relaxed Fit, Athletic, Activewear, Workwear, Preppy, Casual. Empty string for jewelry/accessories or if none apply.",
-  "material": "CLOTHING: primary fabric — one of Cotton, Polyester, Denim, Fleece, Wool, Nylon, Linen, Velvet, Corduroy, Silk, Synthetic, or a blend e.g. Cotton/Polyester. JEWELRY/ACCESSORIES: the actual material — e.g. Gold Tone, Sterling Silver, Cubic Zirconia, Pearl, Leather, Acrylic, Metal. Empty string if unknown.",
-  "sleeveLength": "TOPS ONLY — one of: Short Sleeve, Long Sleeve, Sleeveless, 3/4 Sleeve. Empty string for bottoms/outerwear/jewelry/accessories.",
-  "neckline": "TOPS ONLY — one of: Crew Neck, V-Neck, Hooded, Turtleneck, Mock Neck, Collared. Empty string for bottoms/outerwear/jewelry/accessories.",
-  "fit": "CLOTHING ONLY — one of: Regular, Slim, Relaxed, Oversized, Athletic. Empty string for jewelry/accessories.",
-  "pattern": "eBay Pattern value — one of: Graphic Print, Solid, Striped, Plaid, Floral, Camouflage, Tie Dye, Checkered, Abstract. Use 'Graphic Print' for items with text, logos, or character prints. Applies to scarves/patterned accessories too; empty string if plain or not applicable (most jewelry).",
-  "theme": "comma-separated eBay Theme values that apply, e.g. '90s', 'Vintage', 'Sports', 'Music', 'TV & Movie', 'Holiday', 'Halloween', 'Military', 'Animal', 'Nature', 'Humor'. Empty string if none.",
-  "character": "specific character name if item features one, e.g. 'Mickey Mouse', 'SpongeBob', 'Bugs Bunny', 'Stitch', 'Tupac'. Empty string if no character.",
-  "characterFamily": "franchise/brand of character if any, e.g. 'Disney', 'Nickelodeon', 'Looney Tunes', 'Marvel', 'DC Comics'. Empty string if no character.",
-  "yearManufactured": "estimated decade range — one of: Pre-1960, 1960-1969, 1970-1979, 1980-1989, 1990-1999, 2000-2009, 2010-2019, 2020-2029. Base on style, font, printing technique, tag style, or (for jewelry) design era. Empty string if truly unknown.",
-  "season": "one of: All Seasons, Fall, Spring, Summer, Winter. Default to 'All Seasons' for most clothing and for jewelry; use the actual season for weather-specific accessories like a winter scarf or summer sunhat.",
-  "pitToPit": "TOPS ONLY — armpit to armpit (chest width) read from the measuring tape in the photo, e.g. '22 inches'. Read the tape carefully. Empty string if no tape visible, not a top, or unclear.",
-  "length": "TOPS ONLY — shoulder seam to bottom hem read from the measuring tape, e.g. '28 inches'. Empty string if not visible or not a top.",
-  "waist": "BOTTOMS ONLY — waist measurement from tape. If tape is folded flat across the waistband, double the value shown. Return the full circumference, e.g. '32 inches'. Empty string if not a bottom or not visible.",
-  "inseam": "BOTTOMS ONLY — inseam length read from tape, e.g. '30 inches'. Empty string if not visible or not a bottom.",
-  "description": "2-3 sentences, buyer-facing. Describe what the item actually is (do not describe a necklace as if it were a garment) — for jewelry/accessories mention the metal/stone/material and closure or fastening if visible; for clothing mention fit and fabric. Note notable design details, who'd wear it, and key selling points. No filler phrases.",
-  "suggestedTitle": "eBay listing title — keyword-rich, MAXIMUM 80 characters (count carefully, never exceed 80). Clothing: pack in Brand + Men's/Women's/Unisex + Item Type + Color + Size + keywords like Vintage, Y2K, 90s, Graphic Tee, Band Tee, Streetwear, Distressed, Oversized. Jewelry/accessories: pack in Brand + Item Type + Material/Stone + Color + a selling keyword like Vintage, Statement, Boho, Minimalist. No filler phrases. Aim for all 80 characters."
+  "itemType": "eBay Type value — clothing e.g. 'T-Shirt', 'Hoodie', 'Sweatshirt', 'Jacket', 'Coat', 'Jersey', 'Jeans', 'Pants', 'Shorts', 'Polo', 'Vest', 'Button-Up Shirt', 'Dress'; jewelry/accessories e.g. 'Necklace', 'Stud Earrings', 'Bracelet', 'Ring', 'Belt', 'Wallet', 'Sunglasses', 'Baseball Cap', 'Scarf'",
+  "department": "Men, Women, Unisex Adult, Boys or Girls — from the tag or an obvious cut; empty if unclear",
+  "brand": "brand exactly as on the tag/label/print, or 'Unbranded' only if clearly unbranded; empty if you can't read it",
+  "tagText": "transcribe EVERY readable word on tags/labels: brand, size, RN number, style/model number, fabric %, 'Made in …', care text. Empty if no tag visible.",
+  "color": "main color(s), e.g. 'Brown' or 'Navy, White'",
+  "size": "size exactly as on the tag, e.g. 'XL', 'L Tall', '32x30', '10.5'. Empty if no size tag is visible. Never estimate.",
+  "condition": "one of: New with tags, New without tags, Excellent used, Good - minor flaws, Fair - notable flaws. Be honest: any visible flaw means at most 'Good - minor flaws'.",
+  "flaws": "every visible flaw with its location, e.g. 'small stain on left cuff; light fading on shoulders; fraying at hem'. Empty string if none seen.",
+  "vintage": "'Yes' only if tags/printing clearly show it's 20+ years old (e.g. single-stitch hem, old tag style, dated copyright); otherwise 'No'",
+  "era": "'80s', '90s', 'Y2K' etc. only when the tag/print clearly shows it; else empty",
+  "style": "CLOTHING — e.g. Graphic Tee, Polo, Henley, Crewneck, Workwear, Athletic, Bomber, Chore Coat, Varsity, Streetwear, Western, Preppy, Casual. Empty if none apply.",
+  "material": "outer fabric as on the tag (e.g. 'Cotton', 'Cotton Canvas', 'Polyester', 'Cotton/Polyester') — for jewelry the metal/stone. Empty if not visible.",
+  "sleeveLength": "TOPS/OUTERWEAR — Short Sleeve, Long Sleeve, Sleeveless, 3/4 Sleeve. Empty otherwise.",
+  "neckline": "TOPS — Crew Neck, V-Neck, Hooded, Collared, Mock Neck, Turtleneck, Henley. Empty otherwise.",
+  "fit": "Regular, Slim, Relaxed, Oversized, Athletic — only if the tag says or it's obvious; else empty",
+  "pattern": "Solid, Graphic Print, Striped, Plaid, Floral, Camouflage, Tie Dye, Checkered, Color Block, Logo. Empty if not applicable.",
+  "theme": "comma-separated themes that clearly apply, e.g. 'Sports', 'Music', '90s', 'Western', 'Workwear', 'Outdoor'. Empty if none.",
+  "character": "named character/person printed on the item. Empty if none.",
+  "characterFamily": "its franchise, e.g. 'Disney', 'Marvel'. Empty if none.",
+  "yearManufactured": "decade range only if clearly dated — one of: Pre-1960, 1960-1969, 1970-1979, 1980-1989, 1990-1999, 2000-2009, 2010-2019, 2020-2029. Else empty.",
+  "season": "All Seasons, Fall, Spring, Summer or Winter (outerwear is usually Fall/Winter)",
+  "measurements": {
+    "pitToPit": "TOPS — armpit to armpit from the tape, e.g. '22' (inches). Add ' approx' if the tape is hard to read. Empty if no tape photo.",
+    "length": "TOPS — top of shoulder/collar seam to bottom hem",
+    "sleeve": "TOPS — shoulder seam to cuff",
+    "shoulder": "TOPS — shoulder seam to shoulder seam",
+    "waist": "BOTTOMS — FULL waist: if the tape lies flat across the waistband, DOUBLE it",
+    "inseam": "BOTTOMS — crotch seam to hem",
+    "rise": "BOTTOMS — crotch seam to top of waistband",
+    "legOpening": "BOTTOMS — hem width laid flat"
+  },
+  "specifics": {
+    "Closure": "e.g. Zip, Button, Snap, Pullover, Hook & Loop — if visible",
+    "Features": "comma-separated visible features, e.g. 'Pockets, Hood, Lined, Adjustable Cuffs, Embroidered Logo'",
+    "Accents": "e.g. Embroidered, Patch, Distressed, Rhinestone — if visible",
+    "Fabric Type": "e.g. Canvas, Fleece, Jersey, Knit, Denim, Twill, Mesh — if visible or on the tag",
+    "Lining Material": "if the lining is visible/tagged",
+    "Insulation Material": "if tagged",
+    "Collar Style": "if visible",
+    "Occasion": "Casual, Activewear, Workwear, Party/Cocktail, Formal — when obvious",
+    "Country/Region of Manufacture": "ONLY from a 'Made in …' tag, e.g. 'United States'. Else empty.",
+    "Product Line": "e.g. 'Detroit Jacket', 'Air Jordan', '501' — only if printed/tagged",
+    "Model": "style/model number from the tag, e.g. 'J97'",
+    "Team": "sports team printed on it, e.g. 'Dallas Cowboys'",
+    "League": "e.g. NFL, NBA, MLB, NHL, NCAA",
+    "Player": "player name on the item, e.g. 'Michael Irvin'",
+    "Sport": "e.g. Football, Basketball",
+    "Jersey Number": "number on a jersey, e.g. '88'",
+    "Signed": "Yes only if an autograph is visible; else empty",
+    "Fit": "if on the tag"
+  },
+  "description": "2-3 plain sentences for buyers: what it is, standout details and who it suits. Facts only, no keyword lists, no hype.",
+  "suggestedTitle": "eBay title, MAX 80 characters, in this order: Brand + Vintage/era (only if true) + Men's/Women's + item type + key details (model, team/player, material, style, features) + Size + Color. Use the space well but no spam words (no 'L@@K', 'WOW', 'RARE'), no claims you can't see."
 }`;

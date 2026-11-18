@@ -3,8 +3,13 @@ import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
 import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
 import { ITEM_VISION_PROMPT as PROMPT } from "@/lib/vision-prompt";
+import { requireEbayConnection } from "@/lib/ebay-connection";
+import { ebayContext } from "@/lib/ebay-request-context";
+import { enrichVisionResult } from "@/lib/listing-enrich";
 
 export const runtime = "nodejs";
+// Vision + category specifics fill can take a while on big photo sets.
+export const maxDuration = 60;
 
 const MAX_ATTEMPTS = 3;
 const NORMAL_RETRY_DELAY_MS = 1000;
@@ -34,7 +39,8 @@ async function analyzeGroup(
     try {
       const data = await openAIPost(apiKey, {
         model: "gpt-4o-mini",
-        max_tokens: 1000,
+        max_tokens: 2000,
+        response_format: { type: "json_object" },
         messages: [
           {
             role: "user",
@@ -105,6 +111,8 @@ export async function POST(req: NextRequest) {
   }
 
   const results = [];
+  const connection = await requireEbayConnection(auth).catch(() => null);
+  const runWithEbay = connection ? <T,>(fn: () => Promise<T>) => ebayContext.run(connection, fn) : null;
 
   for (let i = 0; i < groups.length; i++) {
     if (i >= processLimit) {
@@ -113,7 +121,7 @@ export async function POST(req: NextRequest) {
     }
     try {
       const result = await analyzeGroup(apiKey, groups[i].images);
-      results.push(result);
+      results.push(await enrichVisionResult(apiKey, result, runWithEbay));
     } catch (err) {
       results.push({ error: (err as Error).message });
     }

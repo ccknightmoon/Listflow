@@ -456,3 +456,39 @@ export function parseAiAspects(raw: unknown): Aspects {
   }
   return out;
 }
+
+// ------------------------------------------------------------- storage --
+
+export interface StoredSpecificsShape {
+  categoryId: string | null;
+  aspects: Aspects;
+  measurements: Measurement[];
+}
+
+/** Validate drafts.item_specifics input from the browser (bounded, typed). Null if unusable. */
+export function sanitizeStoredSpecifics(raw: unknown): StoredSpecificsShape | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const categoryId = typeof r.categoryId === "string" && /^\d{1,12}$/.test(r.categoryId) ? r.categoryId : null;
+  const aspects: Aspects = {};
+  const src = r.aspects && typeof r.aspects === "object" ? (r.aspects as Record<string, unknown>) : {};
+  for (const [k, v] of Object.entries(src).slice(0, 80)) {
+    const name = k.trim().slice(0, 65);
+    if (!name || !Array.isArray(v)) continue;
+    aspects[name] = v.filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 65)).filter(Boolean).slice(0, 30);
+  }
+  const measurements: Measurement[] = Array.isArray(r.measurements)
+    ? (r.measurements as Array<Record<string, unknown>>)
+        .filter((m) => MEASUREMENT_ORDER.includes(m?.key as Measurement["key"]) && typeof m.inches === "number" && m.inches > 0 && m.inches < 100)
+        .map((m) => ({ key: m.key as Measurement["key"], inches: Math.round((m.inches as number) * 4) / 4, approx: m.approx === true }))
+        .slice(0, 12)
+    : [];
+  return { categoryId, aspects, measurements };
+}
+
+/** Supabase/PostgREST error for a column that doesn't exist yet (migration not applied). */
+export function isMissingColumnError(err: { code?: string; message?: string } | null | undefined, column: string): boolean {
+  if (!err) return false;
+  const m = (err.message ?? "").toLowerCase();
+  return (err.code === "42703" || err.code === "PGRST204" || m.includes("could not find")) && m.includes(column.toLowerCase());
+}

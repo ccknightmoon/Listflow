@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { sanitizeStoredSpecifics, isMissingColumnError } from "@/lib/item-specifics";
 import { isValidCostBasis } from "@/lib/profit";
 import { getListingReadiness } from "@/lib/listing-readiness";
 
@@ -235,10 +236,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "shippingMode must be 'free', 'calculated', or 'buyer_pays'." }, { status: 400 });
   }
 
-  const { data, error } = await auth.supabase
-    .from("drafts")
-    .insert([
-      {
+  const specifics = body.itemSpecifics !== undefined ? sanitizeStoredSpecifics(body.itemSpecifics) : undefined;
+  const row = {
         // Explicit stamp, even though the DB column also defaults to
         // auth.uid() — defense-in-depth matches the rest of this codebase.
         user_id: auth.user.id,
@@ -276,13 +275,20 @@ export async function POST(req: NextRequest) {
         is_heavy: body.isHeavy ?? false,
         shipping_cost: body.shippingCost ?? null,
         shipping_mode: "calculated", // calculated-only; older clients may still send free/buyer_pays
-      },
-    ])
-    .select();
+        ...(specifics !== undefined && { item_specifics: specifics }),
+      };
+  let { data, error } = await auth.supabase.from("drafts").insert([row]).select();
+  // Before migration 027 is applied the item_specifics column doesn't exist:
+  // save everything else rather than failing the whole draft.
+  if (error && isMissingColumnError(error, "item_specifics")) {
+    const { item_specifics: _drop, ...rest } = row as typeof row & { item_specifics?: unknown };
+    void _drop;
+    ({ data, error } = await auth.supabase.from("drafts").insert([rest]).select());
+  }
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ draft: data[0] });
+  return NextResponse.json({ draft: data?.[0] });
 }
