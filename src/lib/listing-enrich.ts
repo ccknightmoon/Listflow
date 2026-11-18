@@ -55,9 +55,18 @@ function visionSpecifics(v: Vision): Aspects {
   return out;
 }
 
+/** eBay search order starts with the brand: "Vintage 90s Carhartt Jacket" → "Carhartt Vintage 90s Jacket". */
+export function brandFirst(title: string, brand: string | null | undefined): string {
+  const b = (brand ?? "").trim();
+  if (!b || /^unbranded$/i.test(b) || !title) return title;
+  const i = title.toLowerCase().indexOf(b.toLowerCase());
+  if (i <= 0) return title;
+  return fitTitle(`${title.slice(i, i + b.length)} ${title.slice(0, i)}${title.slice(i + b.length)}`);
+}
+
 /** Title: the AI's own if it's sensible, else composed from the facts in eBay order. */
 export function chooseTitle(v: Vision, aspects: Aspects): string {
-  const own = fitTitle(str(v.suggestedTitle));
+  const own = brandFirst(fitTitle(str(v.suggestedTitle)), aspects["Brand"]?.[0] ?? str(v.brand));
   if (own.length >= 25) return own;
   const first = (k: string) => aspects[k]?.[0] ?? null;
   return composeTitle({

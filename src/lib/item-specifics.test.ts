@@ -168,3 +168,55 @@ describe("AI fill helpers", () => {
     expect(parseAiAspects(null)).toEqual({});
   });
 });
+
+import { listingDescriptionHtml, measurementsFromDescription, sanitizeStoredSpecifics, isMissingColumnError } from "./item-specifics";
+import { parseConditionPolicy } from "./ebay-aspects";
+import { getListingReadiness } from "./listing-readiness";
+
+describe("publish helpers", () => {
+  it("reads measurements back out of an older plain description", () => {
+    expect(measurementsFromDescription("Measurements: Pit to pit: 22 inches, Length: 28 inches.\n\nGreat tee.")).toEqual([
+      { key: "pitToPit", inches: 22, approx: false }, { key: "length", inches: 28, approx: false },
+    ]);
+    expect(measurementsFromDescription("No measurements here")).toEqual([]);
+  });
+  it("builds the listing HTML from the draft and its final aspects", () => {
+    const html = listingDescriptionHtml(
+      { title: "Vintage Dallas Cowboys Michael Irvin #88 Jersey", description: "Measurements: Pit to pit: 24 inches.\n\nClassic 90s NFL jersey.", condition: "Excellent used", flaws: "", custom_sku: "57" },
+      { Brand: ["Starter"], Size: ["XL"], Team: ["Dallas Cowboys"], Player: ["Michael Irvin"], "Jersey Number": ["88"], Decade: ["1990s"], Color: ["Blue", "White"] },
+      measurementsFromDescription("Measurements: Pit to pit: 24 inches."),
+      "Ships next business day.",
+    );
+    expect(html).toContain("Classic 90s NFL jersey.");
+    expect(html).not.toContain("Measurements: Pit"); // the old line isn't repeated in the summary
+    expect(html).toContain("<b>Team / player:</b> Dallas Cowboys Michael Irvin #88");
+    expect(html).toContain("<b>Era:</b> 1990s");
+    expect(html).toContain("Pit to pit: 24&quot;");
+    expect(html).toContain("Pre-owned in excellent condition.");
+    expect(html).toContain("SKU 57");
+  });
+  it("keeps a description that is already our template", () => {
+    const tpl = '<div style="font-family:Arial,Helvetica">x</div>';
+    expect(listingDescriptionHtml({ description: tpl }, {}, [], null)).toBe(tpl);
+  });
+  it("validates stored specifics from the browser", () => {
+    expect(sanitizeStoredSpecifics({ categoryId: "57988", aspects: { Brand: ["Carhartt", 5], "": ["x"] }, measurements: [{ key: "pitToPit", inches: 26 }, { key: "hack", inches: 1 }] })).toEqual({
+      categoryId: "57988", aspects: { Brand: ["Carhartt"] }, measurements: [{ key: "pitToPit", inches: 26, approx: false }],
+    });
+    expect(sanitizeStoredSpecifics({ categoryId: "drop table" })?.categoryId).toBeNull();
+    expect(sanitizeStoredSpecifics("nope")).toBeNull();
+  });
+  it("recognises 'column not there yet' errors", () => {
+    expect(isMissingColumnError({ code: "PGRST204", message: "Could not find the 'item_specifics' column of 'drafts'" }, "item_specifics")).toBe(true);
+    expect(isMissingColumnError({ code: "23505", message: "duplicate" }, "item_specifics")).toBe(false);
+  });
+  it("maps eBay condition policy ids to Inventory enums", () => {
+    expect(parseConditionPolicy({ itemConditionPolicies: [{ itemConditions: [{ conditionId: "1000" }, { conditionId: "2990" }, { conditionId: "3010" }] }] })).toEqual(["NEW", "PRE_OWNED_EXCELLENT", "PRE_OWNED_FAIR"]);
+    expect(parseConditionPolicy({})).toBeNull();
+  });
+  it("readiness blocks listing while eBay-required specifics are empty", () => {
+    const r = getListingReadiness({ photoCount: 3, title: "T", price: 10, condition: "Excellent used", shippingMode: "calculated", missingRequiredSpecifics: ["Size", "Department"] });
+    expect(r.ready).toBe(false);
+    expect(r.blockers).toContain("Fill eBay's required specifics: Size, Department");
+  });
+});
