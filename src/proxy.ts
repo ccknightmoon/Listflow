@@ -87,8 +87,11 @@ const AI_RATE_LIMITED_PATHS = [
   "/api/ai/suggest-specifics",
   "/api/pricing/suggest",
 ];
-const hasUpstash = Boolean(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
-const redis = hasUpstash ? Redis.fromEnv() : null;
+// Accept either Upstash's own variable names or the KV_* names Vercel's
+// Upstash (Marketplace) integration injects when connected from Storage.
+const upstashUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
+const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
+const redis = upstashUrl && upstashToken ? new Redis({ url: upstashUrl, token: upstashToken }) : null;
 const aiRatelimit = redis
   ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(15, "1 m"), analytics: true, prefix: "listflow:rl:ai" })
   : null;
