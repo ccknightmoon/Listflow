@@ -376,7 +376,8 @@ export default function SalesPage() {
       <div className="relative flex items-start gap-3 mb-4">
         <Link
           href="/dashboard"
-          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
+          aria-label="Back to Home"
+          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none lg:hidden"
           style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
           aria-label="Back to dashboard"
         >

@@ -743,7 +743,8 @@ export default function NewListingPage() {
       <div className="flex items-center gap-3 mb-6">
         <Link
           href="/dashboard"
-          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
+          aria-label="Back to Home"
+          className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none lg:hidden"
           style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
         >
           <ArrowLeft className="w-4 h-4" />
