@@ -71,9 +71,12 @@ export default function Sheet({
       if (e.key === "Tab" && panel) trapTab(e, panel);
     };
     window.addEventListener("keydown", onKey);
+    // Move focus in only for mouse/keyboard computers: on phones a
+    // programmatic focus could pop the on-screen keyboard unasked.
+    const finePointer = typeof window.matchMedia === "function" && window.matchMedia("(hover: hover) and (pointer: fine)").matches;
     const t = window.setTimeout(() => {
       const panel = panelRef.current;
-      if (panel && !panel.contains(document.activeElement)) {
+      if (finePointer && panel && !panel.contains(document.activeElement)) {
         (focusablesIn(panel).find((el) => !el.hasAttribute("data-sheet-close")) ?? panel).focus({ preventScroll: true });
       }
     }, 0);

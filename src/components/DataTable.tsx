@@ -17,7 +17,9 @@ export interface Column<T> {
  * swipe cards). Mouse: checkbox / shift-click range select, row actions on
  * hover, "⋯" and right-click menus. Keyboard: see src/lib/row-keys.ts —
  * one row is in the Tab order at a time (roving tabindex), arrows move,
- * Space selects, Enter opens, Shift+F10 opens the menu.
+ * Space selects, Enter opens, Shift+F10 / Menu key / "." opens the actions
+ * menu. The row's own buttons are mouse shortcuts (kept out of the Tab
+ * order so Tab moves past the table instead of through 1,000+ buttons).
  */
 export default function DataTable<T>({
   rows,
@@ -145,13 +147,13 @@ export default function DataTable<T>({
                     <div className="hover-actions flex items-center gap-1">
                       {quick.map((a) =>
                         a.href ? (
-                          <a key={a.label} href={a.href} target={a.external ? "_blank" : undefined} rel={a.external ? "noopener noreferrer" : undefined}
+                          <a key={a.label} tabIndex={-1} href={a.href} target={a.external ? "_blank" : undefined} rel={a.external ? "noopener noreferrer" : undefined}
                             className="h-8 px-2.5 rounded-lg flex items-center gap-1.5 text-xs font-medium hover:bg-[var(--glass-strong)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
                             style={{ color: a.tone === "danger" ? "var(--danger)" : a.tone === "accent" ? "var(--accent)" : "var(--text-secondary)" }}>
                             {a.icon}{a.label}
                           </a>
                         ) : (
-                          <button key={a.label} type="button" disabled={a.disabled} onClick={(e) => { e.stopPropagation(); a.onAction?.(); }}
+                          <button key={a.label} type="button" tabIndex={-1} disabled={a.disabled} onClick={(e) => { e.stopPropagation(); a.onAction?.(); }}
                             className="h-8 px-2.5 rounded-lg flex items-center gap-1.5 text-xs font-medium hover:bg-[var(--glass-strong)] disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
                             style={{ color: a.tone === "danger" ? "var(--danger)" : a.tone === "accent" ? "var(--accent)" : "var(--text-secondary)" }}>
                             {a.icon}{a.label}
@@ -159,7 +161,7 @@ export default function DataTable<T>({
                         ),
                       )}
                     </div>
-                    <RowMenuButton label={`More actions for ${rowLabel(r)}`} onOpen={(at) => setMenu({ id, at })} />
+                    <RowMenuButton tabIndex={-1} label={`More actions for ${rowLabel(r)}`} onOpen={(at) => setMenu({ id, at })} />
                   </div>
                 </td>
               </tr>

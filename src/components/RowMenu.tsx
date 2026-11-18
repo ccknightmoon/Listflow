@@ -95,10 +95,11 @@ export function RowMenu({ actions, at, onClose, label = "Actions" }: { actions: 
 }
 
 /** The "⋯" button that opens a RowMenu below itself. */
-export function RowMenuButton({ onOpen, label = "More actions" }: { onOpen: (at: { x: number; y: number }) => void; label?: string }) {
+export function RowMenuButton({ onOpen, label = "More actions", tabIndex }: { onOpen: (at: { x: number; y: number }) => void; label?: string; tabIndex?: number }) {
   return (
     <button
       type="button"
+      tabIndex={tabIndex}
       aria-label={label}
       aria-haspopup="menu"
       title={label}
