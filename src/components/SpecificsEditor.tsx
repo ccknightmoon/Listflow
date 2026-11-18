@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, FolderTree, Loader2, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api";
+import AspectPicker from "@/components/AspectPicker";
 import { isRejectedValue, matchAllowedValue, missingRequiredAspects, suggestAllowedValues, type AspectDef, type Aspects } from "@/lib/item-specifics";
 
 /**
@@ -93,9 +94,9 @@ export default function SpecificsEditor({
   ];
   const emptyRecommended = defs.filter((d) => !d.required && d.recommended && !valueOf(d.name).length);
 
-  function set(def: AspectDef, raw: string) {
+  function set(def: AspectDef, list: string[]) {
     // Snap to eBay's exact spelling where there is one ("usa" → "United States").
-    const parts = (def.multi ? raw.split(",").map((s) => s.trim()) : [raw.trim()])
+    const parts = (def.multi ? list : list.slice(0, 1)).map((s) => s.trim())
       .map((p) => (p && def.values.length ? matchAllowedValue(p, def) ?? p : p));
     const next: Aspects = { ...aspects };
     for (const k of Object.keys(next)) if (k.toLowerCase() === def.name.toLowerCase()) delete next[k];
@@ -106,42 +107,25 @@ export default function SpecificsEditor({
 
   const row = (d: AspectDef) => {
     const vals = valueOf(d.name);
-    const text = vals.join(", ");
     const isMissing = d.required && vals.length === 0;
     // Only a real problem: a selection-only aspect, full list known, and no
     // allowed value matches (casing/synonyms like "USA" are fine).
     const rejected = vals.filter((v) => isRejectedValue(v, d));
     const offList = rejected.length > 0;
-    const listId = d.values.length ? `asp-${d.name.replace(/[^a-z0-9]/gi, "-").toLowerCase()}` : undefined;
+    const labelId = `asp-label-${d.name.replace(/[^a-z0-9]/gi, "-").toLowerCase()}`;
     return (
-      <label key={d.name} className="flex flex-col gap-1 min-w-0">
-        <span className="text-[11px] font-semibold flex items-center gap-1" style={{ color: isMissing ? "var(--danger)" : "var(--text-secondary)" }}>
+      <div key={d.name} className="flex flex-col gap-1 min-w-0" role="group" aria-labelledby={labelId}>
+        <span id={labelId} className="text-[11px] font-semibold flex items-center gap-1" style={{ color: isMissing ? "var(--danger)" : "var(--text-secondary)" }}>
           {d.name}
           {d.required && <span className="text-[9px] px-1 rounded" style={{ background: isMissing ? "var(--warning-bg)" : "var(--glass)", border: `1px solid ${isMissing ? "var(--warning-border)" : "var(--glass-line)"}` }}>Required</span>}
         </span>
-        <input
-          className="input text-sm py-1.5"
-          style={isMissing ? { borderColor: "var(--danger)" } : undefined}
-          defaultValue={text}
-          key={`${d.name}:${text}`}
-          list={listId}
-          disabled={disabled}
-          placeholder={isMissing ? "Needed to publish" : d.multi ? "Values, comma-separated" : ""}
-          onBlur={(e) => { if (e.target.value.trim() !== text) set(d, e.target.value); }}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
-          aria-invalid={isMissing || offList || undefined}
-        />
-        {listId && (
-          <datalist id={listId}>
-            {d.values.map((v) => <option key={v} value={v} />)}
-          </datalist>
-        )}
+        <AspectPicker def={d} values={vals} categoryId={catId} missing={isMissing} disabled={disabled} onChange={(next) => set(d, next)} />
         {offList && (
           <span className="text-[10px] flex flex-wrap items-center gap-1" style={{ color: "var(--danger)" }} role="alert">
             eBay doesn&apos;t accept &ldquo;{rejected[0]}&rdquo; here.
             {suggestAllowedValues(rejected[0], d).map((sug) => (
               <button key={sug} type="button" disabled={disabled}
-                onClick={(e) => { e.preventDefault(); set(d, d.multi ? vals.map((v) => (v === rejected[0] ? sug : v)).join(", ") : sug); }}
+                onClick={(e) => { e.preventDefault(); set(d, d.multi ? vals.map((v) => (v === rejected[0] ? sug : v)) : [sug]); }}
                 className="px-1.5 py-0.5 rounded-md font-semibold" style={{ background: "var(--accent-tint)", color: "var(--accent)" }}>
                 Use &ldquo;{sug}&rdquo;
               </button>
@@ -149,7 +133,7 @@ export default function SpecificsEditor({
             {suggestAllowedValues(rejected[0], d).length === 0 && <span>Pick one from the list.</span>}
           </span>
         )}
-      </label>
+      </div>
     );
   };
 

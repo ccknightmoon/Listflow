@@ -668,6 +668,7 @@ export function suggestAllowedValues(value: string, def: Pick<AspectDef, "values
     let score = aw.filter((w) => words.has(w)).length * 3;
     if (an.startsWith(n) || n.startsWith(an)) score += 4;
     if (an[0] === n[0]) score += 1;
+    score += Math.max(0, 6 - editDistance(n, an, 6)); // close spellings rank high
     score -= Math.abs(an.length - n.length) / 10;
     return { a, score };
   });
