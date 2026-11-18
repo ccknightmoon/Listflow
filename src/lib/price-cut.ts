@@ -52,3 +52,21 @@ export function summarizeCut(rows: CutRow[]) {
     totalReduction: reductionC / 100,
   };
 }
+
+// ------------------------------------------------- big-run safety (Nov 2026)
+// Lowering many prices at once is one click away from a costly mistake
+// (QA: 896 stale listings, $6,627.79 off). From BULK_CONFIRM_AT listings up,
+// the seller must type the number of listings to confirm; from
+// BULK_WARN_AT up, the confirm step also suggests smaller batches.
+export const BULK_CONFIRM_AT = 20;
+export const BULK_WARN_AT = 250;
+
+export function needsTypedConfirm(changing: number): boolean {
+  return changing >= BULK_CONFIRM_AT;
+}
+
+/** "896", " 896 ", "896 listings" and "896" all confirm 896; anything else doesn't. */
+export function typedConfirmMatches(typed: string, changing: number): boolean {
+  const digits = typed.replace(/[^\d]/g, "");
+  return digits.length > 0 && Number(digits) === changing;
+}

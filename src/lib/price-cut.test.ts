@@ -29,3 +29,19 @@ describe("price cuts", () => {
     expect(summarizeCut(r)).toEqual({ changing: 2, skipped: 0, atFloor: 0, limited: 0, totalReduction: 6.66 });
   });
 });
+
+import { needsTypedConfirm, typedConfirmMatches, BULK_CONFIRM_AT } from "./price-cut";
+describe("bulk price-drop safety", () => {
+  it("asks for a typed confirmation from 20 listings up", () => {
+    expect(needsTypedConfirm(BULK_CONFIRM_AT - 1)).toBe(false);
+    expect(needsTypedConfirm(BULK_CONFIRM_AT)).toBe(true);
+    expect(needsTypedConfirm(896)).toBe(true);
+  });
+  it("only the exact count confirms", () => {
+    expect(typedConfirmMatches("896", 896)).toBe(true);
+    expect(typedConfirmMatches(" 896 listings", 896)).toBe(true);
+    expect(typedConfirmMatches("89", 896)).toBe(false);
+    expect(typedConfirmMatches("", 896)).toBe(false);
+    expect(typedConfirmMatches("yes", 896)).toBe(false);
+  });
+});

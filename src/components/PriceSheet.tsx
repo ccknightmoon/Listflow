@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { Loader2, Eye } from "lucide-react";
 import Sheet from "@/components/Sheet";
-import { planPriceCut, summarizeCut, PRICE_CUT_PRESETS, type CutRow, type CutTarget } from "@/lib/price-cut";
+import { planPriceCut, summarizeCut, PRICE_CUT_PRESETS, needsTypedConfirm, typedConfirmMatches, BULK_WARN_AT, type CutRow, type CutTarget } from "@/lib/price-cut";
 import { OFFER_DISCOUNTS } from "@/lib/watcher-offers-shared";
 import type { PriceChange } from "@/lib/bulk-edit";
 import { formatMoney } from "@/lib/format";
@@ -34,6 +34,9 @@ export default function PriceSheet({
   const [floor, setFloor] = useState("");
   const [offerPct, setOfferPct] = useState<number>(10);
   const [offerState, setOfferState] = useState<"idle" | "sending" | "sent" | string>("idle");
+  // Second step for big runs (see BULK_CONFIRM_AT): type the count to confirm.
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState("");
 
   const change: PriceChange | null = useMemo(() => {
     if (mode === "preset") return { mode: "percent", value: -preset };
@@ -56,9 +59,17 @@ export default function PriceSheet({
   // Footer button and Enter in either amount field (keyboard users).
   const apply = () => {
     if (sum.changing === 0) return;
+    if (needsTypedConfirm(sum.changing) && !confirming) {
+      setConfirming(true);
+      setTyped("");
+      return;
+    }
+    if (confirming && !typedConfirmMatches(typed, sum.changing)) return;
     onApply(rows.filter((r) => r.to != null));
+    setConfirming(false);
     onClose();
   };
+  const close = () => { setConfirming(false); setTyped(""); onClose(); };
   const enterApplies = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") { e.preventDefault(); apply(); }
   };
@@ -66,7 +77,7 @@ export default function PriceSheet({
   return (
     <Sheet
       open={open}
-      onClose={onClose}
+      onClose={close}
       title={single ? items[0].title : "Lower prices"}
       header={
         <div className="flex items-start gap-3">
@@ -88,9 +99,40 @@ export default function PriceSheet({
         </div>
       }
       footer={
-        <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={sum.changing === 0} onClick={apply}>
-          {single ? (rows[0]?.to != null ? `Lower to ${formatMoney(rows[0].to)}` : "Lower price") : `Lower ${sum.changing.toLocaleString("en-US")} price${sum.changing !== 1 ? "s" : ""}`}
-        </button>
+        confirming ? (
+          <div className="flex flex-col gap-2" role="group" aria-label="Confirm price drop">
+            <p className="text-sm font-semibold">
+              Lower {sum.changing.toLocaleString("en-US")} listings by {formatMoney(sum.totalReduction)} in total?
+            </p>
+            {sum.changing >= BULK_WARN_AT && (
+              <p className="text-xs" style={{ color: "var(--danger)" }}>
+                That&apos;s a very large change. Consider doing it in smaller groups (search or filter first). It can&apos;t be undone in one step.
+              </p>
+            )}
+            <label className="text-xs" style={{ color: "var(--text-secondary)" }}>
+              Type <b>{sum.changing}</b> to confirm
+              <input
+                className="input w-full mt-1"
+                inputMode="numeric"
+                autoFocus
+                value={typed}
+                onChange={(e) => setTyped(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); apply(); } }}
+                aria-label={`Type ${sum.changing} to confirm`}
+              />
+            </label>
+            <div className="flex gap-2">
+              <button type="button" className="btn flex-1 min-h-[48px]" onClick={() => setConfirming(false)}>Back</button>
+              <button type="button" className="btn flex-1 min-h-[48px] font-semibold" style={{ background: "var(--danger)", color: "white", borderColor: "var(--danger)" }} disabled={!typedConfirmMatches(typed, sum.changing)} onClick={apply}>
+                Lower {sum.changing.toLocaleString("en-US")} prices
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={sum.changing === 0} onClick={apply}>
+            {single ? (rows[0]?.to != null ? `Lower to ${formatMoney(rows[0].to)}` : "Lower price") : `Lower ${sum.changing.toLocaleString("en-US")} price${sum.changing !== 1 ? "s" : ""}${needsTypedConfirm(sum.changing) ? "…" : ""}`}
+          </button>
+        )
       }
     >
 
