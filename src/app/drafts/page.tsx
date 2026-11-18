@@ -533,22 +533,22 @@ export default function DraftsPage() {
           <select
             value={sort}
             onChange={(e) => handleSortChange(e.target.value as SortKey)}
-            className="shrink-0 w-[108px] text-sm rounded-xl border px-2 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            aria-label="Sort" className="shrink-0 w-[124px] text-sm rounded-xl border pl-2 pr-1 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
           >
-            <option value="newest">Newest first</option>
-            <option value="oldest">Oldest first</option>
-            <option value="price-desc">Price: high to low</option>
-            <option value="price-asc">Price: low to high</option>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="price-desc">Price: high</option>
+            <option value="price-asc">Price: low</option>
           </select>
           <select
             value={filter}
             onChange={(e) => handleFilterChange(e.target.value as DraftFilter)}
-            className="shrink-0 w-[112px] text-sm rounded-xl border px-2 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            aria-label="Filter" className="shrink-0 w-[124px] text-sm rounded-xl border pl-2 pr-1 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
             style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
           >
             <option value="all">All drafts</option>
-            <option value="ready">Ready to list</option>
+            <option value="ready">Ready</option>
             <option value="needs-photo">Needs photos</option>
             <option value="needs-price">Needs price</option>
           </select>

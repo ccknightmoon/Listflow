@@ -383,7 +383,9 @@ export default function StorePage() {
       { label: "End listing", tone: "danger", icon: <Trash2 className="w-3.5 h-3.5" />, disabled: deleting.has(l.listingId), onAction: () => void handleDelist(l) },
     ];
   }
-  const displayCount = useCountUp(listings.length);
+  // Header count = the tab you're looking at (Active 1,170 / Ended …), so
+  // it always matches the tab label instead of active + ended combined.
+  const displayCount = useCountUp(tab === "active" ? activeCount : endedCount);
 
   return (
     <main
@@ -410,7 +412,7 @@ export default function StorePage() {
         </Link>
         <div className="flex-1 min-w-0">
           <h1 className="text-xl font-medium">
-            {loading ? "Store" : `Store (${Math.round(displayCount ?? 0)})`}
+            {loading ? "Listings" : `Listings (${Math.round(displayCount ?? 0).toLocaleString("en-US")} ${tab === "active" ? "active" : "ended"})`}
           </h1>
           {!loading && !error && (
             <p className="text-xs text-[var(--text-secondary)]">
@@ -511,13 +513,13 @@ export default function StorePage() {
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortKey)}
-              className="shrink-0 w-[108px] text-sm rounded-xl border px-2 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              aria-label="Sort" className="shrink-0 w-[124px] text-sm rounded-xl border pl-2 pr-1 py-2 text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
               style={{ background: "var(--glass)", borderColor: "var(--glass-line)", backdropFilter: "blur(10px)" }}
             >
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-              <option value="price-asc">Price: low to high</option>
-              <option value="price-desc">Price: high to low</option>
+              <option value="newest">Newest</option>
+              <option value="oldest">Oldest</option>
+              <option value="price-asc">Price: low</option>
+              <option value="price-desc">Price: high</option>
             </select>
           </div>
           {tab === "active" && staleCount > 0 && (

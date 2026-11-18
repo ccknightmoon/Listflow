@@ -12,6 +12,7 @@ import { bucketRevenue, type BucketableSale } from "@/lib/sales-buckets";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { useCountUp } from "@/lib/use-count-up";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import { lastSevenDays, type HomeSale } from "@/lib/home-week";
 
 // See src/lib/page-cache.ts. Each of this page's four independent fetches
 // gets its own entry so the hero tile can show last session's numbers the
@@ -66,6 +67,7 @@ export default function DashboardPage() {
   const [eyebrow, setEyebrow] = useState("Welcome back");
   // Backs the hero tile's trend sparkline — null until loaded (or if it
   // fails, which just means the tile shows no sparkline, same as today).
+  const [pageOpenedAt] = useState(() => Date.now());
   const [trendSales, setTrendSales] = useState<BucketableSale[] | null>(() => getPageCache<BucketableSale[]>(TREND_SALES_CACHE_KEY) ?? null);
   // Best Offers pending a response -- see store/page.tsx's "Pending
   // offers" card for why this isn't a bottom-nav badge (one GetBestOffers
@@ -174,9 +176,15 @@ export default function DashboardPage() {
 
   const drafts = stats?.drafts ?? null;
   const active = stats?.active ?? null;
-  const revenue = stats?.weeklyRevenue ?? null;
+  // "Last 7 days" in the seller's own time zone, computed exactly like the
+  // Sales page's 7-day tab (paid sales, item totals, units). Falls back to
+  // the server's number for older cached data without quantities.
+  const week = trendSales && trendSales.every((s) => typeof (s as HomeSale).qty === "number")
+    ? lastSevenDays(trendSales as HomeSale[], pageOpenedAt)
+    : null;
+  const revenue = week?.revenue ?? stats?.weeklyRevenue ?? null;
   const displayRevenue = useCountUp(revenue);
-  const weeklySales = stats?.weeklySales ?? null;
+  const weeklySales = week?.sales ?? stats?.weeklySales ?? null;
 
   return (
     <main className="relative min-h-screen flex flex-col max-w-md lg:max-w-[1360px] mx-auto px-4 lg:px-8 pt-5 lg:pt-8 pb-8 overflow-hidden">
@@ -215,7 +223,7 @@ export default function DashboardPage() {
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
           <div>
-            <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }}>This week</p>
+            <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }} title="Item sales, last 7 days (today + 6 days) — same as Sales → 7 days">Last 7 days</p>
             <p className="font-display font-extrabold text-3xl mt-1.5">
               {displayRevenue !== null ? formatMoneyShort(displayRevenue) : "—"}
             </p>
@@ -265,7 +273,7 @@ export default function DashboardPage() {
 
           {weeklySales !== null && weeklySales > 0 && (
             <p className="text-[11.5px] font-bold mt-2 flex items-center gap-1 lg:hidden" style={{ color: "var(--success)" }}>
-              <TrendingUp className="w-3.5 h-3.5" /> {weeklySales} sold this week
+              <TrendingUp className="w-3.5 h-3.5" /> {weeklySales} item{weeklySales !== 1 ? "s" : ""} sold
             </p>
           )}
         </Link>
@@ -274,7 +282,7 @@ export default function DashboardPage() {
           href="/sales"
           className="hidden lg:block card d2 stagger p-4 lg:col-start-3 lg:col-span-2 lg:row-start-1 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
         >
-          <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }}>Sold this week</p>
+          <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }}>Items sold · 7 days</p>
           <p className="font-display font-extrabold text-3xl mt-1.5">{weeklySales !== null ? weeklySales : "—"}</p>
         </Link>
         <Link

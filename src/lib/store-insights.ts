@@ -147,6 +147,35 @@ export function categoryProfit(sales: AnalyticsSale[], econ: SaleEconomics[]): C
   })).sort((a, b) => b.netCents - a.netCents);
 }
 
+/**
+ * Top `max - 1` categories plus one "All other categories" row, so the
+ * table's Sold column always adds up to every sale in the period (the
+ * table used to show only the top 8 and silently drop the rest).
+ */
+export function collapseCategories(rows: CategoryProfit[], max = 8): Array<CategoryProfit & { rolledUp?: number }> {
+  if (rows.length <= max) return rows;
+  const head = rows.slice(0, max - 1);
+  const tail = rows.slice(max - 1);
+  const sum = (k: "units" | "grossCents" | "feeCents" | "labelCents" | "costCents" | "salesWithCost" | "netCents") => tail.reduce((a, r) => a + r[k], 0);
+  const units = sum("units");
+  const netCents = sum("netCents");
+  const other: CategoryProfit & { rolledUp: number } = {
+    category: `All other (${tail.length})`,
+    units,
+    grossCents: sum("grossCents"),
+    feeCents: sum("feeCents"),
+    labelCents: sum("labelCents"),
+    costCents: sum("costCents"),
+    salesWithCost: sum("salesWithCost"),
+    netCents,
+    marginPercent: null,
+    netPerItemCents: units > 0 ? Math.round(netCents / units) : 0,
+    avgDaysToSell: null,
+    rolledUp: tail.length,
+  };
+  return [...head, other];
+}
+
 // ---------------------------------------------------- best / worst items
 
 export function bestAndWorst(econ: SaleEconomics[], n = 3): { best: SaleEconomics[]; worst: SaleEconomics[] } {

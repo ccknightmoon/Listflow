@@ -158,3 +158,25 @@ describe("exact sell-through from daily snapshots", () => {
     expect(exactSellThroughTrend(bars, [], 1200, now)).toBeNull();
   });
 });
+
+import { collapseCategories, categoryProfit as _cp } from "./store-insights";
+import { resolveCategory as _rc } from "./sales-analytics";
+describe("category table adds up to every sale", () => {
+  const row = (category: string, units: number, netCents = units * 100) => ({ category, units, grossCents: units * 1000, feeCents: 0, labelCents: 0, costCents: 0, salesWithCost: 0, netCents, marginPercent: null, netPerItemCents: 100, avgDaysToSell: null });
+  it("rolls everything past the top 7 into one row, keeping totals", () => {
+    const rows = Array.from({ length: 11 }, (_, i) => row(`C${i}`, 11 - i)); // 66 units
+    const out = collapseCategories(rows, 8);
+    expect(out).toHaveLength(8);
+    expect(out[7].category).toBe("All other (4)");
+    expect(out.reduce((a, r) => a + r.units, 0)).toBe(rows.reduce((a, r) => a + r.units, 0));
+    expect(out.reduce((a, r) => a + r.netCents, 0)).toBe(rows.reduce((a, r) => a + r.netCents, 0));
+  });
+  it("leaves short tables alone", () => {
+    const rows = [row("Jackets", 3), row("Other", 1)];
+    expect(collapseCategories(rows, 8)).toBe(rows);
+  });
+  it("a sale with no category info still lands in 'Other'", () => {
+    expect(_rc({ ebayCategory: null, storeCategoryName: null, itemType: null, title: "Mystery lot" })).toBe("Other");
+    void _cp;
+  });
+});

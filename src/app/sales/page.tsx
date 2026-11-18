@@ -16,7 +16,7 @@ import { apiFetch } from "@/lib/api";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
 import { buildLedger, compareWithSummary, payoutBridge, salesBreakdown, displayLines, LINE_LABELS, type EbaySummaryByStatus, type LedgerTx, type Payout, type PeriodRange } from "@/lib/ledger";
-import { saleEconomics, shippingSplit, categoryProfit, bestAndWorst, staleListings, storeTips, activeCountAt, exactSellThroughTrend, type Snapshot } from "@/lib/store-insights";
+import { saleEconomics, shippingSplit, categoryProfit, collapseCategories, bestAndWorst, staleListings, storeTips, activeCountAt, exactSellThroughTrend, type Snapshot } from "@/lib/store-insights";
 import {
   deriveView, chooseFee, resolveCategory, toC, percentChange, type AnalyticsSale, type ActiveListing, type Change, type DatedAmount, type DayRange,
 } from "@/lib/sales-analytics";
@@ -979,7 +979,7 @@ export default function SalesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {fin.cats.slice(0, 8).map((r) => (
+                    {collapseCategories(fin.cats, 8).map((r) => (
                       <tr key={r.category} style={{ borderTop: "1px solid var(--border)" }}>
                         <td className="px-1 py-1.5 font-medium truncate max-w-[130px]">{r.category}</td>
                         <td className="text-right px-1 py-1.5">{r.units}</td>
@@ -991,6 +991,14 @@ export default function SalesPage() {
                       </tr>
                     ))}
                   </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: "1px solid var(--border)", color: "var(--text-secondary)" }}>
+                      <td className="px-1 py-1.5 font-semibold">Total</td>
+                      <td className="text-right px-1 py-1.5 font-semibold">{fin.cats.reduce((a, r) => a + r.units, 0)}</td>
+                      <td className="text-right px-1 py-1.5 font-semibold">{formatMoneyShort(fin.cats.reduce((a, r) => a + r.netCents, 0) / 100)}</td>
+                      <td colSpan={2} />
+                    </tr>
+                  </tfoot>
                 </table>
                 {c.avgDaysToSell != null && (
                   <p className="text-[10.5px] mt-2" style={{ color: "var(--text-tertiary)" }}>Average {Math.round(c.avgDaysToSell)} days from listing to sale ({c.salesWithDays} sales with a known start date).</p>

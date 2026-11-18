@@ -3,7 +3,7 @@ import {
   countStaleSorted,
   parseSortedPage,
   parseTrendSales,
-  weeklyFromTrend,
+  lastSevenDays,
   getDashboardSummary,
   invalidateDashboardSummary,
   SUMMARY_TTL_MS,
@@ -65,22 +65,29 @@ describe("parseSortedPage", () => {
   });
 });
 
-const tx = (price: string, qty: string, created: string) =>
-  `<Transaction><TransactionPrice currencyID="USD">${price}</TransactionPrice><QuantityPurchased>${qty}</QuantityPurchased><CreatedDate>${created}</CreatedDate></Transaction>`;
+let txId = 0;
+const tx = (price: string, qty: string, created: string, extra = "<PaidTime>2026-11-01T00:00:00Z</PaidTime>") =>
+  `<Transaction><TransactionID>${++txId}</TransactionID><Item><ItemID>1${txId}</ItemID><Title>T</Title></Item><TransactionPrice currencyID="USD">${price}</TransactionPrice><QuantityPurchased>${qty}</QuantityPurchased><CreatedDate>${created}</CreatedDate>${extra}</Transaction>`;
 
-describe("sales parsing", () => {
+describe("Home sales use the Sales page's definitions", () => {
   const body = `<Ack>Success</Ack><TransactionArray>${[
     tx("10.00", "1", new Date(NOW - 2 * DAY).toISOString()),
     tx("5.00", "2", new Date(NOW - 10 * DAY).toISOString()),
     tx("99.00", "1", new Date(NOW - 40 * DAY).toISOString()), // touched recently, sold long ago
     tx("0", "1", new Date(NOW - 1 * DAY).toISOString()),
+    tx("31.00", "1", new Date(NOW - 1 * DAY).toISOString(), "<ContainingOrder><CancelStatus>CancelComplete</CancelStatus></ContainingOrder><PaidTime>2026-11-01T00:00:00Z</PaidTime>"), // cancelled
+    tx("8.00", "1", new Date(NOW - 1 * DAY).toISOString(), "<Status><CheckoutStatus>CheckoutIncomplete</CheckoutStatus></Status>"), // unpaid
   ].join("")}</TransactionArray>`;
 
-  it("keeps sales by real sale date inside the 28-day window", () => {
-    expect(parseTrendSales(body, NOW - 28 * DAY).map((s) => s.total)).toEqual([10, 10]);
+  it("keeps paid sales by real sale date inside the 28-day window; drops cancelled and unpaid", () => {
+    expect(parseTrendSales(body, NOW - 28 * DAY).map((s) => [s.total, s.qty])).toEqual([[10, 1], [10, 2]]);
   });
-  it("counts this week's revenue and units", () => {
-    expect(weeklyFromTrend([body], NOW)).toEqual({ revenue: 10, sales: 1 });
+  it("last 7 days = today + 6 days back from local midnight, item sales and units", () => {
+    const sales = parseTrendSales(body, NOW - 28 * DAY);
+    expect(lastSevenDays(sales, NOW)).toEqual({ revenue: 10, sales: 1 });
+    // the window starts at local midnight 6 days back, so 5.9 days ago is always in and 7.5 never (any time zone)
+    const edge = [{ soldAt: new Date(NOW - 5.9 * DAY).toISOString(), total: 4, qty: 1 }, { soldAt: new Date(NOW - 7.5 * DAY).toISOString(), total: 50, qty: 1 }];
+    expect(lastSevenDays(edge, NOW)).toEqual({ revenue: 4, sales: 1 });
   });
 });
 

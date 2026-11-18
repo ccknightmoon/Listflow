@@ -12,7 +12,9 @@ import { fetchUnshippedOrders } from "@/lib/ebay-ship-orders";
 import { countPendingOffers } from "@/lib/ebay-offers";
 import { fetchUnansweredQuestions } from "@/lib/ebay-messages";
 import { STALE_DAYS_THRESHOLD } from "@/lib/stale-listings";
-import type { BucketableSale } from "@/lib/sales-buckets";
+import { parseTransactions } from "@/lib/sales-parse";
+import { lastSevenDays, type HomeSale } from "@/lib/home-week";
+export { lastSevenDays, type HomeSale };
 
 export const SUMMARY_TTL_MS = 120_000;
 export const TREND_DAYS = 28;
@@ -22,7 +24,7 @@ export interface DashboardSummary {
   active: number | null;
   weeklyRevenue: number | null;
   weeklySales: number | null;
-  trendSales: BucketableSale[] | null;
+  trendSales: HomeSale[] | null;
   shipCount: number | null;
   pendingOffers: number | null;
   buyerQuestions: number | null;
@@ -34,51 +36,32 @@ const ok = (body: string) => body.includes("<Ack>Success</Ack>") || body.include
 
 // ---------------------------------------------------------------- sales --
 
-/** Sales (by real sale date, not ModTime) inside the window, from one GetSellerTransactions page. */
-export function parseTrendSales(body: string, sinceMs: number): BucketableSale[] {
-  const out: BucketableSale[] = [];
-  for (const tx of xmlFindAll(body, "Transaction")) {
-    const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
-    const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10) || 1;
-    const soldAt = xmlFind(tx, "CreatedDate");
-    const t = Date.parse(soldAt);
-    if (price > 0 && Number.isFinite(t) && t >= sinceMs) out.push({ soldAt, total: price * qty });
-  }
-  return out;
-}
-
-/** This week's revenue and units sold, by real sale date. */
-export function weeklyFromTrend(body: string[], nowMs: number): { revenue: number; sales: number } {
-  const since = nowMs - 7 * DAY_MS;
-  let revenue = 0;
-  let sales = 0;
-  for (const b of body) {
-    for (const tx of xmlFindAll(b, "Transaction")) {
-      const price = parseFloat(xmlFind(tx, "TransactionPrice") || "0");
-      const qty = parseInt(xmlFind(tx, "QuantityPurchased") || "1", 10) || 1;
-      const t = Date.parse(xmlFind(tx, "CreatedDate"));
-      if (price > 0 && Number.isFinite(t) && t >= since) {
-        revenue += price * qty;
-        sales += qty;
-      }
-    }
-  }
-  return { revenue, sales };
+/**
+ * Paid sales in the window, parsed exactly like the Sales page
+ * (src/lib/sales-parse.ts): de-duplicated, cancelled and unpaid orders
+ * removed, item total = price x qty, dated by the sale (CreatedDate), not
+ * eBay's ModTime.
+ */
+export function parseTrendSales(bodies: string | string[], sinceMs: number): HomeSale[] {
+  const blocks = (Array.isArray(bodies) ? bodies : [bodies]).flatMap((b) => xmlFindAll(b, "Transaction"));
+  return parseTransactions(blocks)
+    .filter((s) => s.status === "paid" && Date.parse(s.soldAt) >= sinceMs)
+    .map((s) => ({ soldAt: s.soldAt, total: s.itemTotal, qty: s.qty }));
 }
 
 function salesXml(from: string, to: string, page: number) {
-  return `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination></GetSellerTransactionsRequest>`;
+  return `<?xml version="1.0" encoding="utf-8"?><GetSellerTransactionsRequest xmlns="urn:ebay:apis:eBLBaseComponents"><DetailLevel>ReturnAll</DetailLevel><IncludeContainingOrder>true</IncludeContainingOrder><ModTimeFrom>${from}</ModTimeFrom><ModTimeTo>${to}</ModTimeTo><Pagination><EntriesPerPage>200</EntriesPerPage><PageNumber>${page}</PageNumber></Pagination></GetSellerTransactionsRequest>`;
 }
 
 async function fetchSalesPages(nowMs: number): Promise<string[] | null> {
   const from = new Date(nowMs - TREND_DAYS * DAY_MS).toISOString();
   const to = new Date(nowMs).toISOString();
-  const first = await tradingRequest("GetSellerTransactions", salesXml(from, to, 1));
+  const first = await tradingRequest("GetSellerTransactions", salesXml(from, to, 1), "1225");
   if (!ok(first.body)) return null;
   const pages = Math.min(parseInt(xmlFind(xmlFind(first.body, "PaginationResult"), "TotalNumberOfPages") || "1", 10) || 1, 10);
   const bodies = [first.body];
   for (let p = 2; p <= pages; p++) {
-    const r = await tradingRequest("GetSellerTransactions", salesXml(from, to, p));
+    const r = await tradingRequest("GetSellerTransactions", salesXml(from, to, p), "1225");
     if (ok(r.body)) bodies.push(r.body);
   }
   return bodies;
@@ -196,14 +179,17 @@ export async function buildDashboardSummary(nowMs = Date.now()): Promise<Dashboa
     fetchStaleCount(nowMs),
   ]);
   const bodies = settled(salesBodies);
-  const weekly = bodies ? weeklyFromTrend(bodies, nowMs) : null;
+  const trend = bodies ? parseTrendSales(bodies, nowMs - TREND_DAYS * DAY_MS) : null;
+  // Server-side fallback in UTC; the Dashboard recomputes "last 7 days" in
+  // the seller's own time zone from trendSales (same as the Sales page).
+  const weekly = trend ? lastSevenDays(trend, nowMs) : null;
   const shipRes = settled(ship);
   const q = settled(questions);
   return {
     active: settled(active),
     weeklyRevenue: weekly ? Math.round(weekly.revenue * 100) / 100 : null,
     weeklySales: weekly ? weekly.sales : null,
-    trendSales: bodies ? bodies.flatMap((b) => parseTrendSales(b, nowMs - TREND_DAYS * DAY_MS)) : null,
+    trendSales: trend,
     shipCount: shipRes && !shipRes.error ? shipRes.items.length : null,
     pendingOffers: settled(offers),
     buyerQuestions: q && !q.error ? q.questions.length : null,
