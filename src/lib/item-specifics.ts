@@ -98,7 +98,7 @@ export function matchAllowedValue(value: string, def: Pick<AspectDef, "mode" | "
   if (!def.values.length) {
     if (def.mode === "SELECTION_ONLY") return null;
     // Free text: canonical spelling for known equivalents ("USA" → "United States").
-    return group ? group[0].replace(/\b\w/g, (c) => c.toUpperCase()) : v.slice(0, 65);
+    return group ? group[0].replace(/\b\w/g, (c) => c.toUpperCase()) : capLength(v);
   }
   const byNorm = new Map(def.values.map((a) => [norm(a), a]));
   if (byNorm.has(n)) return byNorm.get(n)!;
@@ -106,14 +106,73 @@ export function matchAllowedValue(value: string, def: Pick<AspectDef, "mode" | "
   for (const alt of SYNONYMS[n] ?? []) if (byNorm.has(alt)) return byNorm.get(alt)!;
   const compact = n.replace(/ /g, "");
   for (const [k, a] of byNorm) if (k.replace(/ /g, "") === compact) return a;
-  // Whole-word containment of an allowed value INSIDE the seller's value
-  // ("Heavyweight Cotton" → "Cotton"), preferring the longest so
-  // "Light Blue" beats "Blue". Never the other way round: a short value
-  // like "Jersey" must not grab a longer, different allowed value.
-  const words = ` ${n} `;
-  const hits = [...byNorm.entries()].filter(([k]) => k.length >= 3 && words.includes(` ${k} `));
-  if (hits.length) return hits.sort((a, b) => b[0].length - a[0].length)[0][1];
-  return def.mode === "SELECTION_ONLY" ? null : v.slice(0, 65);
+  // Singular/plural ("Pittsburgh Steeler" → "Pittsburgh Steelers").
+  const sing = singularize(n);
+  for (const [k, a] of byNorm) if (singularize(k) === sing) return a;
+  const selection = def.mode === "SELECTION_ONLY";
+  // Typos: the single closest value within a small edit distance (a tie
+  // means "not sure" → no match). Free text only snaps when it's 1 edit away.
+  const fuzzy = closestByEdits(n, [...byNorm.keys()], selection ? maxEditsFor(n) : Math.min(1, maxEditsFor(n)));
+  if (fuzzy) return byNorm.get(fuzzy)!;
+  if (selection) {
+    // Whole-word containment of an allowed value INSIDE the seller's value
+    // ("Heavyweight Cotton" → "Cotton"), longest first ("Light Blue" beats
+    // "Blue"). Never the other way round, and never for free text (the
+    // seller's own wording is kept there).
+    const words = ` ${n} `;
+    const hits = [...byNorm.entries()].filter(([k]) => k.length >= 3 && words.includes(` ${k} `));
+    if (hits.length) return hits.sort((a, b) => b[0].length - a[0].length)[0][1];
+    return null;
+  }
+  return capLength(v);
+}
+
+/** eBay's max length for an aspect value; cut at a word boundary. */
+export const ASPECT_VALUE_MAX = 65;
+export function capLength(v: string, max = ASPECT_VALUE_MAX): string {
+  if (v.length <= max) return v;
+  const cut = v.slice(0, max + 1);
+  const at = cut.lastIndexOf(" ");
+  return (at > max * 0.6 ? cut.slice(0, at) : v.slice(0, max)).trim();
+}
+
+function singularize(n: string): string {
+  return n.split(" ").map((w) => (w.length > 3 && /ies$/.test(w) ? w.slice(0, -3) + "y" : w.length > 3 && /(ses|xes|ches|shes)$/.test(w) ? w.slice(0, -2) : w.length > 3 && /s$/.test(w) && !/ss$/.test(w) ? w.slice(0, -1) : w)).join(" ");
+}
+
+function maxEditsFor(n: string): number {
+  return n.length <= 4 ? 0 : n.length <= 8 ? 1 : n.length <= 16 ? 2 : 3;
+}
+
+/** Levenshtein distance, bailing out early once over `limit`. */
+export function editDistance(a: string, b: string, limit = Infinity): number {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      rowMin = Math.min(rowMin, cur[j]);
+    }
+    if (rowMin > limit) return limit + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** The unique key within `limit` edits of `n` (null if none, or a tie). */
+function closestByEdits(n: string, keys: string[], limit: number): string | null {
+  if (limit <= 0) return null;
+  let best: string | null = null;
+  let bestD = limit + 1;
+  let tie = false;
+  for (const k of keys) {
+    const d = editDistance(n, k, limit);
+    if (d < bestD) { best = k; bestD = d; tie = false; }
+    else if (d === bestD && d <= limit) tie = true;
+  }
+  return best && bestD <= limit && !tie ? best : null;
 }
 
 export type Aspects = Record<string, string[]>;

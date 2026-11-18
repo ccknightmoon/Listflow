@@ -136,7 +136,16 @@ const get = (a: AspectMap, name: string) => Object.entries(a).find(([k]) => lc(k
  * "Character", fabric constructions as "Material", and vintage/decade
  * without evidence. Returns what was removed so it can be reported.
  */
-export function sanitizeForItem(aspects: AspectMap, kind: GarmentKind, opts: { vintageEvidence?: boolean } = {}): { aspects: AspectMap; removed: Array<{ name: string; value: string; why: string }> } {
+// Feature values that belong to other garments: dropped unless the photos
+// showed them (analyze time passes the photo-read features as evidence).
+const FEATURE_CONFLICTS: Partial<Record<GarmentKind, RegExp>> = {
+  "sports-jersey": /^(pockets?|zip(per)? pockets?|cargo pockets?|side pockets?|belt loops?|drawstring|elastic waist(band)?|hood(ed)?|zip(per)?|full zip|lined|insulated)$/i,
+  top: /^(cargo pockets?|belt loops?|elastic waist(band)?|drawstring waist)$/i,
+  bottom: /^(hood(ed)?|collar(ed)?|chest pocket)$/i,
+  hat: /^(pockets?|belt loops?|hood(ed)?)$/i,
+};
+
+export function sanitizeForItem(aspects: AspectMap, kind: GarmentKind, opts: { vintageEvidence?: boolean; photoFeatures?: string[] } = {}): { aspects: AspectMap; removed: Array<{ name: string; value: string; why: string }> } {
   const out: AspectMap = {};
   const removed: Array<{ name: string; value: string; why: string }> = [];
   const people = [...get(aspects, "Player"), ...get(aspects, "Team"), ...get(aspects, "League"), ...get(aspects, "Athlete")]
@@ -155,6 +164,10 @@ export function sanitizeForItem(aspects: AspectMap, kind: GarmentKind, opts: { v
         removed.push({ name, value: v, why: "a knit/weave, not a fiber — moved to Fabric Type" });
         if (!get(aspects, "Fabric Type").length && !get(out, "Fabric Type").length) out["Fabric Type"] = [v];
         continue;
+      }
+      if ((n === "features" || n === "accents") && opts.photoFeatures && FEATURE_CONFLICTS[kind]?.test(v.trim())
+        && !opts.photoFeatures.some((f) => lc(f) === lc(v))) {
+        removed.push({ name, value: v, why: "doesn't fit this kind of item and wasn't seen in the photos" }); continue;
       }
       if ((n === "vintage" && lc(v) === "no")) { removed.push({ name, value: v, why: "not verified" }); continue; }
       if ((n === "vintage" || n === "decade" || n === "year manufactured") && !opts.vintageEvidence) { removed.push({ name, value: v, why: "no evidence in the photos" }); continue; }
@@ -188,3 +201,23 @@ export function consistencyIssues(f: { title?: string | null; kind: GarmentKind;
   }
   return [...new Set(issues)];
 }
+
+/**
+ * Drop "extra" aspects (not in the category's list) whose values just repeat
+ * a real aspect — e.g. a leftover Type "Jersey" next to the category's own
+ * Product "Jersey". Category aspects are always kept.
+ */
+export function dedupeAspects(aspects: AspectMap, categoryAspectNames: string[]): AspectMap {
+  const known = new Set(categoryAspectNames.map(lc));
+  if (known.size === 0) return aspects;
+  const knownValues = new Set(Object.entries(aspects).filter(([k]) => known.has(lc(k))).flatMap(([, v]) => v.map(lc)));
+  const out: AspectMap = {};
+  for (const [k, v] of Object.entries(aspects)) {
+    if (!known.has(lc(k)) && v.length && v.every((x) => knownValues.has(lc(x)))) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+// Aspects only the photos can tell (the text-only fill step must not invent them).
+export const PHOTO_ONLY_ASPECTS = new Set(["features", "accents", "closure", "pattern", "color", "neckline", "sleeve length", "fabric type", "collar style", "lining material", "jersey number", "signed"]);

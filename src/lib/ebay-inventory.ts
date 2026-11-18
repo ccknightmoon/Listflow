@@ -7,7 +7,7 @@ import {
   aspectsFromDraft, conditionNote, fitTitle, listingDescriptionHtml, measurementAspects, measurementsFromDescription, mergeAspects,
   pickCondition, sanitizeStoredSpecifics,
 } from "./item-specifics";
-import { aspectFitsKind, classifyGarment, measurementKeysFor, sanitizeForItem } from "./garment";
+import { aspectFitsKind, classifyGarment, dedupeAspects, measurementKeysFor, sanitizeForItem } from "./garment";
 
 export const CONDITION_MAP: Record<string, string> = {
   "New with tags": "NEW",
@@ -300,7 +300,13 @@ export async function upsertInventoryItem(sku: string, draft: {
   const fittingDefs = defs.filter((d) => aspectFitsKind(d.name, kind));
   const vintageOk = /^y/i.test(draft.vintage ?? "") && !!draft.year_manufactured;
   const merged = mergeAspects([aspectsFromDraft(draft), measurementAspects(ms, fittingDefs), stored?.aspects ?? {}], fittingDefs);
-  const aspects = sanitizeForItem(merged.aspects, kind, { vintageEvidence: vintageOk || !!stored?.aspects?.["Vintage"]?.length }).aspects;
+  // Same validation as at analyze time: every value matched to eBay's list
+  // for this category (mergeAspects), garment guard, then extras that only
+  // repeat a category aspect are dropped — nothing invalid reaches eBay.
+  const aspects = dedupeAspects(
+    sanitizeForItem(merged.aspects, kind, { vintageEvidence: vintageOk || !!stored?.aspects?.["Vintage"]?.length }).aspects,
+    fittingDefs.map((d) => d.name),
+  );
   const missingRequiredAspects = mergeAspects([aspects], fittingDefs).missingRequired;
 
   // Condition: the category's own accepted value for the seller's tier

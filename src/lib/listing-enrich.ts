@@ -9,7 +9,7 @@
 // Runs inside an eBay request context (taxonomy calls use the seller's token).
 import { openAIPost } from "@/lib/openai-request";
 import { chooseCategory } from "@/lib/ebay-category";
-import { aspectFitsKind, classifyGarment, consistencyIssues, measurementKeysFor, sanitizeForItem, type GarmentKind } from "@/lib/garment";
+import { aspectFitsKind, classifyGarment, consistencyIssues, dedupeAspects, measurementKeysFor, PHOTO_ONLY_ASPECTS, sanitizeForItem, type GarmentKind } from "@/lib/garment";
 import { fetchAspectDefs, defsForClient } from "@/lib/ebay-aspects";
 import {
   aspectsFromDraft, aspectsToAsk, composeTitle, fitTitle, measurementAspects, measurementLines, measurementsFrom,
@@ -152,11 +152,9 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
   const ms = visionMeasurements(v).filter((m) => allowedKeys.size === 0 || allowedKeys.has(m.key));
   const evidence = vintageEvidence(v);
 
-  const base = sanitizeForItem(
-    mergeAspects([aspectsFromDraft(facts), visionSpecifics(v), measurementAspects(ms, defs)], defs).aspects,
-    kind,
-    { vintageEvidence: evidence },
-  ).aspects;
+  const photoFeatures = [...(visionSpecifics(v)["Features"] ?? []), ...(visionSpecifics(v)["Accents"] ?? [])];
+  const baseMerge = mergeAspects([aspectsFromDraft(facts), visionSpecifics(v), measurementAspects(ms, defs)], defs);
+  const base = sanitizeForItem(baseMerge.aspects, kind, { vintageEvidence: evidence, photoFeatures }).aspects;
 
   let ai: Aspects = {};
   const ask = aspectsToAsk(defs, base);
@@ -175,15 +173,24 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
           ),
         }],
       })) as { choices?: { message?: { content?: string } }[] };
-      ai = sanitizeForItem(parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}")), kind, { vintageEvidence: evidence }).aspects;
+      // The text-only step can't see the item: it may not add visual
+      // aspects (features, color, closure…) the photos didn't show.
+      const raw = parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}"));
+      for (const k of Object.keys(raw)) if (PHOTO_ONLY_ASPECTS.has(k.toLowerCase())) delete raw[k];
+      ai = sanitizeForItem(raw, kind, { vintageEvidence: evidence, photoFeatures }).aspects;
     } catch {
       ai = {};
     }
   }
 
-  // Photo-read facts win over the text model's mapping.
-  const merged = mergeAspects([ai, base], defs);
-  const issues = consistencyIssues({ title: titleForCategory, kind, categoryPath: cat?.categoryPath ?? null, aspects: merged.aspects, measurementKeys: ms.map((m) => m.key) });
+  // Photo-read facts win over the text model's mapping. Every value is
+  // validated against eBay's list for this category (server = source of truth).
+  const merged0 = mergeAspects([ai, base], defs);
+  const merged = { ...merged0, aspects: dedupeAspects(merged0.aspects, defs.map((d) => d.name)) };
+  const rejected = [...baseMerge.dropped, ...merged0.dropped]
+    .filter((d) => defs.some((x) => x.name === d.name && x.mode === "SELECTION_ONLY"))
+    .map((d) => `${d.name}: "${d.value}" isn't one of eBay's values — pick one from the list.`);
+  const issues = [...consistencyIssues({ title: titleForCategory, kind, categoryPath: cat?.categoryPath ?? null, aspects: merged.aspects, measurementKeys: ms.map((m) => m.key) }), ...new Set(rejected)];
   if (cat?.needsReview) issues.unshift("Couldn't find an eBay category that clearly fits this item — please choose one.");
   return {
     categoryId,
@@ -256,12 +263,15 @@ export async function refillForCategory(
         response_format: { type: "json_schema", json_schema: { name: "item_specifics", strict: true, schema: FILL_SCHEMA } },
         messages: [{ role: "user", content: fillPrompt({ title: input.title, itemType: input.itemType, known: base }, ask, `${input.itemType ?? kind} — eBay category: ${input.categoryPath ?? input.categoryId}`) }],
       })) as { choices?: { message?: { content?: string } }[] };
-      ai = sanitizeForItem(parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}")), kind, { vintageEvidence: evidence }).aspects;
+      const raw = parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}"));
+      for (const k of Object.keys(raw)) if (PHOTO_ONLY_ASPECTS.has(k.toLowerCase())) delete raw[k];
+      ai = sanitizeForItem(raw, kind, { vintageEvidence: evidence }).aspects;
     } catch {
       ai = {};
     }
   }
-  const merged = mergeAspects([ai, base], defs);
+  const merged0 = mergeAspects([ai, base], defs);
+  const merged = { ...merged0, aspects: dedupeAspects(merged0.aspects, defs.map((d) => d.name)) };
   return {
     categoryId: input.categoryId,
     categoryPath: input.categoryPath,

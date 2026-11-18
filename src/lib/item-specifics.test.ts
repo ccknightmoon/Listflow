@@ -35,7 +35,8 @@ describe("allowed-value matching", () => {
   it("snaps case, spelling variants and synonyms to eBay's value", () => {
     expect(matchAllowedValue("grey", color)).toBe("Gray");
     expect(matchAllowedValue("light blue", color)).toBe("Light Blue");
-    expect(matchAllowedValue("Light blue denim", color)).toBe("Light Blue"); // longest whole-word hit
+    expect(matchAllowedValue("Light blue denim", { ...color, mode: "SELECTION_ONLY" })).toBe("Light Blue"); // longest whole-word hit
+    expect(matchAllowedValue("Light blue denim", color)).toBe("Light blue denim"); // free text keeps the seller's words
     expect(matchAllowedValue("Men's", dept)).toBe("Men");
   });
   it("selection-only never guesses; free text keeps the seller's value", () => {
