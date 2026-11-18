@@ -14,6 +14,8 @@ export interface AspectDef {
   mode: "FREE_TEXT" | "SELECTION_ONLY";
   multi: boolean;
   values: string[]; // allowed / suggested values
+  /** The browser copy only has part of eBay's list (long free-text lists like Brand). */
+  valuesTruncated?: boolean;
 }
 
 /** eBay Taxonomy getItemAspectsForCategory → AspectDef[] (required first, then recommended, then the rest, eBay order kept). */
@@ -54,18 +56,53 @@ const SYNONYMS: Record<string, string[]> = {
   mens: ["men"], womens: ["women"], "men s": ["men"], "women s": ["women"],
 };
 
+// Values that mean the same thing (any member → whichever spelling eBay's
+// list uses). Countries are the common one: tags say "Made in USA".
+const EQUIVALENT_GROUPS: string[][] = [
+  ["united states", "united states of america", "usa", "us", "america", "the united states", "u s", "u s a"],
+  ["united kingdom", "uk", "great britain", "britain", "england", "gb"],
+  ["china", "prc", "peoples republic of china", "mainland china"],
+  ["hong kong", "hong kong sar", "hong kong china"],
+  ["taiwan", "republic of china"],
+  ["south korea", "korea", "republic of korea", "korea republic of", "korea south"],
+  ["vietnam", "viet nam"],
+  ["turkey", "turkiye"],
+  ["czech republic", "czechia"],
+  ["macau", "macao"],
+  ["dominican republic", "dominican rep"],
+  ["el salvador", "salvador"],
+];
+const EQUIV = new Map<string, string[]>();
+for (const g of EQUIVALENT_GROUPS) for (const m of g) EQUIV.set(m, g);
+
+/** Strip label noise the AI or a tag adds: "Made in USA", "Country of origin: China", trailing dots. */
+export function cleanAspectInput(value: string): string {
+  return value
+    .trim()
+    .replace(/^(made|manufactured|assembled|printed)\s+in\s+(the\s+)?/i, "")
+    .replace(/^(country( of origin)?|country\/region of manufacture|origin)\s*[:\-]\s*/i, "")
+    .replace(/[.;,\s]+$/, "")
+    .trim();
+}
+
 /**
  * Best eBay value for `value`. SELECTION_ONLY aspects only accept a listed
  * value (null if none fits — never a guess); FREE_TEXT keeps the seller's
  * text but snaps to a listed value when it's the same thing.
  */
 export function matchAllowedValue(value: string, def: Pick<AspectDef, "mode" | "values">): string | null {
-  const v = value.trim();
+  const v = cleanAspectInput(value);
   if (!v) return null;
   const n = norm(v);
-  if (!def.values.length) return def.mode === "SELECTION_ONLY" ? null : v.slice(0, 65);
+  const group = EQUIV.get(n);
+  if (!def.values.length) {
+    if (def.mode === "SELECTION_ONLY") return null;
+    // Free text: canonical spelling for known equivalents ("USA" → "United States").
+    return group ? group[0].replace(/\b\w/g, (c) => c.toUpperCase()) : v.slice(0, 65);
+  }
   const byNorm = new Map(def.values.map((a) => [norm(a), a]));
   if (byNorm.has(n)) return byNorm.get(n)!;
+  for (const alt of group ?? []) if (byNorm.has(alt)) return byNorm.get(alt)!;
   for (const alt of SYNONYMS[n] ?? []) if (byNorm.has(alt)) return byNorm.get(alt)!;
   const compact = n.replace(/ /g, "");
   for (const [k, a] of byNorm) if (k.replace(/ /g, "") === compact) return a;
@@ -558,4 +595,32 @@ export function listingDescriptionHtml(
     notes,
     sku: draft.custom_sku ?? null,
   });
+}
+
+
+/** Closest allowed values for a value eBay won't accept (for one-tap fixes). */
+export function suggestAllowedValues(value: string, def: Pick<AspectDef, "values">, max = 3): string[] {
+  const n = norm(cleanAspectInput(value));
+  if (!n || !def.values.length) return [];
+  const words = new Set(n.split(" "));
+  const scored = def.values.map((a) => {
+    const an = norm(a);
+    const aw = an.split(" ");
+    let score = aw.filter((w) => words.has(w)).length * 3;
+    if (an.startsWith(n) || n.startsWith(an)) score += 4;
+    if (an[0] === n[0]) score += 1;
+    score -= Math.abs(an.length - n.length) / 10;
+    return { a, score };
+  });
+  return scored.filter((x) => x.score > 1).sort((x, y) => y.score - x.score).slice(0, max).map((x) => x.a);
+}
+
+/**
+ * Is this value a real problem for eBay? Only for selection-only aspects
+ * whose FULL allowed list we have, and only if no allowed value matches.
+ * Free-text aspects accept any value, so they're never flagged.
+ */
+export function isRejectedValue(value: string, def: Pick<AspectDef, "mode" | "values" | "valuesTruncated">): boolean {
+  if (def.mode !== "SELECTION_ONLY" || def.valuesTruncated || def.values.length === 0) return false;
+  return matchAllowedValue(value, def) === null;
 }

@@ -61,7 +61,17 @@ export function parseConditionPolicy(data: unknown): string[] | null {
   return enums.length ? enums : null;
 }
 
-/** Defs trimmed for the browser (Brand alone can list thousands of values). */
-export function defsForClient(defs: AspectDef[], maxValues = 120): AspectDef[] {
-  return defs.map((d) => ({ ...d, values: d.values.slice(0, maxValues) }));
+/**
+ * Defs for the browser. Free-text lists (Brand can have thousands) are
+ * trimmed and marked `valuesTruncated` so the editor never flags a value
+ * just because it fell off the trimmed list. Selection-only lists are sent
+ * whole (bug, Nov 2026: Country/Region of Manufacture has ~250 values,
+ * "United States" was past the old 120 cut, so a correct value showed an
+ * error under the field).
+ */
+export function defsForClient(defs: AspectDef[], maxFreeTextValues = 120, maxSelectionValues = 1500): AspectDef[] {
+  return defs.map((d) => {
+    const cap = d.mode === "SELECTION_ONLY" ? maxSelectionValues : maxFreeTextValues;
+    return d.values.length > cap ? { ...d, values: d.values.slice(0, cap), valuesTruncated: true } : d;
+  });
 }

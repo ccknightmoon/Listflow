@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, FolderTree, Loader2, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api";
-import { matchAllowedValue, missingRequiredAspects, type AspectDef, type Aspects } from "@/lib/item-specifics";
+import { isRejectedValue, matchAllowedValue, missingRequiredAspects, suggestAllowedValues, type AspectDef, type Aspects } from "@/lib/item-specifics";
 
 /**
  * Edit eBay item specifics fast (phone and desktop). Required aspects come
@@ -94,7 +94,9 @@ export default function SpecificsEditor({
   const emptyRecommended = defs.filter((d) => !d.required && d.recommended && !valueOf(d.name).length);
 
   function set(def: AspectDef, raw: string) {
-    const parts = def.multi ? raw.split(",").map((s) => s.trim()) : [raw.trim()];
+    // Snap to eBay's exact spelling where there is one ("usa" → "United States").
+    const parts = (def.multi ? raw.split(",").map((s) => s.trim()) : [raw.trim()])
+      .map((p) => (p && def.values.length ? matchAllowedValue(p, def) ?? p : p));
     const next: Aspects = { ...aspects };
     for (const k of Object.keys(next)) if (k.toLowerCase() === def.name.toLowerCase()) delete next[k];
     const vals = parts.filter(Boolean);
@@ -106,7 +108,10 @@ export default function SpecificsEditor({
     const vals = valueOf(d.name);
     const text = vals.join(", ");
     const isMissing = d.required && vals.length === 0;
-    const offList = d.mode === "SELECTION_ONLY" && d.values.length > 0 && vals.some((v) => matchAllowedValue(v, d) === null);
+    // Only a real problem: a selection-only aspect, full list known, and no
+    // allowed value matches (casing/synonyms like "USA" are fine).
+    const rejected = vals.filter((v) => isRejectedValue(v, d));
+    const offList = rejected.length > 0;
     const listId = d.values.length ? `asp-${d.name.replace(/[^a-z0-9]/gi, "-").toLowerCase()}` : undefined;
     return (
       <label key={d.name} className="flex flex-col gap-1 min-w-0">
@@ -131,7 +136,19 @@ export default function SpecificsEditor({
             {d.values.map((v) => <option key={v} value={v} />)}
           </datalist>
         )}
-        {offList && <span className="text-[10px]" style={{ color: "var(--danger)" }}>Pick one of eBay&apos;s values for this.</span>}
+        {offList && (
+          <span className="text-[10px] flex flex-wrap items-center gap-1" style={{ color: "var(--danger)" }} role="alert">
+            eBay doesn&apos;t accept &ldquo;{rejected[0]}&rdquo; here.
+            {suggestAllowedValues(rejected[0], d).map((sug) => (
+              <button key={sug} type="button" disabled={disabled}
+                onClick={(e) => { e.preventDefault(); set(d, d.multi ? vals.map((v) => (v === rejected[0] ? sug : v)).join(", ") : sug); }}
+                className="px-1.5 py-0.5 rounded-md font-semibold" style={{ background: "var(--accent-tint)", color: "var(--accent)" }}>
+                Use &ldquo;{sug}&rdquo;
+              </button>
+            ))}
+            {suggestAllowedValues(rejected[0], d).length === 0 && <span>Pick one from the list.</span>}
+          </span>
+        )}
       </label>
     );
   };

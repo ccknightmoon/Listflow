@@ -75,7 +75,7 @@ Respond with ONLY a JSON object (no markdown) in this exact shape:
     "Insulation Material": "if tagged",
     "Collar Style": "if visible",
     "Occasion": "Casual, Activewear, Workwear, Party/Cocktail, Formal — when obvious",
-    "Country/Region of Manufacture": "ONLY from a 'Made in …' tag, e.g. 'United States'. Else empty.",
+    "Country/Region of Manufacture": "ONLY from a 'Made in …' tag — the country name alone, e.g. 'United States', 'China', 'Mexico' (not 'Made in USA'). Else empty.",
     "Product Line": "e.g. 'Detroit Jacket', 'Air Jordan', '501' — only if printed/tagged",
     "Model": "style/model number from the tag, e.g. 'J97'",
     "Team": "sports team printed on it, e.g. 'Dallas Cowboys'",
