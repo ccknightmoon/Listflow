@@ -2,6 +2,8 @@
 
 import Sheet from "@/components/Sheet";
 import { takePendingPhotos } from "@/lib/pending-photos";
+import PhotoDropZone from "@/components/PhotoDropZone";
+import { useIsDesktop } from "@/lib/use-is-desktop";
 import { getPublishQueue } from "@/lib/publish-queue";
 import { formatMoney } from "@/lib/format";
 import { useState, useRef, useEffect } from "react";
@@ -218,6 +220,7 @@ export default function NewListingPage() {
   }
 
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const isDesktop = useIsDesktop();
   const draggedPhoto = useRef<number | null>(null);
   const photoEditorRef = useRef<HTMLDivElement | null>(null);
   const dragPointer = useRef<{ x: number; y: number } | null>(null);
@@ -724,6 +727,17 @@ export default function NewListingPage() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
+  // Every way photos arrive (camera/file picker, drag-and-drop, paste)
+  // goes through here, so the hand-off guard below applies to all of them.
+  function addPhotoFiles(files: File[]) {
+    if (files.length === 0) return;
+    if (handingOff.current) {
+      heldFiles.current.push(...files);
+      return;
+    }
+    void (async () => { for (const f of files) await handleFileChange(f); })();
+  }
+
   return (
     <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-24">
       <div className="flex items-center gap-3 mb-6">
@@ -737,9 +751,11 @@ export default function NewListingPage() {
         <h1 className="text-xl font-medium">New listing</h1>
       </div>
 
-      <div className="mb-4">
+      {/* Desktop (lg): photos on the left (sticky), the form on the right. */}
+      <div className="lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-8 lg:items-start">
+      <PhotoDropZone className="mb-4 lg:sticky lg:top-6" onFiles={addPhotoFiles} disabled={photos.length >= 24}>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-xs text-[var(--text-secondary)]">Photos ({photos.length})</p>
+          <p className="text-xs text-[var(--text-secondary)]">Photos ({photos.length})<span className="hidden lg:inline"> · drag photos here or paste with ⌘V / Ctrl+V</span></p>
           <button type="button" className="btn text-xs py-1.5 px-2.5" onClick={() => fileInput.current?.click()}>
             <Plus className="w-3.5 h-3.5" /> Add photo
           </button>
@@ -747,24 +763,22 @@ export default function NewListingPage() {
             ref={fileInput}
             type="file"
             accept="image/*"
-            capture="environment"
+            // Phones open the camera; computers get the normal file picker
+            // (multi-select) instead of relying on `capture`.
+            capture={isDesktop ? undefined : "environment"}
             className="hidden"
             multiple
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
               e.currentTarget.value = "";
-              if (handingOff.current) {
-                heldFiles.current.push(...files);
-                return;
-              }
-              void (async () => { for (const f of files) await handleFileChange(f); })();
+              addPhotoFiles(files);
             }}
           />
         </div>
         {photos.length === 0 ? (
           <button type="button" onClick={() => fileInput.current?.click()} className="card border-dashed w-full py-8 flex flex-col items-center gap-2">
             <Camera className="w-6 h-6 text-accent" />
-            <span className="text-sm text-[var(--text-secondary)]">Add your first photo</span>
+            <span className="text-sm text-[var(--text-secondary)]">{isDesktop ? "Choose photos, drag them here, or paste" : "Add your first photo"}</span>
           </button>
         ) : (
           <div
@@ -804,15 +818,16 @@ export default function NewListingPage() {
             : { background: "var(--accent-tint)", color: "var(--accent)", border: "1px solid color-mix(in srgb, var(--accent) 40%, transparent)" }}
         >
           <Camera className="w-5 h-5" />
-          {photos.length === 0 ? "Take photos" : photos.length === 1 ? "Next photo (measurements)" : photos.length === 2 ? "Next photo (flaws / tag)" : `Next photo (${photos.length + 1})`}
+          {isDesktop ? (photos.length === 0 ? "Choose photos…" : "Add more photos…") : photos.length === 0 ? "Take photos" : photos.length === 1 ? "Next photo (measurements)" : photos.length === 2 ? "Next photo (flaws / tag)" : `Next photo (${photos.length + 1})`}
         </button>
         {photoUndo && (
           <button type="button" onClick={undoPhotoChange} className="mt-1 text-xs flex items-center gap-1 text-[var(--accent)]">
             <Undo2 className="w-3.5 h-3.5" /> Undo {photoUndoLabel.toLowerCase()}
           </button>
         )}
-      </div>
+      </PhotoDropZone>
 
+      <div className="min-w-0">
       <AIDisclaimer className="mb-4" />
 
       <div className="flex flex-col gap-3 mb-4">
@@ -1189,6 +1204,8 @@ export default function NewListingPage() {
           ) : null}
         </div>
       )}
+      </div>
+      </div>
     </main>
   );
 }
@@ -1224,6 +1241,12 @@ function PhotoCard({
     startPoint.current = { x: e.clientX, y: e.clientY };
     dragTarget.current = e.currentTarget;
     dropIndex.current = index;
+    // A mouse grabs the handle straight away (no press-and-hold needed).
+    if (e.pointerType === "mouse") {
+      setTouchDragging(true);
+      dragTarget.current?.setPointerCapture(e.pointerId);
+      return;
+    }
     dragTimer.current = window.setTimeout(() => {
       setTouchDragging(true);
       dragTarget.current?.setPointerCapture(e.pointerId);
@@ -1275,13 +1298,18 @@ function PhotoCard({
         <div
           role="button"
           tabIndex={0}
-          aria-label={`Hold and drag photo ${index + 1} to reorder`}
+          aria-label={`Drag photo ${index + 1} to reorder (or use the arrow keys)`}
           title="Hold and drag to reorder"
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white cursor-grab touch-none"
           onPointerDown={(e) => { e.stopPropagation(); onDragStart(); onPointerDown(e); }}
           onPointerMove={(e) => { e.stopPropagation(); onPointerMove(e); }}
           onPointerUp={(e) => { e.stopPropagation(); onPointerUp(e); }}
           onPointerCancel={(e) => { e.stopPropagation(); onPointerUp(e); }}
+          onKeyDown={(e) => {
+            // Keyboard reorder: ←/→ move this photo.
+            if (e.key === "ArrowLeft" && index > 0) { e.preventDefault(); onMove(index - 1); }
+            if (e.key === "ArrowRight" && index < count - 1) { e.preventDefault(); onMove(index + 1); }
+          }}
         >
           <GripVertical className="w-5 h-5" />
         </div>

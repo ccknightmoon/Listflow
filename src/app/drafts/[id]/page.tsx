@@ -1,6 +1,8 @@
 "use client";
 
 import Sheet from "@/components/Sheet";
+import PhotoDropZone from "@/components/PhotoDropZone";
+import { useIsDesktop } from "@/lib/use-is-desktop";
 import Lightbox from "@/components/Lightbox";
 import { Z } from "@/lib/z-layers";
 import { EditorSkeleton } from "@/components/ui";
@@ -67,6 +69,7 @@ interface Draft {
 }
 
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const isDesktop = useIsDesktop();
   const { id } = use(params);
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -585,6 +588,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  // Drag-and-drop / paste / multi-select on computers: add each in turn.
+  async function handleAddListingPhotos(files: File[]) {
+    for (const f of files) await handleAddListingPhoto(f);
+  }
+
   async function handleAddListingPhoto(file: File | undefined) {
     if (!file) return;
     setError(null);
@@ -746,6 +754,14 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       if (moved) {
         clearTimeout(photoDragTimer.current);
         photoDragTimer.current = null;
+        // A mouse can't press-and-hold-then-drag naturally: moving with the
+        // button down starts the reorder right away (a plain click still
+        // opens the photo).
+        if (e.pointerType === "mouse" && photoDragIdx.current !== null) {
+          activePhotoDrag.current = true;
+          setDragIdx(photoDragIdx.current);
+          photoDragTarget.current?.setPointerCapture(e.pointerId);
+        }
       }
     }
     if (photoDragIdx.current === null || !activePhotoDrag.current) return;
@@ -947,10 +963,13 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             </div>
       </Sheet>
 
+      {/* Desktop (lg): photos + re-analyze on the left (sticky), the form on the right. */}
+      <div className="lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-8 lg:items-start">
+      <PhotoDropZone className="lg:sticky lg:top-6" onFiles={(files) => void handleAddListingPhotos(files)} disabled={photoUrls.length >= 24}>
       {photoUrls.length > 0 ? (
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-xs text-[var(--text-secondary)]">Photos · swipe to see all</p>
+            <p className="text-xs text-[var(--text-secondary)]">Photos · <span className="lg:hidden">swipe to see all</span><span className="hidden lg:inline">scroll to see all · drop or paste photos to add</span></p>
             {photoUndo && (
               <button
                 type="button"
@@ -1048,7 +1067,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             <Upload className="w-5 h-5" />
             Add photo
           </button>
-          <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { void handleAddListingPhoto(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+          <input ref={photoInputRef} type="file" accept="image/*" multiple={isDesktop} className="hidden" onChange={(e) => { void handleAddListingPhotos(Array.from(e.target.files ?? [])); e.currentTarget.value = ""; }} />
           </div>
         </div>
       ) : draft?.thumbnail_url ? (
@@ -1083,7 +1102,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             <Upload className="w-6 h-6" />
             Add your first photo
           </button>
-          <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => { void handleAddListingPhoto(e.target.files?.[0]); e.currentTarget.value = ""; }} />
+          <input ref={photoInputRef} type="file" accept="image/*" multiple={isDesktop} className="hidden" onChange={(e) => { void handleAddListingPhotos(Array.from(e.target.files ?? [])); e.currentTarget.value = ""; }} />
         </div>
       )}
 
@@ -1121,6 +1140,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           {reanalyzing ? "Analyzing..." : "Re-analyze"}
         </button>
       </div>
+      </PhotoDropZone>
+
+      <div className="min-w-0">
 
       {draft?.avg_sold == null && title && (
         <button
@@ -1424,7 +1446,10 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-      <div className="fixed left-0 right-0 px-5 pt-3 max-w-md mx-auto"
+      </div>
+      </div>
+
+      <div className="content-bar fixed left-0 right-0 px-5 pt-3 max-w-md mx-auto lg:rounded-2xl lg:pb-3"
         style={{
           // Sits above the progress tray when it's showing; padded for the iPhone home indicator.
           bottom: "var(--tray-offset, 0px)",
