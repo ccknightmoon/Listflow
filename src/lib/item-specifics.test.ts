@@ -201,7 +201,7 @@ describe("publish helpers", () => {
   });
   it("validates stored specifics from the browser", () => {
     expect(sanitizeStoredSpecifics({ categoryId: "57988", aspects: { Brand: ["Carhartt", 5], "": ["x"] }, measurements: [{ key: "pitToPit", inches: 26 }, { key: "hack", inches: 1 }] })).toEqual({
-      categoryId: "57988", aspects: { Brand: ["Carhartt"] }, measurements: [{ key: "pitToPit", inches: 26, approx: false }],
+      categoryId: "57988", categoryPath: null, categoryNeedsReview: false, aspects: { Brand: ["Carhartt"] }, measurements: [{ key: "pitToPit", inches: 26, approx: false }],
     });
     expect(sanitizeStoredSpecifics({ categoryId: "drop table" })?.categoryId).toBeNull();
     expect(sanitizeStoredSpecifics("nope")).toBeNull();

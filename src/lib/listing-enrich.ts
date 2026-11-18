@@ -8,7 +8,8 @@
 //  5. fit the title and flag required aspects that are still empty.
 // Runs inside an eBay request context (taxonomy calls use the seller's token).
 import { openAIPost } from "@/lib/openai-request";
-import { getCategoryIdForTitle } from "@/lib/ebay-inventory";
+import { chooseCategory } from "@/lib/ebay-category";
+import { aspectFitsKind, classifyGarment, consistencyIssues, measurementKeysFor, sanitizeForItem, type GarmentKind } from "@/lib/garment";
 import { fetchAspectDefs, defsForClient } from "@/lib/ebay-aspects";
 import {
   aspectsFromDraft, aspectsToAsk, composeTitle, fitTitle, measurementAspects, measurementLines, measurementsFrom,
@@ -17,6 +18,11 @@ import {
 
 export interface EnrichedListing {
   categoryId: string | null;
+  categoryPath: string | null;
+  categoryNeedsReview: boolean;
+  garmentKind: GarmentKind;
+  /** Contradictions found by the self-check (shown on the review screen). */
+  issues: string[];
   itemSpecifics: Aspects;
   missingRequired: string[];
   aspectDefs: AspectDef[];
@@ -98,11 +104,18 @@ const FILL_SCHEMA = {
   },
 };
 
-export function fillPrompt(facts: Record<string, unknown>, ask: ReturnType<typeof aspectsToAsk>): string {
+export function fillPrompt(facts: Record<string, unknown>, ask: ReturnType<typeof aspectsToAsk>, itemDescription = ""): string {
   return `You fill eBay item specifics for a secondhand listing.
+THE ITEM IS: ${itemDescription || "see facts"}.
 Use ONLY the facts below (read from the item's photos and tags). If a fact
 for an aspect isn't directly supported, leave that aspect out. Never guess.
-When an aspect lists allowed values, use one of them exactly.
+When an aspect lists allowed values, use one of them exactly — but if none
+of the allowed values truly describes THIS item, leave the aspect out
+(never pick the "closest" value: e.g. no "Joggers" for a jersey).
+Players, teams and leagues go in Player/Team/League/Sport, never in
+Character or Character Family (those are for cartoon/movie characters).
+Material means fiber from the tag (e.g. Polyester, Cotton) — "jersey" or
+"knit" is a fabric construction, not a material.
 
 FACTS:
 ${JSON.stringify(facts, null, 1)}
@@ -113,14 +126,37 @@ ${JSON.stringify(ask)}
 Answer as JSON: {"aspects":[{"name":"<exact aspect name>","values":["…"]}]}`;
 }
 
+/** Vintage/decade only with evidence: the vision step said vintage AND gave an era/date. */
+export function vintageEvidence(v: Vision): boolean {
+  const yes = /^y/i.test(str(v.vintage));
+  return yes && !!(str(v.era) || str(v.yearManufactured) || /(©|\(c\)|copyright)\s*(19|20)\d\d|\b(19[5-9]\d)\b/i.test(str(v.tagText)));
+}
+
+const specific = (v: Vision, k: string) => str(((v.specifics ?? {}) as Record<string, unknown>)[k]);
+
 export async function enrichListing(apiKey: string, v: Vision): Promise<EnrichedListing> {
   const facts = visionFacts(v);
-  const ms = visionMeasurements(v);
+  const hints = { team: specific(v, "Team") || null, league: specific(v, "League") || null, player: specific(v, "Player") || null };
   const titleForCategory = fitTitle(facts.title) || [facts.brand, facts.item_type].filter(Boolean).join(" ");
-  const categoryId = await getCategoryIdForTitle(titleForCategory, facts.item_type || undefined).catch(() => null);
-  const defs = categoryId ? await fetchAspectDefs(categoryId) : [];
+  const kind = classifyGarment(facts.item_type, titleForCategory, hints);
 
-  const base = mergeAspects([aspectsFromDraft(facts), visionSpecifics(v), measurementAspects(ms, defs)], defs).aspects;
+  // Garment-aware category (never a pants leaf for a jersey); flagged when unsure.
+  const cat = await chooseCategory({ title: titleForCategory, itemType: facts.item_type, brand: facts.brand, department: facts.department, ...hints })
+    .catch(() => null);
+  const categoryId = cat?.categoryId ?? null;
+  const defsAll = categoryId ? await fetchAspectDefs(categoryId) : [];
+  const defs = defsAll.filter((d) => aspectFitsKind(d.name, kind));
+
+  // Measurements only for this kind of garment (no inseam on a top).
+  const allowedKeys = measurementKeysFor(kind);
+  const ms = visionMeasurements(v).filter((m) => allowedKeys.size === 0 || allowedKeys.has(m.key));
+  const evidence = vintageEvidence(v);
+
+  const base = sanitizeForItem(
+    mergeAspects([aspectsFromDraft(facts), visionSpecifics(v), measurementAspects(ms, defs)], defs).aspects,
+    kind,
+    { vintageEvidence: evidence },
+  ).aspects;
 
   let ai: Aspects = {};
   const ask = aspectsToAsk(defs, base);
@@ -132,10 +168,14 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
         response_format: { type: "json_schema", json_schema: { name: "item_specifics", strict: true, schema: FILL_SCHEMA } },
         messages: [{
           role: "user",
-          content: fillPrompt({ ...facts, tagText: str(v.tagText), era: str(v.era), flaws: str(v.flaws), specifics: v.specifics ?? {}, measurements: measurementLines(ms) }, ask),
+          content: fillPrompt(
+            { ...facts, tagText: str(v.tagText), era: str(v.era), flaws: str(v.flaws), specifics: v.specifics ?? {}, measurements: measurementLines(ms) },
+            ask,
+            `${facts.item_type || kind}${hints.team ? ` (${hints.team})` : ""}${cat?.categoryPath ? ` — eBay category: ${cat.categoryPath}` : ""}`,
+          ),
         }],
       })) as { choices?: { message?: { content?: string } }[] };
-      ai = parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}"));
+      ai = sanitizeForItem(parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}")), kind, { vintageEvidence: evidence }).aspects;
     } catch {
       ai = {};
     }
@@ -143,8 +183,14 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
 
   // Photo-read facts win over the text model's mapping.
   const merged = mergeAspects([ai, base], defs);
+  const issues = consistencyIssues({ title: titleForCategory, kind, categoryPath: cat?.categoryPath ?? null, aspects: merged.aspects, measurementKeys: ms.map((m) => m.key) });
+  if (cat?.needsReview) issues.unshift("Couldn't find an eBay category that clearly fits this item — please choose one.");
   return {
     categoryId,
+    categoryPath: cat?.categoryPath ?? null,
+    categoryNeedsReview: !!cat?.needsReview,
+    garmentKind: kind,
+    issues,
     itemSpecifics: merged.aspects,
     missingRequired: merged.missingRequired,
     aspectDefs: defsForClient(defs),
@@ -180,8 +226,50 @@ export async function enrichVisionResult(
   if (!runWithEbay) return { ...v, suggestedTitle: fitTitle(str(v.suggestedTitle)) || str(v.suggestedTitle), measurementLines: lines };
   try {
     const e = await runWithEbay(() => enrichListing(apiKey, v));
-    return { ...v, ...e, measurementLines: lines };
+    return { ...v, ...e, measurementLines: measurementLines(e.measurementsList) };
   } catch {
     return { ...v, suggestedTitle: fitTitle(str(v.suggestedTitle)), measurementLines: lines };
   }
+}
+
+/**
+ * "Change category" on the review screen: re-check the current specifics
+ * against the newly chosen category, drop what doesn't belong, and fill
+ * what the category recommends from the facts already known (no photos).
+ */
+export async function refillForCategory(
+  apiKey: string | null,
+  input: { categoryId: string; categoryPath: string | null; title: string; itemType: string | null; aspects: Aspects },
+): Promise<Pick<EnrichedListing, "categoryId" | "categoryPath" | "categoryNeedsReview" | "garmentKind" | "issues" | "itemSpecifics" | "missingRequired" | "aspectDefs">> {
+  const first = (k: string) => input.aspects[k]?.[0] ?? null;
+  const kind = classifyGarment(input.itemType ?? first("Type"), input.title, { team: first("Team"), league: first("League"), player: first("Player") });
+  const defs = (await fetchAspectDefs(input.categoryId)).filter((d) => aspectFitsKind(d.name, kind));
+  const evidence = !!input.aspects["Vintage"]?.length;
+  const base = sanitizeForItem(mergeAspects([input.aspects], defs).aspects, kind, { vintageEvidence: evidence }).aspects;
+  let ai: Aspects = {};
+  const ask = aspectsToAsk(defs, base);
+  if (apiKey && ask.length) {
+    try {
+      const res = (await openAIPost(apiKey, {
+        model: "gpt-4o-mini",
+        max_tokens: 1000,
+        response_format: { type: "json_schema", json_schema: { name: "item_specifics", strict: true, schema: FILL_SCHEMA } },
+        messages: [{ role: "user", content: fillPrompt({ title: input.title, itemType: input.itemType, known: base }, ask, `${input.itemType ?? kind} — eBay category: ${input.categoryPath ?? input.categoryId}`) }],
+      })) as { choices?: { message?: { content?: string } }[] };
+      ai = sanitizeForItem(parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}")), kind, { vintageEvidence: evidence }).aspects;
+    } catch {
+      ai = {};
+    }
+  }
+  const merged = mergeAspects([ai, base], defs);
+  return {
+    categoryId: input.categoryId,
+    categoryPath: input.categoryPath,
+    categoryNeedsReview: false,
+    garmentKind: kind,
+    issues: consistencyIssues({ title: input.title, kind, categoryPath: input.categoryPath, aspects: merged.aspects }),
+    itemSpecifics: merged.aspects,
+    missingRequired: merged.missingRequired,
+    aspectDefs: defsForClient(defs),
+  };
 }

@@ -7,6 +7,7 @@ import {
   aspectsFromDraft, conditionNote, fitTitle, listingDescriptionHtml, measurementAspects, measurementsFromDescription, mergeAspects,
   pickCondition, sanitizeStoredSpecifics,
 } from "./item-specifics";
+import { aspectFitsKind, classifyGarment, measurementKeysFor, sanitizeForItem } from "./garment";
 
 export const CONDITION_MAP: Record<string, string> = {
   "New with tags": "NEW",
@@ -291,10 +292,16 @@ export async function upsertInventoryItem(sku: string, draft: {
   const defs = await fetchAspectDefs(categoryId);
   const stored = sanitizeStoredSpecifics(draft.item_specifics);
   const measurements = stored?.measurements?.length ? stored.measurements : measurementsFromDescription(draft.description);
-  const { aspects, missingRequired: missingRequiredAspects } = mergeAspects(
-    [aspectsFromDraft(draft), measurementAspects(measurements, defs), stored?.aspects ?? {}],
-    defs,
-  );
+  // Garment guard (Nov 2026): nothing from the wrong kind of garment
+  // reaches eBay (no Inseam on a jersey, no player as "Character").
+  const kind = classifyGarment(draft.item_type, draft.title);
+  const keys = measurementKeysFor(kind);
+  const ms = measurements.filter((m) => keys.size === 0 || keys.has(m.key));
+  const fittingDefs = defs.filter((d) => aspectFitsKind(d.name, kind));
+  const vintageOk = /^y/i.test(draft.vintage ?? "") && !!draft.year_manufactured;
+  const merged = mergeAspects([aspectsFromDraft(draft), measurementAspects(ms, fittingDefs), stored?.aspects ?? {}], fittingDefs);
+  const aspects = sanitizeForItem(merged.aspects, kind, { vintageEvidence: vintageOk || !!stored?.aspects?.["Vintage"]?.length }).aspects;
+  const missingRequiredAspects = mergeAspects([aspects], fittingDefs).missingRequired;
 
   // Condition: the category's own accepted value for the seller's tier
   // (eBay Metadata API), else the known apparel/general mapping.
@@ -313,7 +320,7 @@ export async function upsertInventoryItem(sku: string, draft: {
       // clean/reusable, and every listing always picks up whatever the
       // seller has saved as their footer right now, not a snapshot frozen
       // in at draft-save time.
-      description: listingDescriptionHtml(draft, aspects, measurements, storeFooter),
+      description: listingDescriptionHtml(draft, aspects, ms, storeFooter),
       aspects,
       ...(() => {
         const urls = (draft.photo_urls ?? []).filter((u) => u?.startsWith("http"));

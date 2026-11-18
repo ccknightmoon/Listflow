@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   upsertInventoryItem, createOffer, updateOffer, deleteOffer, deleteInventoryItem,
-  getOfferBySku, getAllOffers, publishOffer, getCategoryIdForTitle, getSafeFallbackCategory,
+  getOfferBySku, getAllOffers, publishOffer, getSafeFallbackCategory,
   ensureMerchantLocation, recreateMerchantLocation, CONDITION_MAP, getConditionCandidates, inventoryRequest,
 } from "@/lib/ebay-inventory";
 import { invalidateAccessTokenCache } from "@/lib/ebay-oauth";
@@ -14,6 +14,8 @@ import { createTtlDedupeCache } from "@/lib/ttl-cache";
 import { setListingStoreCategory } from "@/lib/ebay-store-categories";
 import { assignSequentialSku } from "@/lib/sku-assign";
 import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
+import { classifyGarment, categoryFits } from "@/lib/garment";
+import { chooseCategory } from "@/lib/ebay-category";
 
 export const runtime = "nodejs";
 
@@ -250,8 +252,15 @@ export async function POST(req: NextRequest) {
     const legacyHyphenSku = `listflow-${draftId}`;
     // The category the AI filled item specifics for (saved with the draft)
     // keeps aspects and category consistent; older drafts look it up.
-    const categoryId = sanitizeStoredSpecifics(draft.item_specifics)?.categoryId
-      ?? await getCategoryIdForTitle(draft.title || "", draft.item_type || undefined);
+    // A stored category is only trusted if its path fits the garment (a
+    // jersey never goes to a pants leaf); otherwise re-pick garment-aware.
+    const stored = sanitizeStoredSpecifics(draft.item_specifics);
+    const kind = classifyGarment(draft.item_type, draft.title);
+    // Drafts saved before category paths were stored (no path) are re-picked.
+    const storedOk = !!stored?.categoryId && !!stored.categoryPath && categoryFits(kind, stored.categoryPath).ok;
+    const categoryId = storedOk
+      ? stored!.categoryId!
+      : (await chooseCategory({ title: draft.title, itemType: draft.item_type, brand: draft.brand })).categoryId ?? getSafeFallbackCategory(draft.title || "");
 
     await ensureMerchantLocation();
 

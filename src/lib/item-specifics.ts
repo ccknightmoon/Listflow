@@ -69,10 +69,12 @@ export function matchAllowedValue(value: string, def: Pick<AspectDef, "mode" | "
   for (const alt of SYNONYMS[n] ?? []) if (byNorm.has(alt)) return byNorm.get(alt)!;
   const compact = n.replace(/ /g, "");
   for (const [k, a] of byNorm) if (k.replace(/ /g, "") === compact) return a;
-  // Whole-word containment either way ("Heavyweight Cotton" → "Cotton"),
-  // preferring the longest allowed value so "Light Blue" beats "Blue".
+  // Whole-word containment of an allowed value INSIDE the seller's value
+  // ("Heavyweight Cotton" → "Cotton"), preferring the longest so
+  // "Light Blue" beats "Blue". Never the other way round: a short value
+  // like "Jersey" must not grab a longer, different allowed value.
   const words = ` ${n} `;
-  const hits = [...byNorm.entries()].filter(([k]) => k.length >= 3 && (words.includes(` ${k} `) || ` ${k} `.includes(words)));
+  const hits = [...byNorm.entries()].filter(([k]) => k.length >= 3 && words.includes(` ${k} `));
   if (hits.length) return hits.sort((a, b) => b[0].length - a[0].length)[0][1];
   return def.mode === "SELECTION_ONLY" ? null : v.slice(0, 65);
 }
@@ -461,6 +463,10 @@ export function parseAiAspects(raw: unknown): Aspects {
 
 export interface StoredSpecificsShape {
   categoryId: string | null;
+  /** eBay category path shown on the review screen. */
+  categoryPath?: string | null;
+  /** Nothing eBay suggested fit the item — the seller should confirm the category. */
+  categoryNeedsReview?: boolean;
   aspects: Aspects;
   measurements: Measurement[];
 }
@@ -483,7 +489,8 @@ export function sanitizeStoredSpecifics(raw: unknown): StoredSpecificsShape | nu
         .map((m) => ({ key: m.key as Measurement["key"], inches: Math.round((m.inches as number) * 4) / 4, approx: m.approx === true }))
         .slice(0, 12)
     : [];
-  return { categoryId, aspects, measurements };
+  const categoryPath = typeof r.categoryPath === "string" ? r.categoryPath.slice(0, 300) : null;
+  return { categoryId, categoryPath, categoryNeedsReview: r.categoryNeedsReview === true, aspects, measurements };
 }
 
 /** Supabase/PostgREST error for a column that doesn't exist yet (migration not applied). */

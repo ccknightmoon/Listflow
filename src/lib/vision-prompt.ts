@@ -35,7 +35,7 @@ flat with a tape measure, then flaw close-ups.
 Respond with ONLY a JSON object (no markdown) in this exact shape:
 
 {
-  "itemType": "eBay Type value — clothing e.g. 'T-Shirt', 'Hoodie', 'Sweatshirt', 'Jacket', 'Coat', 'Jersey', 'Jeans', 'Pants', 'Shorts', 'Polo', 'Vest', 'Button-Up Shirt', 'Dress'; jewelry/accessories e.g. 'Necklace', 'Stud Earrings', 'Bracelet', 'Ring', 'Belt', 'Wallet', 'Sunglasses', 'Baseball Cap', 'Scarf'",
+  "itemType": "what the garment IS — clothing e.g. 'T-Shirt', 'Hoodie', 'Sweatshirt', 'Jacket', 'Coat', 'Jersey' (a sports/team jersey top), 'Jeans', 'Pants', 'Shorts', 'Polo', 'Vest', 'Button-Up Shirt', 'Dress', 'Hat'. Describe the garment, never the fabric (a T-shirt made of jersey knit is 'T-Shirt'); jewelry/accessories e.g. 'Necklace', 'Stud Earrings', 'Bracelet', 'Ring', 'Belt', 'Wallet', 'Sunglasses', 'Baseball Cap', 'Scarf'",
   "department": "Men, Women, Unisex Adult, Boys or Girls — from the tag or an obvious cut; empty if unclear",
   "brand": "brand exactly as on the tag/label/print, or 'Unbranded' only if clearly unbranded; empty if you can't read it",
   "tagText": "transcribe EVERY readable word on tags/labels: brand, size, RN number, style/model number, fabric %, 'Made in …', care text. Empty if no tag visible.",
@@ -43,18 +43,18 @@ Respond with ONLY a JSON object (no markdown) in this exact shape:
   "size": "size exactly as on the tag, e.g. 'XL', 'L Tall', '32x30', '10.5'. Empty if no size tag is visible. Never estimate.",
   "condition": "one of: New with tags, New without tags, Excellent used, Good - minor flaws, Fair - notable flaws. Be honest: any visible flaw means at most 'Good - minor flaws'.",
   "flaws": "every visible flaw with its location, e.g. 'small stain on left cuff; light fading on shoulders; fraying at hem'. Empty string if none seen.",
-  "vintage": "'Yes' only if tags/printing clearly show it's 20+ years old (e.g. single-stitch hem, old tag style, dated copyright); otherwise 'No'",
+  "vintage": "'Yes' only if tags/printing clearly show it's 20+ years old (dated copyright, old tag style with a date code); otherwise empty string. Do not answer 'No' — leave it empty when unsure.",
   "era": "'80s', '90s', 'Y2K' etc. only when the tag/print clearly shows it; else empty",
   "style": "CLOTHING — e.g. Graphic Tee, Polo, Henley, Crewneck, Workwear, Athletic, Bomber, Chore Coat, Varsity, Streetwear, Western, Preppy, Casual. Empty if none apply.",
-  "material": "outer fabric as on the tag (e.g. 'Cotton', 'Cotton Canvas', 'Polyester', 'Cotton/Polyester') — for jewelry the metal/stone. Empty if not visible.",
+  "material": "FIBER content as printed on the tag (e.g. 'Polyester', 'Cotton', 'Cotton/Polyester', 'Cotton Canvas') — for jewelry the metal/stone. Never 'Jersey' or 'Knit' (those are constructions). Empty if no fiber tag is visible.",
   "sleeveLength": "TOPS/OUTERWEAR — Short Sleeve, Long Sleeve, Sleeveless, 3/4 Sleeve. Empty otherwise.",
   "neckline": "TOPS — Crew Neck, V-Neck, Hooded, Collared, Mock Neck, Turtleneck, Henley. Empty otherwise.",
   "fit": "Regular, Slim, Relaxed, Oversized, Athletic — only if the tag says or it's obvious; else empty",
   "pattern": "Solid, Graphic Print, Striped, Plaid, Floral, Camouflage, Tie Dye, Checkered, Color Block, Logo. Empty if not applicable.",
   "theme": "comma-separated themes that clearly apply, e.g. 'Sports', 'Music', '90s', 'Western', 'Workwear', 'Outdoor'. Empty if none.",
-  "character": "named character/person printed on the item. Empty if none.",
-  "characterFamily": "its franchise, e.g. 'Disney', 'Marvel'. Empty if none.",
-  "yearManufactured": "decade range only if clearly dated — one of: Pre-1960, 1960-1969, 1970-1979, 1980-1989, 1990-1999, 2000-2009, 2010-2019, 2020-2029. Else empty.",
+  "character": "a fictional/cartoon/movie character printed on the item (e.g. 'Mickey Mouse'). NEVER a real person, athlete or team — those go in specifics.Player/Team. Empty if none.",
+  "characterFamily": "that character's franchise, e.g. 'Disney', 'Marvel'. Never a sports team. Empty if none.",
+  "yearManufactured": "decade range only if a date/copyright/date code is visible — one of: Pre-1960, 1960-1969, 1970-1979, 1980-1989, 1990-1999, 2000-2009, 2010-2019, 2020-2029. Else empty.",
   "season": "All Seasons, Fall, Spring, Summer or Winter (outerwear is usually Fall/Winter)",
   "measurements": {
     "pitToPit": "TOPS — armpit to armpit from the tape, e.g. '22' (inches). Add ' approx' if the tape is hard to read. Empty if no tape photo.",

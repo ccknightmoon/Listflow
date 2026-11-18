@@ -3,7 +3,7 @@ import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { fetchAspectDefs, defsForClient } from "@/lib/ebay-aspects";
-import { getCategoryIdForTitle } from "@/lib/ebay-inventory";
+import { chooseCategory } from "@/lib/ebay-category";
 
 export const runtime = "nodejs";
 
@@ -18,11 +18,15 @@ export async function GET(req: Request) {
   const sp = new URL(req.url).searchParams;
   const given = sp.get("categoryId");
   return ebayContext.run(connection, async () => {
-    const categoryId = given && /^\d+$/.test(given)
-      ? given
-      : await getCategoryIdForTitle(sp.get("title") ?? "", sp.get("itemType") || undefined).catch(() => null);
+    const pick = given && /^\d+$/.test(given)
+      ? null
+      : await chooseCategory({ title: sp.get("title"), itemType: sp.get("itemType") }).catch(() => null);
+    const categoryId = given && /^\d+$/.test(given) ? given : pick?.categoryId ?? null;
     if (!categoryId) return NextResponse.json({ categoryId: null, defs: [] });
     const defs = await fetchAspectDefs(categoryId);
-    return NextResponse.json({ categoryId, defs: defsForClient(defs) }, { headers: { "Cache-Control": "private, max-age=3600" } });
+    return NextResponse.json(
+      { categoryId, categoryPath: pick?.categoryPath ?? null, categoryNeedsReview: pick?.needsReview ?? false, defs: defsForClient(defs) },
+      { headers: { "Cache-Control": "private, max-age=3600" } },
+    );
   });
 }

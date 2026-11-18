@@ -35,6 +35,11 @@ export interface AiResult {
   era?: string;
   /** eBay category the specifics were filled for. */
   categoryId?: string | null;
+  categoryPath?: string | null;
+  categoryNeedsReview?: boolean;
+  garmentKind?: string;
+  /** Self-check contradictions (title vs category vs Type vs measurements). */
+  issues?: string[];
   /** Category item specifics, eBay names → values. */
   itemSpecifics?: Record<string, string[]>;
   missingRequired?: string[];
@@ -46,13 +51,15 @@ export interface AiResult {
 /** What's stored in drafts.item_specifics (migration 027). */
 export interface StoredSpecifics {
   categoryId: string | null;
+  categoryPath?: string | null;
+  categoryNeedsReview?: boolean;
   aspects: Record<string, string[]>;
   measurements: import("./item-specifics").Measurement[];
 }
 
-export function storedSpecificsFrom(r: Pick<AiResult, "categoryId" | "itemSpecifics" | "measurementsList"> | null | undefined): StoredSpecifics | null {
+export function storedSpecificsFrom(r: Pick<AiResult, "categoryId" | "categoryPath" | "categoryNeedsReview" | "itemSpecifics" | "measurementsList"> | null | undefined): StoredSpecifics | null {
   if (!r || (!r.itemSpecifics && !r.measurementsList)) return null;
-  return { categoryId: r.categoryId ?? null, aspects: r.itemSpecifics ?? {}, measurements: r.measurementsList ?? [] };
+  return { categoryId: r.categoryId ?? null, categoryPath: r.categoryPath ?? null, categoryNeedsReview: !!r.categoryNeedsReview, aspects: r.itemSpecifics ?? {}, measurements: r.measurementsList ?? [] };
 }
 
 export function formatMeasurements(r: AiResult): string {
