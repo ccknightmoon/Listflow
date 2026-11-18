@@ -163,6 +163,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ---- Mouse & keyboard (any width) --------------------------------------
+   Only for devices with a real pointer that can hover, so touch screens
+   never get "stuck" hover styles; focus rings only for keyboard focus. */
+@media (hover: hover) and (pointer: fine) {
+  .tap { cursor: pointer; }
+  .tap:hover:not(:disabled) { filter: brightness(1.08); }
+  .card:is(a, button):hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--glass-line)); }
+}
+:where(a, button, [role="button"], [tabindex], input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* ---- Desktop (Tailwind lg, 1024px+). Phones are untouched. ----------
    The sidebar (src/components/Sidebar.tsx) sets --sidebar-space only on
    screens where it shows; the bottom nav's --nav-space doesn't apply. */

@@ -1238,16 +1238,21 @@ function PhotoCard({
   const dropIndex = useRef<number | null>(null);
   const [touchDragging, setTouchDragging] = useState(false);
 
+  // The grip handle: a mouse grabs it straight away (no press-and-hold);
+  // touch keeps the hold-to-drag so scrolling the strip still works.
+  function onGripPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    if (e.pointerType !== "mouse") { onPointerDown(e); return; }
+    startPoint.current = { x: e.clientX, y: e.clientY };
+    dragTarget.current = e.currentTarget;
+    dropIndex.current = index;
+    setTouchDragging(true);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
   function onPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     startPoint.current = { x: e.clientX, y: e.clientY };
     dragTarget.current = e.currentTarget;
     dropIndex.current = index;
-    // A mouse grabs the handle straight away (no press-and-hold needed).
-    if (e.pointerType === "mouse") {
-      setTouchDragging(true);
-      dragTarget.current?.setPointerCapture(e.pointerId);
-      return;
-    }
     dragTimer.current = window.setTimeout(() => {
       setTouchDragging(true);
       dragTarget.current?.setPointerCapture(e.pointerId);
@@ -1302,7 +1307,7 @@ function PhotoCard({
           aria-label={`Drag photo ${index + 1} to reorder (or use the arrow keys)`}
           title="Hold and drag to reorder"
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-black/65 p-3 text-white cursor-grab touch-none"
-          onPointerDown={(e) => { e.stopPropagation(); onDragStart(); onPointerDown(e); }}
+          onPointerDown={(e) => { e.stopPropagation(); onDragStart(); onGripPointerDown(e); }}
           onPointerMove={(e) => { e.stopPropagation(); onPointerMove(e); }}
           onPointerUp={(e) => { e.stopPropagation(); onPointerUp(e); }}
           onPointerCancel={(e) => { e.stopPropagation(); onPointerUp(e); }}

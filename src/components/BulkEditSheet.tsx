@@ -83,10 +83,18 @@ export default function BulkEditSheet({
     color: active ? "var(--accent)" : "var(--text-secondary)",
   });
 
+  // Enter in any field applies (same rules as the Apply button).
+  const enterApplies = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (hasEdit && changing > 0 && !saving) void apply();
+  };
+
   return (
     <Sheet
       open={open}
       onClose={onClose}
+      desktop="drawer"
       title={`Edit ${items.length} item${items.length !== 1 ? "s" : ""}`}
       footer={
         <>
@@ -108,7 +116,7 @@ export default function BulkEditSheet({
               ))}
             </div>
             {priceMode && (
-              <input
+              <input onKeyDown={enterApplies}
                 type="text"
                 inputMode="decimal"
                 enterKeyHint="done"
@@ -154,8 +162,8 @@ export default function BulkEditSheet({
             </div>
             {titleMode && (
               <div className="flex gap-2">
-                <input className="input flex-1" placeholder={titleMode === "replace" ? "Find" : "Word(s)"} value={titleText} onChange={(e) => setTitleText(e.target.value)} enterKeyHint="next" aria-label="Title words" />
-                {titleMode === "replace" && <input className="input flex-1" placeholder="Replace with" value={titleWith} onChange={(e) => setTitleWith(e.target.value)} enterKeyHint="done" aria-label="Replace with" />}
+                <input onKeyDown={enterApplies} className="input flex-1" placeholder={titleMode === "replace" ? "Find" : "Word(s)"} value={titleText} onChange={(e) => setTitleText(e.target.value)} enterKeyHint="next" aria-label="Title words" />
+                {titleMode === "replace" && <input onKeyDown={enterApplies} className="input flex-1" placeholder="Replace with" value={titleWith} onChange={(e) => setTitleWith(e.target.value)} enterKeyHint="done" aria-label="Replace with" />}
               </div>
             )}
           </div>

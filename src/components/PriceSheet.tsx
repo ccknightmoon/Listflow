@@ -53,6 +53,16 @@ export default function PriceSheet({
     color: on ? "var(--accent)" : "var(--text-secondary)",
   });
 
+  // Footer button and Enter in either amount field (keyboard users).
+  const apply = () => {
+    if (sum.changing === 0) return;
+    onApply(rows.filter((r) => r.to != null));
+    onClose();
+  };
+  const enterApplies = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter") { e.preventDefault(); apply(); }
+  };
+
   return (
     <Sheet
       open={open}
@@ -78,7 +88,7 @@ export default function PriceSheet({
         </div>
       }
       footer={
-        <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={sum.changing === 0} onClick={() => { onApply(rows.filter((r) => r.to != null)); onClose(); }}>
+        <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={sum.changing === 0} onClick={apply}>
           {single ? (rows[0]?.to != null ? `Lower to ${formatMoney(rows[0].to)}` : "Lower price") : `Lower ${sum.changing.toLocaleString("en-US")} price${sum.changing !== 1 ? "s" : ""}`}
         </button>
       }
@@ -106,6 +116,7 @@ export default function PriceSheet({
             placeholder={mode === "set" ? "New price, e.g. 19.99" : mode === "minus$" ? "Amount off, e.g. 5" : "Percent off, e.g. 25"}
             value={custom}
             onChange={(e) => setCustom(e.target.value.replace(/[^0-9.]/g, ""))}
+            onKeyDown={enterApplies}
             aria-label="Custom amount"
           />
         )}
@@ -118,6 +129,7 @@ export default function PriceSheet({
             placeholder="optional floor"
             value={floor}
             onChange={(e) => setFloor(e.target.value.replace(/[^0-9.]/g, ""))}
+            onKeyDown={enterApplies}
             aria-label="Minimum price"
           />
         </label>

@@ -34,10 +34,11 @@ export default function ConfirmHost() {
       header={opts ? <p id="confirm-title" className="text-base font-semibold">{opts.title}</p> : null}
       footer={opts ? (
         <div className="flex gap-2">
-          <button type="button" className="btn flex-1 min-h-[48px]" onClick={() => close(false)}>{opts.cancelLabel ?? "Cancel"}</button>
+          {/* Keyboard: destructive confirms start on Cancel, so a stray Enter can't delete. */}
+          <button type="button" autoFocus={!!opts.destructive} className="btn flex-1 min-h-[48px]" onClick={() => close(false)}>{opts.cancelLabel ?? "Cancel"}</button>
           <button
             type="button"
-            autoFocus
+            autoFocus={!opts.destructive}
             className="btn flex-1 min-h-[48px] font-semibold"
             style={opts.destructive ? { background: "var(--danger)", color: "white", borderColor: "var(--danger)" } : { background: "var(--accent)", color: "white", borderColor: "var(--accent)" }}
             onClick={() => close(true)}
