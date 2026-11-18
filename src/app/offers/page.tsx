@@ -205,6 +205,8 @@ export default function OffersPage() {
         <button
           onClick={() => load()}
           disabled={loading}
+          aria-label="Refresh offers"
+          title="Refresh offers"
           className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
         >
           {loading
@@ -249,7 +251,7 @@ export default function OffersPage() {
       )}
 
       {!loading && offers.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 lg:grid lg:grid-cols-2 xl:grid-cols-3 lg:gap-3 lg:items-start">
           {offers.map((offer, i) => {
             const key = offerKey(offer);
             const isResponding = responding.has(key);
@@ -366,6 +368,11 @@ export default function OffersPage() {
                         placeholder="Counter price"
                         value={counterPrices[key] ?? ""}
                         onChange={(e) => setCounterPrices((prev) => ({ ...prev, [key]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); void handleCounterSubmit(offer); }
+                          if (e.key === "Escape") { e.preventDefault(); setCounterOpenKey(null); }
+                        }}
+                        aria-label={`Counter price for ${offer.title || "this listing"}`}
                         className="input w-full pl-6 text-sm"
                       />
                     </div>

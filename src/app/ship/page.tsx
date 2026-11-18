@@ -119,6 +119,7 @@ export default function ShipPage() {
           onClick={() => void load()}
           disabled={checking}
           aria-label="Check with eBay"
+          title="Refresh — check with eBay"
           className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
         >
           {checking
@@ -157,7 +158,7 @@ export default function ShipPage() {
       )}
 
       {!loading && items.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 lg:grid lg:grid-cols-2 xl:grid-cols-3 lg:gap-3 lg:items-start">
           {items.map((item, i) => {
             const days = daysSince(item.paidAt);
             const ebayOrderUrl = `https://www.ebay.com/sh/ord/details?orderid=${item.listingId}-${item.transactionId}`;
@@ -184,7 +185,7 @@ export default function ShipPage() {
                   <p className="text-sm font-medium truncate">{item.title || "Unknown item"}</p>
 
                   {item.address && (
-                    <p className="text-xs text-[var(--text-secondary)] mt-0.5 truncate">
+                    <p className="text-xs text-[var(--text-secondary)] mt-0.5 truncate lg:whitespace-normal">
                       {item.address.name ? `${item.address.name} · ` : ""}
                       {formatAddress(item.address)}
                     </p>
@@ -211,7 +212,8 @@ export default function ShipPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={(e) => e.stopPropagation()}
-                  className="flex items-center gap-1 text-xs font-medium text-[var(--accent-soft)] hover:underline flex-shrink-0 mt-0.5"
+                  aria-label={`Ship ${item.title || "this order"} on eBay (opens in a new tab)`}
+                  className="flex items-center gap-1 text-xs font-medium text-[var(--accent-soft)] hover:underline flex-shrink-0 mt-0.5 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)] lg:px-2.5 lg:py-1.5 lg:bg-[var(--accent-tint)] lg:no-underline"
                 >
                   Ship
                   <ExternalLink className="w-3 h-3" />

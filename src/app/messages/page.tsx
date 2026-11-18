@@ -9,6 +9,7 @@ import { ArrowLeft, Loader2, RefreshCw, MessageCircle, Shirt, Send } from "lucid
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import { useIsDesktop } from "@/lib/use-is-desktop";
 
 interface BuyerQuestion {
   messageId: string;
@@ -52,6 +53,9 @@ export default function MessagesPage() {
   const [replying, setReplying] = useState<Set<string>>(new Set());
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [replyText, setReplyText] = useState<Record<string, string>>({});
+  // Desktop (lg): list on the left, the selected question + reply on the right.
+  const isDesktop = useIsDesktop();
+  const [activeKey, setActiveKey] = useState<string | null>(null);
 
   // Guards against out-of-order responses: the silent load fired on mount
   // and a manual refresh-button click can now overlap (e.g. tapping
@@ -169,6 +173,8 @@ export default function MessagesPage() {
         <button
           onClick={() => load()}
           disabled={loading}
+          aria-label="Refresh questions"
+          title="Refresh questions"
           className="p-2 rounded-lg hover:bg-[var(--bg-page)] transition-colors"
         >
           {loading
@@ -206,7 +212,82 @@ export default function MessagesPage() {
         </div>
       )}
 
-      {!loading && questions.length > 0 && (
+      {!loading && questions.length > 0 && isDesktop && (() => {
+        const active = questions.find((q) => questionKey(q) === activeKey) ?? questions[0];
+        const key = questionKey(active);
+        const text = replyText[key] ?? "";
+        const isReplying = replying.has(key);
+        return (
+          <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-4 items-start">
+            <div role="listbox" aria-label="Buyer questions" className="card p-1.5 flex flex-col gap-0.5 max-h-[calc(100vh-180px)] overflow-y-auto"
+              onKeyDown={(e) => {
+                if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+                e.preventDefault();
+                const i = questions.findIndex((q) => questionKey(q) === key);
+                const next = questions[Math.max(0, Math.min(questions.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+                setActiveKey(questionKey(next));
+                (e.currentTarget.querySelector(`[data-qkey="${CSS.escape(questionKey(next))}"]`) as HTMLElement | null)?.focus();
+              }}>
+              {questions.map((q) => {
+                const k = questionKey(q);
+                const sel = k === key;
+                return (
+                  <button key={k} type="button" role="option" aria-selected={sel} data-qkey={k} tabIndex={sel ? 0 : -1}
+                    onClick={() => setActiveKey(k)}
+                    className="text-left rounded-xl px-3 py-2.5 flex items-start gap-3 hover:bg-[var(--glass)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
+                    style={{ background: sel ? "var(--accent-tint)" : undefined }}>
+                    {q.thumbnail ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={q.thumbnail} alt="" loading="lazy" className="w-10 h-10 rounded-md object-cover flex-none" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-md bg-[var(--bg-page)] flex items-center justify-center flex-none"><MessageCircle className="w-4 h-4 text-[var(--text-secondary)]" /></div>
+                    )}
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm font-medium truncate">{q.title || (q.context === "general" ? "General message" : "Listing")}</span>
+                      <span className="block text-xs truncate" style={{ color: "var(--text-secondary)" }}>{q.senderId || "Unknown buyer"}{timeAgo(q.createdAt) ? ` · ${timeAgo(q.createdAt)}` : ""}</span>
+                      <span className="block text-xs truncate mt-0.5" style={{ color: "var(--text-tertiary)" }}>{q.body || q.subject}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="card p-5 lg:sticky lg:top-6">
+              <div className="flex items-start gap-3 mb-3">
+                <div className="flex-1 min-w-0">
+                  {active.url ? (
+                    <a href={active.url} target="_blank" rel="noopener noreferrer" className="text-base font-semibold hover:text-[var(--accent)]">{active.title || "Listing"}</a>
+                  ) : (
+                    <p className="text-base font-semibold">General message</p>
+                  )}
+                  <p className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                    {active.context === "order" ? "About their order · " : ""}{active.senderId || "Unknown buyer"}{timeAgo(active.createdAt) ? ` · ${timeAgo(active.createdAt)}` : ""}
+                    {active.price != null ? ` · ${formatMoney(active.price)}` : ""}
+                  </p>
+                </div>
+              </div>
+              <p className="text-sm whitespace-pre-wrap mb-4">{active.body || active.subject || "(no message text)"}</p>
+              <textarea
+                value={text}
+                onChange={(e) => setReplyText((prev) => ({ ...prev, [key]: e.target.value.slice(0, MAX_REPLY_LEN) }))}
+                onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim() && !isReplying) { e.preventDefault(); void sendReply(active); } }}
+                placeholder="Write your reply…"
+                aria-label={`Reply to ${active.senderId || "buyer"}`}
+                rows={5}
+                className="input w-full text-sm resize-y"
+                disabled={isReplying}
+              />
+              <div className="flex items-center justify-between mt-2">
+                <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>{text.length}/{MAX_REPLY_LEN} · ⌘/Ctrl+Enter to send</span>
+                <button onClick={() => sendReply(active)} disabled={isReplying || !text.trim()} className="btn btn-primary text-sm px-4">
+                  {isReplying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />} Send reply
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {!loading && questions.length > 0 && !isDesktop && (
         <div className="flex flex-col gap-2">
           {questions.map((q, i) => {
             const key = questionKey(q);
@@ -259,6 +340,7 @@ export default function MessagesPage() {
                     <textarea
                       value={text}
                       onChange={(e) => setReplyText((prev) => ({ ...prev, [key]: e.target.value.slice(0, MAX_REPLY_LEN) }))}
+                      onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && text.trim() && !isReplying) { e.preventDefault(); void sendReply(q); } }}
                       placeholder="Write your reply..."
                       rows={3}
                       className="input w-full text-sm resize-none"
