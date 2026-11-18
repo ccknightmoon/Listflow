@@ -2,6 +2,11 @@ import https from "node:https";
 import { getAccessToken } from "./ebay-oauth";
 import { getEbayContext } from "./ebay-request-context";
 import { buildPackageWeightAndSize, type PackageVariant, type ShippingMode } from "./shipping";
+import { fetchAspectDefs, fetchAllowedConditions } from "./ebay-aspects";
+import {
+  aspectsFromDraft, conditionNote, fitTitle, listingDescriptionHtml, measurementAspects, measurementsFromDescription, mergeAspects,
+  pickCondition, sanitizeStoredSpecifics,
+} from "./item-specifics";
 
 export const CONDITION_MAP: Record<string, string> = {
   "New with tags": "NEW",
@@ -245,110 +250,6 @@ export async function inventoryRequest(
   });
 }
 
-function isAspect(v: string | null | undefined): v is string {
-  return typeof v === "string" && v !== "null" && v.trim() !== "";
-}
-
-interface AspectInfo {
-  mode: "FREE_TEXT" | "SELECTION_ONLY";
-  cardinality: "SINGLE" | "MULTI";
-  allowedValues: string[];
-  required: boolean;
-}
-
-const aspectCache = new Map<string, { map: Map<string, AspectInfo>; expiresAt: number }>();
-const ASPECT_CACHE_TTL_MS = 2 * 60 * 60 * 1000;
-
-async function fetchCategoryAspects(categoryId: string): Promise<Map<string, AspectInfo>> {
-  const cached = aspectCache.get(categoryId);
-  if (cached && Date.now() < cached.expiresAt) return cached.map;
-
-  try {
-    const result = await inventoryRequest(
-      "GET",
-      `/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category?category_id=${categoryId}`
-    );
-    if (result.status >= 400) return new Map();
-
-    type RawAspect = {
-      localizedAspectName: string;
-      aspectConstraint: {
-        aspectMode: string;
-        itemToAspectCardinality: string;
-        // eBay's documented contract is aspectRequired: boolean, but this
-        // session had no live eBay credentials to confirm the exact response
-        // shape against a real category — checking aspectUsage as a fallback
-        // too, so a naming mismatch degrades to "nothing flagged as missing"
-        // rather than crashing. Worth confirming against one real category
-        // response (e.g. log `aspectConstraint` for a known category) the
-        // first time this runs against the live account.
-        aspectRequired?: boolean;
-        aspectUsage?: string;
-      };
-      aspectValues?: Array<{ localizedValue: string }>;
-    };
-    const rawAspects = (result.data as { aspects?: RawAspect[] }).aspects ?? [];
-    const map = new Map<string, AspectInfo>();
-    for (const a of rawAspects) {
-      const required = a.aspectConstraint.aspectRequired === true
-        || a.aspectConstraint.aspectUsage === "REQUIRED";
-      map.set(a.localizedAspectName.toLowerCase(), {
-        mode: a.aspectConstraint.aspectMode as "FREE_TEXT" | "SELECTION_ONLY",
-        cardinality: a.aspectConstraint.itemToAspectCardinality as "SINGLE" | "MULTI",
-        allowedValues: (a.aspectValues ?? []).map(v => v.localizedValue),
-        required,
-      });
-    }
-    aspectCache.set(categoryId, { map, expiresAt: Date.now() + ASPECT_CACHE_TTL_MS });
-    return map;
-  } catch {
-    return new Map();
-  }
-}
-
-function normalizeAspectValues(values: string[], info: AspectInfo): string[] {
-  if (info.mode === "FREE_TEXT" || info.allowedValues.length === 0) return values;
-
-  const result: string[] = [];
-  for (const v of values) {
-    const lower = v.toLowerCase();
-    // Exact match
-    const exact = info.allowedValues.find(a => a.toLowerCase() === lower);
-    if (exact) { result.push(exact); continue; }
-    // Contains match
-    const partial = info.allowedValues.find(a =>
-      a.toLowerCase().includes(lower) || lower.includes(a.toLowerCase())
-    );
-    if (partial) result.push(partial);
-    // No match → omit (eBay silently drops unrecognized SELECTION_ONLY values)
-  }
-  // Respect cardinality
-  return info.cardinality === "SINGLE" ? result.slice(0, 1) : result;
-}
-
-// Infers eBay's "Size Type" aspect (Regular / Petite / Plus / Big & Tall /
-// Tall / Juniors) from what's actually on the size tag and in the title,
-// instead of hardcoding "Regular" on every single listing regardless of fit.
-// The AI already reads whatever's printed on the tag into `size` (e.g. "16W",
-// "8P", "XLT") — this interprets the notation eBay itself uses for
-// plus/petite/tall sizing, plus a couple of title keywords for phrasing the
-// tag notation alone wouldn't catch (e.g. "Juniors", "Plus Size" spelled out).
-// Deliberately does NOT treat plain "XXL"/"XXXL" as Plus — that notation is
-// just as common on ordinary unisex/men's sizing as it is on women's plus
-// lines, so guessing Plus from size letters alone would be wrong more often
-// than it'd be right.
-function detectSizeType(size: string | null, title: string | null): string {
-  const s = (size || "").trim().toUpperCase();
-  const t = (title || "").toLowerCase();
-
-  if (/\bplus[\s-]?size\b/.test(t) || /^[1-5]X$/.test(s) || /\d+W$/.test(s)) return "Plus";
-  if (/\bpetite\b/.test(t) || /\dP$/.test(s) || /^[SMLX]+P$/.test(s)) return "Petite";
-  if (/\bbig\s*&?\s*tall\b/.test(t) || /^\d*XLT$/.test(s)) return "Big & Tall";
-  if (/\bjuniors?\b/.test(t)) return "Juniors";
-  if (/\btall\b/.test(t)) return "Tall";
-  return "Regular";
-}
-
 export async function upsertInventoryItem(sku: string, draft: {
   title: string | null;
   brand: string | null;
@@ -372,6 +273,8 @@ export async function upsertInventoryItem(sku: string, draft: {
   character_family?: string | null;
   year_manufactured?: string | null;
   season?: string | null;
+  item_specifics?: unknown;
+  custom_sku?: string | null;
 }, categoryId = "1059", conditionOverride?: string,
   // Kept for call-site compatibility; package details no longer depend on
   // the shipping mode (see the packageWeightAndSize note below).
@@ -380,116 +283,37 @@ export async function upsertInventoryItem(sku: string, draft: {
   storeFooter?: string | null,
   packageVariant: PackageVariant = "typed",
 ) {
-  const aspects: Record<string, string[]> = {};
-  aspects["Department"] = [getDepartment(draft.title || "")];
-  // Derived from the actual size tag/title (see detectSizeType) rather than
-  // hardcoded — Country of Origin, by contrast, was previously hardcoded to
-  // "United States" for every single listing regardless of whether that was
-  // true. That's a factual claim eBay and buyers can act on (customs,
-  // sourcing questions), so it's no longer set here at all — if a category
-  // actually requires it, it now shows up in missingRequiredAspects below
-  // instead of being fabricated.
-  aspects["Size Type"] = [detectSizeType(draft.size, draft.title)];
-  if (isAspect(draft.brand)) aspects["Brand"] = [draft.brand];
-  if (isAspect(draft.color)) aspects["Color"] = [draft.color];
+  // Listing quality (Nov 2026): aspects = the fixed draft fields, then
+  // measured waist/inseam/rise, then the AI's category fill + the seller's
+  // edits (drafts.item_specifics) on top -- all snapped to eBay's allowed
+  // values for THIS category. Required aspects still empty are reported so
+  // the review screen flags them (nothing is invented to fill them).
+  const defs = await fetchAspectDefs(categoryId);
+  const stored = sanitizeStoredSpecifics(draft.item_specifics);
+  const measurements = stored?.measurements?.length ? stored.measurements : measurementsFromDescription(draft.description);
+  const { aspects, missingRequired: missingRequiredAspects } = mergeAspects(
+    [aspectsFromDraft(draft), measurementAspects(measurements, defs), stored?.aspects ?? {}],
+    defs,
+  );
 
-  // For pants, split "WaistxInseam" (e.g. "38x32") into separate aspects
-  const titleLower = (draft.title || "").toLowerCase();
-  const isOuterwearItem = /\b(jacket|coat|hoodie|sweatshirt|vest|bomber|windbreaker|blazer|fleece|puffer|anorak)\b/.test(titleLower);
-  const isBottomItem = !isOuterwearItem && /\b(pants?|jeans?|shorts|trousers?|cargo|chinos?|leggings?|skirts?|joggers?|sweatpants?)\b/.test(titleLower);
-  if (isAspect(draft.size)) {
-    const pantsMatch = isBottomItem && draft.size.match(/^(\d+)[xX](\d+)$/);
-    if (pantsMatch) {
-      aspects["Waist Size"] = [`${pantsMatch[1]} in`];
-      aspects["Inseam"] = [`${pantsMatch[2]} in`];
-      aspects["Size"] = [draft.size];
-    } else {
-      aspects["Size"] = [draft.size];
-    }
-  }
-  // Shoe categories expect "US Shoe Size" as the aspect name, not the
-  // generic "Size" used for clothing — set both so whichever the category
-  // actually wants gets picked up by the normalization pass below instead
-  // of silently missing (the AI already reads the shoe size off the
-  // box/tag into `size`, same as it does for clothing).
-  const isShoeItem = /\b(shoes?|boots?|sneakers?|sandals?|slippers?|loafers?|heels?|flats?)\b/.test(titleLower);
-  if (isShoeItem && isAspect(draft.size)) {
-    aspects["US Shoe Size"] = [draft.size];
-  }
-  if (isAspect(draft.item_type)) aspects["Type"] = [draft.item_type];
-  if (isAspect(draft.style)) aspects["Style"] = [draft.style];
-  if (isAspect(draft.material)) aspects["Material"] = [draft.material];
-  // Theme can be multi-value on eBay (e.g. "90s", "Vintage", "Music")
-  if (isAspect(draft.theme)) aspects["Theme"] = draft.theme.split(",").map(t => t.trim()).filter(Boolean);
-  if (isAspect(draft.sleeve_length)) aspects["Sleeve Length"] = [draft.sleeve_length];
-  if (isAspect(draft.neckline)) aspects["Neckline"] = [draft.neckline];
-  if (isAspect(draft.fit)) aspects["Fit"] = [draft.fit];
-  if (isAspect(draft.pattern)) aspects["Pattern"] = [draft.pattern];
-  // New fields
-  if (isAspect(draft.vintage)) aspects["Vintage"] = [draft.vintage === "Yes" ? "Yes" : "No"];
-  if (isAspect(draft.character)) aspects["Character"] = [draft.character];
-  if (isAspect(draft.character_family)) aspects["Character Family"] = [draft.character_family];
-  if (isAspect(draft.year_manufactured)) aspects["Year Manufactured"] = [draft.year_manufactured];
-  if (isAspect(draft.season)) aspects["Season"] = [draft.season];
-
-  // Normalize aspect values against eBay's actual allowed values for this category.
-  // SELECTION_ONLY aspects reject unrecognized values silently — normalization fixes mismatches.
-  const categoryAspects = await fetchCategoryAspects(categoryId);
-  for (const [aspectName, values] of Object.entries(aspects)) {
-    const info = categoryAspects.get(aspectName.toLowerCase());
-    if (!info) continue;
-    const normalized = normalizeAspectValues(values, info);
-    if (normalized.length > 0) {
-      aspects[aspectName] = normalized;
-    } else if (info.mode === "SELECTION_ONLY") {
-      delete aspects[aspectName]; // Avoid sending invalid values eBay would drop anyway
-    }
-  }
-
-  // Anything eBay actually requires for this category that we have no value
-  // for at all — surfaced to the caller instead of silently fabricated or
-  // silently omitted, so the review screen can flag it before the seller
-  // clicks List. This is what makes the app respect whatever fields THIS
-  // category needs, not just the fixed set of fields it was originally
-  // built to know about.
-  const missingRequiredAspects: string[] = [];
-  for (const [nameLower, info] of categoryAspects.entries()) {
-    if (!info.required) continue;
-    const hasValue = Object.keys(aspects).some(
-      (k) => k.toLowerCase() === nameLower && aspects[k]?.length > 0
-    );
-    if (!hasValue) {
-      // Recover the original-cased name for display — eBay's response keys
-      // are already human-readable, we just lowercased them for lookup.
-      missingRequiredAspects.push(nameLower.replace(/\b\w/g, (c) => c.toUpperCase()));
-    }
-  }
-
-  const descParts = [
-    draft.brand ? `Brand: ${draft.brand}` : null,
-    draft.color ? `Color: ${draft.color}` : null,
-    draft.size ? `Size: ${draft.size}` : null,
-    draft.condition ? `Condition: ${draft.condition}` : null,
-    draft.flaws ? `Notes: ${draft.flaws}` : null,
-  ].filter(Boolean);
-
-  const condition = conditionOverride ?? getConditionCandidates(draft.condition, draft.title || "")[0];
+  // Condition: the category's own accepted value for the seller's tier
+  // (eBay Metadata API), else the known apparel/general mapping.
+  const allowedConditions = conditionOverride ? null : await fetchAllowedConditions(categoryId);
+  const condition = conditionOverride ?? pickCondition(draft.condition, allowedConditions) ?? getConditionCandidates(draft.condition, draft.title || "")[0];
   const isUsed = !["NEW", "NEW_OTHER"].includes(condition);
 
   const body: Record<string, unknown> = {
     availability: { shipToLocationAvailability: { quantity: 1 } },
     condition,
     product: {
-      title: (draft.title || "Item").slice(0, 80),
+      title: fitTitle(draft.title) || "Item",
       // The seller's own store-wide message (Settings → Store Description)
       // is appended here, at actual eBay-listing-build time, never written
       // into drafts.description itself — the item's own description stays
       // clean/reusable, and every listing always picks up whatever the
       // seller has saved as their footer right now, not a snapshot frozen
       // in at draft-save time.
-      description: [draft.description || descParts.join("\n") || "No description.", storeFooter?.trim() || null]
-        .filter(Boolean)
-        .join("\n\n"),
+      description: listingDescriptionHtml(draft, aspects, measurements, storeFooter),
       aspects,
       ...(() => {
         const urls = (draft.photo_urls ?? []).filter((u) => u?.startsWith("http"));
@@ -499,8 +323,8 @@ export async function upsertInventoryItem(sku: string, draft: {
     },
   };
 
-  if (isUsed && draft.flaws) {
-    body.conditionDescription = draft.flaws.slice(0, 1000);
+  if (isUsed) {
+    body.conditionDescription = conditionNote(draft.condition, draft.flaws).slice(0, 1000);
   }
 
   // Package weight/size is attached in EVERY shipping mode, not just the

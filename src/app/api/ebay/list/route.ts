@@ -13,6 +13,7 @@ import { chooseCalculatedPolicy, summarizeFulfillmentPolicies, type FulfillmentP
 import { createTtlDedupeCache } from "@/lib/ttl-cache";
 import { setListingStoreCategory } from "@/lib/ebay-store-categories";
 import { assignSequentialSku } from "@/lib/sku-assign";
+import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
 
 export const runtime = "nodejs";
 
@@ -247,7 +248,10 @@ export async function POST(req: NextRequest) {
     const legacyFullSku = `listflow${draftId.replace(/-/g, "")}`;
     const legacyShortSku = `listflow${draftId.replace(/-/g, "").slice(0, 8)}`;
     const legacyHyphenSku = `listflow-${draftId}`;
-    const categoryId = await getCategoryIdForTitle(draft.title || "", draft.item_type || undefined);
+    // The category the AI filled item specifics for (saved with the draft)
+    // keeps aspects and category consistent; older drafts look it up.
+    const categoryId = sanitizeStoredSpecifics(draft.item_specifics)?.categoryId
+      ?? await getCategoryIdForTitle(draft.title || "", draft.item_type || undefined);
 
     await ensureMerchantLocation();
 

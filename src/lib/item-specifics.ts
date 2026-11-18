@@ -492,3 +492,63 @@ export function isMissingColumnError(err: { code?: string; message?: string } | 
   const m = (err.message ?? "").toLowerCase();
   return (err.code === "42703" || err.code === "PGRST204" || m.includes("could not find")) && m.includes(column.toLowerCase());
 }
+
+// ------------------------------------------------- listing description --
+
+const LEGACY_LABELS: Array<[RegExp, Measurement["key"]]> = [
+  [/pit\s*to\s*pit|p2p|chest/i, "pitToPit"],
+  [/^length|body length/i, "length"],
+  [/sleeve/i, "sleeve"],
+  [/shoulder/i, "shoulder"],
+  [/waist/i, "waist"],
+  [/inseam/i, "inseam"],
+  [/rise/i, "rise"],
+  [/leg opening/i, "legOpening"],
+];
+
+/** Measurements from an older plain description ("Measurements: Pit to pit: 22 inches, Length: 28 inches."). */
+export function measurementsFromDescription(desc: string | null | undefined): Measurement[] {
+  if (!desc || isTemplateHtml(desc)) return [];
+  const line = desc.split(/\n+/).find((l) => /^\s*Measurements:/i.test(l));
+  if (!line) return [];
+  const raw: Partial<Record<Measurement["key"], string>> = {};
+  for (const part of line.replace(/^\s*Measurements:\s*/i, "").replace(/\.$/, "").split(/\s*,\s*/)) {
+    const [label, value] = part.split(/\s*:\s*/);
+    const hit = LEGACY_LABELS.find(([re]) => re.test((label ?? "").trim()));
+    if (hit && value && !raw[hit[1]]) raw[hit[1]] = value;
+  }
+  return measurementsFrom(raw);
+}
+
+/** The listing's HTML description from the draft + its final aspects. */
+export function listingDescriptionHtml(
+  draft: { title?: string | null; description?: string | null; condition?: string | null; flaws?: string | null; custom_sku?: string | null },
+  aspects: Aspects,
+  measurements: Measurement[],
+  notes: string | null | undefined,
+): string {
+  if (isTemplateHtml(draft.description)) return draft.description!.trim();
+  const first = (...names: string[]) => names.map((n) => aspects[n]?.join(", ")).find(Boolean) ?? null;
+  const details: Array<[string, string | null]> = [
+    ["Brand", first("Brand")],
+    ["Size", [first("Size"), first("Size Type") && first("Size Type") !== "Regular" ? first("Size Type") : null].filter(Boolean).join(" ") || null],
+    ["Department", first("Department")],
+    ["Type", first("Type")],
+    ["Model / line", [first("Product Line"), first("Model")].filter(Boolean).join(" ") || null],
+    ["Team / player", [first("Team"), first("Player"), first("Jersey Number") ? `#${first("Jersey Number")}` : null].filter(Boolean).join(" ") || null],
+    ["Era", first("Decade") ?? (first("Vintage") === "Yes" ? "Vintage" : null)],
+    ["Material", first("Outer Shell Material", "Material", "Fabric Type")],
+    ["Color", first("Color")],
+    ["Made in", first("Country/Region of Manufacture")],
+  ];
+  return buildDescriptionHtml({
+    title: draft.title ?? "",
+    summary: plainSummary(draft.description),
+    details,
+    measurements,
+    conditionLabel: draft.condition,
+    flaws: draft.flaws,
+    notes,
+    sku: draft.custom_sku ?? null,
+  });
+}
