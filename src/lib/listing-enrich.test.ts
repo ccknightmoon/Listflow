@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { ai, cat, defs } = vi.hoisted(() => ({ ai: vi.fn(), cat: vi.fn(), defs: vi.fn() }));
 vi.mock("@/lib/openai-request", () => ({ openAIPost: (...a: unknown[]) => ai(...a) }));
-vi.mock("@/lib/ebay-inventory", () => ({ getCategoryIdForTitle: (...a: unknown[]) => cat(...a) }));
+vi.mock("@/lib/ebay-category", () => ({ chooseCategory: (...a: unknown[]) => cat(...a) }));
 vi.mock("@/lib/ebay-aspects", () => ({ fetchAspectDefs: (...a: unknown[]) => defs(...a), defsForClient: (d: unknown) => d }));
 
 import { enrichListing, enrichVisionResult, chooseTitle, visionMeasurements, brandFirst } from "./listing-enrich";
@@ -33,7 +33,7 @@ const CARHARTT = {
 
 beforeEach(() => {
   ai.mockReset(); cat.mockReset(); defs.mockReset();
-  cat.mockResolvedValue("57988");
+  cat.mockResolvedValue({ categoryId: "57988", categoryPath: "Clothing, Shoes & Accessories > Men > Men's Clothing > Coats, Jackets & Vests", needsReview: false, query: "q", rejected: [], kind: "outerwear" });
   defs.mockResolvedValue(JACKET_DEFS);
 });
 

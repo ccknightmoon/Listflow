@@ -9,7 +9,8 @@ export type GarmentKind =
 const W = (words: string) => new RegExp(`\\b(${words})\\b`, "i");
 const RE = {
   jersey: W("jerseys?"),
-  sportsHint: W("nfl|nba|mlb|nhl|mls|ncaa|football|basketball|baseball|hockey|soccer|team|#\\s?\\d{1,2}"),
+  sportsHint: W("nfl|nba|mlb|nhl|mls|ncaa|football|basketball|baseball|hockey|soccer|team"),
+  jerseyNumber: /#\s?\d{1,2}\b/,
   outerwear: W("jackets?|coats?|parkas?|puffers?|bombers?|windbreakers?|anoraks?|blazers?|vests?|gilets?|fleece jackets?|hoodies?|sweatshirts?|pullovers?|cardigans?|sweaters?|quarter zip|1/4 zip"),
   top: W("t-?shirts?|tees?|shirts?|tops?|blouses?|polos?|tank tops?|tanks?|henleys?|button[- ]?(ups?|downs?)|camisoles?|tunics?|crop tops?"),
   bottom: W("pants|jeans|shorts|trousers|joggers|sweatpants|leggings|chinos|cargos?|skirts?|overalls|capris|culottes"),
@@ -25,7 +26,7 @@ const RE = {
 export function classifyGarment(itemType: string | null | undefined, title: string | null | undefined, hints: { team?: string | null; league?: string | null; player?: string | null } = {}): GarmentKind {
   const t = (itemType ?? "").trim();
   const all = `${t} ${title ?? ""}`;
-  const sportsy = !!(hints.team || hints.league || hints.player) || RE.sportsHint.test(all);
+  const sportsy = !!(hints.team || hints.league || hints.player) || RE.sportsHint.test(all) || RE.jerseyNumber.test(all);
   const check = (s: string): GarmentKind | null => {
     if (!s) return null;
     if (RE.jersey.test(s)) return sportsy ? "sports-jersey" : "top"; // a jersey is a top, never "jersey knit" pants
@@ -47,7 +48,10 @@ const isTopLike = (k: GarmentKind) => k === "top" || k === "sports-jersey" || k 
 
 /** Does an eBay category path fit this kind of item? (Tops never in pants, and vice versa.) */
 export function categoryFits(kind: GarmentKind, path: string): { ok: boolean; reason?: string } {
-  const p = ` ${path.toLowerCase()} `;
+  // Judge by everything below the top-level vertical: eBay's root
+  // "Clothing, Shoes & Accessories" would otherwise look like "shoes".
+  const segs = path.split(">").map((x) => x.trim()).filter(Boolean);
+  const p = ` ${(segs.length > 1 ? segs.slice(1) : segs).join(" > ").toLowerCase()} `;
   const has = (re: RegExp) => re.test(p);
   const bottoms = /\b(pants|jeans|shorts|trousers|leggings|joggers|sweatpants|skirts?|bottoms|overalls)\b/;
   const tops = /\b(shirts?|tops|t-shirts|tees|blouses|polos|jerseys|sweaters|sweatshirts|hoodies|coats|jackets|vests)\b/;

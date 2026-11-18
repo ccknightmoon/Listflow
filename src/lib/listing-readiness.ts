@@ -7,6 +7,10 @@ export type ListingReadinessInput = {
   shippingPolicyConfigured?: boolean;
   /** eBay-required item specifics still empty for the chosen category. */
   missingRequiredSpecifics?: string[];
+  /** The eBay category couldn't be confirmed, or the self-check says it's wrong. */
+  categoryNeedsReview?: boolean;
+  /** Self-check contradictions (title vs category vs Type vs measurements). */
+  categoryIssues?: string[];
 };
 
 export type ListingReadiness = {
@@ -31,6 +35,10 @@ export function getListingReadiness(input: ListingReadinessInput): ListingReadin
   if (input.missingRequiredSpecifics && input.missingRequiredSpecifics.length > 0) {
     blockers.push(`Fill eBay's required specifics: ${input.missingRequiredSpecifics.join(", ")}`);
   }
+  if (input.categoryNeedsReview || (input.categoryIssues ?? []).some((i) => /^Category looks wrong/.test(i))) {
+    blockers.push("Confirm the eBay category (it doesn't look right for this item)");
+  }
+  for (const i of input.categoryIssues ?? []) if (!/^Category looks wrong/.test(i)) warnings.push(i);
   if (input.shippingPolicyConfigured === false) {
     blockers.push("Finish the shipping policy in eBay settings");
   }

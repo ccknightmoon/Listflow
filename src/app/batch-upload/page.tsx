@@ -1624,6 +1624,8 @@ export default function BatchUploadPage() {
       condition: result.condition,
       shippingMode: shippingModes[index] ?? defaultShippingMode,
       missingRequiredSpecifics: result.missingRequired,
+      categoryNeedsReview: result.categoryNeedsReview,
+      categoryIssues: result.issues,
     });
     if (!readiness.ready) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
@@ -2711,6 +2713,8 @@ export default function BatchUploadPage() {
               condition: result.condition,
               shippingMode: shippingModes[i] ?? defaultShippingMode,
               missingRequiredSpecifics: result.missingRequired,
+              categoryNeedsReview: result.categoryNeedsReview,
+              categoryIssues: result.issues,
             });
 
             return (
@@ -2971,6 +2975,12 @@ export default function BatchUploadPage() {
                       aspects={result.itemSpecifics ?? {}}
                       defs={result.aspectDefs ?? null}
                       categoryId={result.categoryId ?? null}
+                      categoryPath={result.categoryPath ?? null}
+                      categoryNeedsReview={result.categoryNeedsReview}
+                      issues={result.issues}
+                      onCategoryChange={(r) =>
+                        setResults((prev) => prev.map((x, j) => (j === i ? { ...x, categoryId: r.categoryId, categoryPath: r.categoryPath, categoryNeedsReview: false, itemSpecifics: r.aspects, missingRequired: r.missingRequired, aspectDefs: r.defs, issues: r.issues } : x)))
+                      }
                       title={result.suggestedTitle}
                       itemType={result.itemType}
                       disabled={saveStatus[i] === "saved"}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, ChevronDown, ChevronUp, ListChecks } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, FolderTree, Loader2, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { matchAllowedValue, missingRequiredAspects, type AspectDef, type Aspects } from "@/lib/item-specifics";
 
@@ -16,13 +16,23 @@ export default function SpecificsEditor({
   onChange,
   defs: givenDefs,
   categoryId,
+  categoryPath,
+  categoryNeedsReview,
+  issues,
   title,
   itemType,
   disabled,
   onMeta,
+  onCategoryChange,
 }: {
   aspects: Aspects;
   onChange: (next: Aspects, meta: { categoryId: string | null; missingRequired: string[] }) => void;
+  categoryPath?: string | null;
+  categoryNeedsReview?: boolean;
+  /** Self-check contradictions to show (title vs category vs Type…). */
+  issues?: string[];
+  /** Seller picked another category: new specifics, defs and checks. */
+  onCategoryChange?: (r: { categoryId: string; categoryPath: string; aspects: Aspects; missingRequired: string[]; defs: AspectDef[]; issues: string[] }) => void;
   defs?: AspectDef[] | null;
   categoryId?: string | null;
   title?: string | null;
@@ -31,7 +41,12 @@ export default function SpecificsEditor({
   /** Fires whenever the category or the list of missing required aspects changes. */
   onMeta?: (meta: { categoryId: string | null; missingRequired: string[] }) => void;
 }) {
-  const [fetched, setFetched] = useState<{ categoryId: string | null; defs: AspectDef[] } | null>(null);
+  const [fetched, setFetched] = useState<{ categoryId: string | null; categoryPath?: string | null; categoryNeedsReview?: boolean; defs: AspectDef[] } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [query, setQuery] = useState("");
+  const [options, setOptions] = useState<Array<{ id: string; path: string; fits: boolean }> | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [pickError, setPickError] = useState<string | null>(null);
   const [showMore, setShowMore] = useState(false);
   const [open, setOpen] = useState(true);
   const defs = useMemo(() => givenDefs ?? fetched?.defs ?? [], [givenDefs, fetched]);
@@ -43,8 +58,16 @@ export default function SpecificsEditor({
     if (!categoryId && !title) return;
     let cancelled = false;
     const q = categoryId ? `categoryId=${encodeURIComponent(categoryId)}` : `title=${encodeURIComponent(title ?? "")}&itemType=${encodeURIComponent(itemType ?? "")}`;
-    apiFetch<{ categoryId: string | null; defs: AspectDef[] }>(`/api/ebay/aspects?${q}`)
-      .then((r) => { if (!cancelled) setFetched({ categoryId: r.categoryId, defs: r.defs ?? [] }); })
+    apiFetch<{ categoryId: string | null; categoryPath?: string | null; categoryNeedsReview?: boolean; defs: AspectDef[] }>(`/api/ebay/aspects?${q}`)
+      .then((r) => {
+        if (cancelled) return;
+        setFetched((prev) => ({
+          categoryId: r.categoryId,
+          categoryPath: r.categoryPath ?? (prev?.categoryId === r.categoryId ? prev?.categoryPath : null),
+          categoryNeedsReview: r.categoryNeedsReview,
+          defs: r.defs ?? [],
+        }));
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [givenDefs, categoryId, title, itemType]);
@@ -113,7 +136,91 @@ export default function SpecificsEditor({
     );
   };
 
-  if (!defs.length && filled === 0) return null;
+  const shownPath = categoryPath ?? fetched?.categoryPath ?? null;
+  const needsReview = categoryNeedsReview ?? fetched?.categoryNeedsReview ?? false;
+
+  async function searchCategories(q: string) {
+    setPickError(null);
+    setBusy(true);
+    try {
+      const r = await apiFetch<{ categories?: Array<{ id: string; path: string; fits: boolean }> }>(
+        `/api/ebay/categories?q=${encodeURIComponent(q)}&itemType=${encodeURIComponent(itemType ?? "")}&title=${encodeURIComponent(title ?? "")}`,
+      );
+      setOptions(r.categories ?? []);
+    } catch (e) {
+      setPickError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function chooseCategory(c: { id: string; path: string }) {
+    setBusy(true);
+    setPickError(null);
+    try {
+      const r = await apiFetch<{ itemSpecifics: Aspects; missingRequired: string[]; aspectDefs: AspectDef[]; issues: string[] }>("/api/ebay/specifics-refill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ categoryId: c.id, categoryPath: c.path, title, itemType, aspects }),
+      });
+      setFetched({ categoryId: c.id, categoryPath: c.path, categoryNeedsReview: false, defs: r.aspectDefs ?? [] });
+      onCategoryChange?.({ categoryId: c.id, categoryPath: c.path, aspects: r.itemSpecifics ?? {}, missingRequired: r.missingRequired ?? [], defs: r.aspectDefs ?? [], issues: r.issues ?? [] });
+      setPicking(false);
+      setOptions(null);
+    } catch (e) {
+      setPickError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const categoryBlock = (
+    <div className="mb-3 rounded-xl p-2.5" style={{ background: needsReview ? "var(--warning-bg)" : "var(--glass)", border: `1px solid ${needsReview ? "var(--warning-border)" : "var(--glass-line)"}` }}>
+      <div className="flex items-start gap-2">
+        <FolderTree className="w-4 h-4 flex-none mt-0.5" style={{ color: needsReview ? "var(--danger)" : "var(--accent)" }} />
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] font-semibold" style={{ color: "var(--text-tertiary)" }}>eBay category</p>
+          <p className="text-sm font-medium break-words">{shownPath ?? (catId ? `Category #${catId}` : "Not chosen yet")}</p>
+          {needsReview && <p className="text-[11px] mt-0.5" style={{ color: "var(--danger)" }}>Please confirm — no suggested category clearly fit this item.</p>}
+        </div>
+        {!disabled && onCategoryChange && (
+          <button type="button" className="btn text-xs px-2.5 py-1.5 flex-none" onClick={() => { setPicking((v) => !v); if (!query) setQuery([title].filter(Boolean).join(" ").slice(0, 60)); }}>
+            Change category
+          </button>
+        )}
+      </div>
+      {picking && (
+        <div className="mt-2">
+          <form className="flex gap-2" onSubmit={(e) => { e.preventDefault(); void searchCategories(query); }}>
+            <input className="input text-sm flex-1" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="e.g. Dallas Cowboys football jersey" aria-label="Search eBay categories" />
+            <button type="submit" className="btn text-xs px-3" disabled={busy || query.trim().length < 2} aria-label="Search">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
+            </button>
+          </form>
+          {pickError && <p className="text-xs mt-1" style={{ color: "var(--danger)" }}>{pickError}</p>}
+          {options && (
+            <div className="mt-2 flex flex-col gap-1 max-h-60 overflow-y-auto">
+              {options.length === 0 && <p className="text-xs" style={{ color: "var(--text-tertiary)" }}>No categories found — try other words.</p>}
+              {options.map((o) => (
+                <button key={o.id} type="button" disabled={busy} onClick={() => void chooseCategory(o)}
+                  className="text-left text-xs rounded-lg px-2.5 py-2 hover:bg-[var(--accent-tint)]"
+                  style={{ border: "1px solid var(--glass-line)", opacity: o.fits ? 1 : 0.6 }}>
+                  {o.path}{!o.fits && <span className="ml-1" style={{ color: "var(--danger)" }}>· doesn&apos;t look like this item</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {issues && issues.length > 0 && (
+        <ul className="mt-2 text-[11px] list-disc pl-4" style={{ color: "var(--danger)" }}>
+          {issues.map((i) => <li key={i}>{i}</li>)}
+        </ul>
+      )}
+    </div>
+  );
+
+  if (!defs.length && filled === 0 && !shownPath && !catId) return null;
 
   return (
     <div className="card p-3 mb-4">
@@ -130,6 +237,7 @@ export default function SpecificsEditor({
       </button>
       {open && (
         <div className="mt-3">
+          {categoryBlock}
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5">
             {required.map(row)}
             {filledOther.map(row)}

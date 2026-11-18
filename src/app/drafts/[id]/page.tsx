@@ -77,6 +77,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [specifics, setSpecifics] = useState<StoredSpecificsShape | null>(null);
   const [missingSpecifics, setMissingSpecifics] = useState<string[]>([]);
   const specificsTouched = useRef(false);
+  const [categoryIssues, setCategoryIssues] = useState<string[]>([]);
   const { id } = use(params);
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -441,6 +442,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       condition,
       shippingMode,
       missingRequiredSpecifics: missingSpecifics,
+      categoryNeedsReview: specifics?.categoryNeedsReview,
+      categoryIssues,
     });
     if (!readiness.ready) {
       setError(`Before listing: ${readiness.blockers.join(" • ")}`);
@@ -1343,12 +1346,21 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       <SpecificsEditor
         aspects={specifics?.aspects ?? {}}
         categoryId={specifics?.categoryId ?? null}
+        categoryPath={specifics?.categoryPath ?? null}
+        categoryNeedsReview={specifics?.categoryNeedsReview}
+        issues={categoryIssues}
+        onCategoryChange={(r) => {
+          specificsTouched.current = true;
+          setSpecifics((prev) => ({ categoryId: r.categoryId, categoryPath: r.categoryPath, categoryNeedsReview: false, aspects: r.aspects, measurements: prev?.measurements ?? [] }));
+          setMissingSpecifics(r.missingRequired);
+          setCategoryIssues(r.issues);
+        }}
         title={title}
         itemType={itemType}
         onMeta={(m) => setMissingSpecifics(m.missingRequired)}
         onChange={(aspects, meta) => {
           specificsTouched.current = true;
-          setSpecifics((prev) => ({ categoryId: meta.categoryId ?? prev?.categoryId ?? null, aspects, measurements: prev?.measurements ?? [] }));
+          setSpecifics((prev) => ({ ...prev, categoryId: meta.categoryId ?? prev?.categoryId ?? null, aspects, measurements: prev?.measurements ?? [] }));
           setMissingSpecifics(meta.missingRequired);
         }}
       />

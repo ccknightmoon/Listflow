@@ -626,6 +626,8 @@ export default function NewListingPage() {
       condition,
       shippingMode,
       missingRequiredSpecifics: missingSpecifics,
+      categoryNeedsReview: specifics?.categoryNeedsReview,
+      categoryIssues: aiResult?.issues,
     });
     if (!readiness.ready) {
       setListError(`Before listing: ${readiness.blockers.join(" • ")}`);
@@ -1066,11 +1068,19 @@ export default function NewListingPage() {
           aspects={specifics?.aspects ?? {}}
           defs={aiResult.aspectDefs ?? null}
           categoryId={specifics?.categoryId ?? aiResult.categoryId ?? null}
+          categoryPath={specifics?.categoryPath ?? aiResult.categoryPath ?? null}
+          categoryNeedsReview={specifics?.categoryNeedsReview ?? aiResult.categoryNeedsReview}
+          issues={aiResult.issues}
+          onCategoryChange={(r) => {
+            setAiResult((prev) => (prev ? { ...prev, aspectDefs: r.defs, issues: r.issues, categoryId: r.categoryId, categoryPath: r.categoryPath, categoryNeedsReview: false } : prev));
+            setSpecifics((prev) => ({ categoryId: r.categoryId, categoryPath: r.categoryPath, categoryNeedsReview: false, aspects: r.aspects, measurements: prev?.measurements ?? [] }));
+            setMissingSpecifics(r.missingRequired);
+          }}
           title={title}
           itemType={aiResult.itemType}
           onMeta={(m) => setMissingSpecifics(m.missingRequired)}
         onChange={(aspects, meta) => {
-            setSpecifics((prev) => ({ categoryId: meta.categoryId ?? prev?.categoryId ?? null, aspects, measurements: prev?.measurements ?? [] }));
+            setSpecifics((prev) => ({ ...prev, categoryId: meta.categoryId ?? prev?.categoryId ?? null, aspects, measurements: prev?.measurements ?? [] }));
             setMissingSpecifics(meta.missingRequired);
           }}
         />
