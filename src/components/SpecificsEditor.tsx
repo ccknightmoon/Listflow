@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import { matchAllowedValue, missingRequiredAspects, type AspectDef, type Aspects } from "@/lib/item-specifics";
@@ -19,6 +19,7 @@ export default function SpecificsEditor({
   title,
   itemType,
   disabled,
+  onMeta,
 }: {
   aspects: Aspects;
   onChange: (next: Aspects, meta: { categoryId: string | null; missingRequired: string[] }) => void;
@@ -27,6 +28,8 @@ export default function SpecificsEditor({
   title?: string | null;
   itemType?: string | null;
   disabled?: boolean;
+  /** Fires whenever the category or the list of missing required aspects changes. */
+  onMeta?: (meta: { categoryId: string | null; missingRequired: string[] }) => void;
 }) {
   const [fetched, setFetched] = useState<{ categoryId: string | null; defs: AspectDef[] } | null>(null);
   const [showMore, setShowMore] = useState(false);
@@ -47,6 +50,12 @@ export default function SpecificsEditor({
   }, [givenDefs, categoryId, title, itemType]);
 
   const missing = missingRequiredAspects(aspects, defs);
+  const missingKey = missing.join("|");
+  const metaRef = useRef(onMeta);
+  useEffect(() => { metaRef.current = onMeta; }, [onMeta]);
+  useEffect(() => {
+    metaRef.current?.({ categoryId: catId, missingRequired: missingKey ? missingKey.split("|") : [] });
+  }, [catId, missingKey]);
   const filled = Object.values(aspects).filter((v) => v?.length).length;
   const byLower = new Map(defs.map((d) => [d.name.toLowerCase(), d]));
   const valueOf = (name: string) => {

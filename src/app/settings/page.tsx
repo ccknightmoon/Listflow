@@ -671,14 +671,14 @@ export default function SettingsPage() {
 
       <SettingsSection
         delay="d4"
-        title="Store description"
-        description="Write your shop's boilerplate once — welcome message, policies, a sign-off, whatever you'd normally paste into every listing. It gets added to the end of every item's description automatically when you list it. Each item's own description above this only ever has that item's own details; you never see or edit this text on the listing screens."
+        title="Shipping & returns notes"
+        description="Write this once. It's added to every listing's description under a “Shipping & returns” heading (after the item details, measurements and condition). Keep it short — e.g. how fast you ship, how items are packed, and your returns policy."
         icon={FileText}
       >
         <textarea
           className="input"
           rows={8}
-          placeholder={'Welcome to our store :)!\nExplore unique second-hand treasures with detailed photos!\n...'}
+          placeholder={'Ships within 1 business day, carefully packed.\n30-day returns accepted.\nMeasurements are taken flat and are approximate.'}
           value={footer}
           onChange={(e) => { setFooter(e.target.value); setFooterSaved(false); }}
         />

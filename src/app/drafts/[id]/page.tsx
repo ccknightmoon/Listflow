@@ -2,6 +2,8 @@
 
 import Sheet from "@/components/Sheet";
 import PhotoDropZone from "@/components/PhotoDropZone";
+import SpecificsEditor from "@/components/SpecificsEditor";
+import { sanitizeStoredSpecifics, type StoredSpecificsShape } from "@/lib/item-specifics";
 import { useIsDesktop } from "@/lib/use-is-desktop";
 import Lightbox from "@/components/Lightbox";
 import { Z } from "@/lib/z-layers";
@@ -59,6 +61,7 @@ interface Draft {
   character_family: string | null;
   year_manufactured: string | null;
   season: string | null;
+  item_specifics?: unknown;
   ebay_listing_id: string | null;
   store_category_id: string | null;
   store_category_name: string | null;
@@ -70,6 +73,10 @@ interface Draft {
 
 export default function DraftDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const isDesktop = useIsDesktop();
+  // eBay item specifics (drafts.item_specifics) + required ones still empty.
+  const [specifics, setSpecifics] = useState<StoredSpecificsShape | null>(null);
+  const [missingSpecifics, setMissingSpecifics] = useState<string[]>([]);
+  const specificsTouched = useRef(false);
   const { id } = use(params);
   const router = useRouter();
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -227,6 +234,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         setCharacterFamily(str(d.character_family));
         setYearManufactured(str(d.year_manufactured));
         setSeason(str(d.season));
+        setSpecifics(sanitizeStoredSpecifics(d.item_specifics));
         setStoreCategoryId(d.store_category_id ?? null);
         setStoreCategoryName(d.store_category_name ?? null);
         if (d.ebay_listing_id) setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
@@ -388,6 +396,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
     };
     if (normalizedSku !== initialCustomSku.current) payload.customSku = normalizedSku;
+    if (specificsTouched.current && specifics) payload.itemSpecifics = specifics;
     return payload;
   }
 
@@ -431,6 +440,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       price: priceNum,
       condition,
       shippingMode,
+      missingRequiredSpecifics: missingSpecifics,
     });
     if (!readiness.ready) {
       setError(`Before listing: ${readiness.blockers.join(" • ")}`);
@@ -1329,6 +1339,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           />
         </div>
       </div>
+
+      <SpecificsEditor
+        aspects={specifics?.aspects ?? {}}
+        categoryId={specifics?.categoryId ?? null}
+        title={title}
+        itemType={itemType}
+        onMeta={(m) => setMissingSpecifics(m.missingRequired)}
+        onChange={(aspects, meta) => {
+          specificsTouched.current = true;
+          setSpecifics((prev) => ({ categoryId: meta.categoryId ?? prev?.categoryId ?? null, aspects, measurements: prev?.measurements ?? [] }));
+          setMissingSpecifics(meta.missingRequired);
+        }}
+      />
 
       {/* AI Suggest Section */}
       <div className="card p-4 mb-4">

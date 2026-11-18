@@ -2974,6 +2974,7 @@ export default function BatchUploadPage() {
                       title={result.suggestedTitle}
                       itemType={result.itemType}
                       disabled={saveStatus[i] === "saved"}
+                      onMeta={(m) => setResults((prev) => prev.map((r, j) => (j === i && (r.missingRequired ?? []).join("|") !== m.missingRequired.join("|") ? { ...r, missingRequired: m.missingRequired } : r)))}
                       onChange={(aspects, meta) =>
                         setResults((prev) => prev.map((r, j) => (j === i ? { ...r, itemSpecifics: aspects, missingRequired: meta.missingRequired, categoryId: meta.categoryId ?? r.categoryId } : r)))
                       }

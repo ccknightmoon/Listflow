@@ -1068,7 +1068,8 @@ export default function NewListingPage() {
           categoryId={specifics?.categoryId ?? aiResult.categoryId ?? null}
           title={title}
           itemType={aiResult.itemType}
-          onChange={(aspects, meta) => {
+          onMeta={(m) => setMissingSpecifics(m.missingRequired)}
+        onChange={(aspects, meta) => {
             setSpecifics((prev) => ({ categoryId: meta.categoryId ?? prev?.categoryId ?? null, aspects, measurements: prev?.measurements ?? [] }));
             setMissingSpecifics(meta.missingRequired);
           }}
