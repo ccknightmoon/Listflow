@@ -8,6 +8,11 @@ import { buildGroupsFromDividers, countMarkedItems } from "@/lib/manual-dividers
 import PhotoDropZone from "@/components/PhotoDropZone";
 import PhotoViewer from "@/components/PhotoViewer";
 import { getPublishQueue } from "@/lib/publish-queue";
+import { createLimiter, mapLimit, retry } from "@/lib/concurrency";
+import { MAX_ANALYSIS_PHOTOS } from "@/lib/photo-plan";
+import { retryDelayMs } from "@/lib/backoff";
+import { newTimings, recordItemServer, recordSpan, timed, type BatchTimings, type ItemServerTiming } from "@/lib/batch-timings";
+import BatchTimingsPanel, { type PublishSpan } from "@/components/BatchTimingsPanel";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -53,6 +58,8 @@ interface SlotImage {
   data: string;
   mediaType: string;
   previewUrl: string;
+  /** Storage URL once the background upload finishes (also kept across a recovered session). */
+  url?: string;
 }
 
 // batch-upload additionally tracks a live pricing suggestion and a
@@ -65,6 +72,10 @@ interface AiResult extends BaseAiResult {
   // live "still analyzing" state instead of blank fields the instant the
   // results screen appears.
   pending?: boolean;
+  /** analyze-batch: OpenAI said "slow down" -- safe to retry after a pause. */
+  rateLimited?: boolean;
+  /** analyze-batch: server-side timing breakdown for this item. */
+  timings?: ItemServerTiming;
 }
 
 interface Thumbnail {
@@ -104,8 +115,24 @@ const THUMB_QUALITY = 0.5;
 // concurrency-pooled rather than looping the whole batch in one shot --
 // see LARGE_BATCH_NOTICE_THRESHOLD below for the one real user-facing
 // consequence of a bigger batch (it takes longer, not that it breaks).
-const MAX_PHOTOS = 200;
+// Volume Phase 1: raised 200 -> 500 so a full day (~450 photos) fits in one
+// batch. Compression, uploads and grouping thumbnails all run through a
+// small worker pool (COMPRESS_CONCURRENCY / UPLOAD_CONCURRENCY) instead of
+// all at once, so a big pick doesn't spike phone memory.
+const MAX_PHOTOS = 500;
+const COMPRESS_CONCURRENCY = 4;
+const UPLOAD_CONCURRENCY = 4;
+// Photos sent inline (base64) when an item's uploads haven't finished or
+// failed. Uploaded photos go by URL, and every photo of an item (up to
+// MAX_ANALYSIS_PHOTOS) is analyzed -- tag/front shots at full detail.
 const MAX_PHOTOS_PER_ITEM = 6;
+// How long analysis waits for a photo's background upload before falling
+// back to sending it inline.
+const UPLOAD_WAIT_MS = 20_000;
+// Items analyzed at once (was 3). analyze-batch backs off on OpenAI rate
+// limits, and the page retries a rate-limited item up to twice more.
+const ANALYSIS_CONCURRENCY = 6;
+const ANALYSIS_RATE_LIMIT_RETRIES = 2;
 const GROUPING_CHUNK_SIZE = 15;
 // Past this many photos, AI grouping alone needs 5+ sequential chunks
 // (see DELAY_BETWEEN_CHUNKS_MS below) even before analysis starts -- long
@@ -335,6 +362,20 @@ export default function BatchUploadPage() {
   // full photo upload for the whole group. Across a real batch that meant
   // the same unchanged photos crossing the network 2-3x each for nothing.
   const uploadedPhotoUrls = useRef<Record<number, string>>({});
+  // Background uploads (Volume Phase 1): each photo starts uploading as
+  // soon as it's compressed, UPLOAD_CONCURRENCY at a time with retries.
+  // uploadPromises lets analysis/save wait for an in-flight upload instead
+  // of starting a second one. uploadGen invalidates uploads from a
+  // discarded batch so a late finish can't land on a new batch's photo.
+  const uploadLimiter = useRef(createLimiter(UPLOAD_CONCURRENCY));
+  const uploadPromises = useRef<Record<number, Promise<string | undefined>>>({});
+  const uploadGen = useRef(0);
+  const [uploadProgress, setUploadProgress] = useState({ done: 0, failed: 0, total: 0 });
+  // Per-stage timings for this batch (see BatchTimingsPanel).
+  const timingsRef = useRef<BatchTimings>(newTimings());
+  const [timingsSnap, setTimingsSnap] = useState<BatchTimings>(() => timingsRef.current);
+  const bumpTimings = () => setTimingsSnap({ ...timingsRef.current });
+  const [publishSpans, setPublishSpans] = useState<PublishSpan[]>([]);
   const pauseRef = useRef(false);
   const cancelRef = useRef(false);
   // Tracks the batch_jobs id for whichever bulk listing run
@@ -371,7 +412,14 @@ export default function BatchUploadPage() {
         const restoredStep =
           hasGroups && (snapshot.step === "results" || snapshot.step === "review") ? snapshot.step : "upload";
         setStep(restoredStep);
-        setPhotos(snapshot.photos as SlotImage[]);
+        const restoredPhotos = snapshot.photos as SlotImage[];
+        setPhotos(restoredPhotos);
+        restoredPhotos.forEach((p, i) => {
+          if (p.url) uploadedPhotoUrls.current[i] = p.url;
+        });
+        startBackgroundUploads(
+          restoredPhotos.map((p, i) => ({ idx: i, photo: p })).filter(({ photo }) => !photo.url)
+        );
         setGroups(snapshot.groups);
         setResults(snapshot.results as AiResult[]);
         setCustomPrices(snapshot.customPrices);
@@ -388,6 +436,7 @@ export default function BatchUploadPage() {
       recoveryHydrated.current = true;
     });
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once on mount; startBackgroundUploads only reads refs
   }, []);
 
   useEffect(() => {
@@ -419,6 +468,7 @@ export default function BatchUploadPage() {
     void clearBatchRecovery().catch(() => {});
       setRecoveredBatch(false);
       setStep("upload");
+      resetUploadState();
       setPhotos([]);
       setGroups([]);
       setResults([]);
@@ -511,6 +561,75 @@ export default function BatchUploadPage() {
     setManualDividers((prev) => { const n = new Set(prev); n.delete(photoIndex); return n; });
   }
 
+  // Compresses picked photos a few at a time (not all at once -- 500
+  // full-size camera photos decoded together can exhaust phone memory).
+  async function compressFiles(fileArray: File[]): Promise<SlotImage[]> {
+    const t = timingsRef.current;
+    const out = await mapLimit(fileArray, COMPRESS_CONCURRENCY, (file) =>
+      timed(t, "compress", async () => {
+        const { dataUrl, mediaType } = await resizeImage(file);
+        return { data: dataUrl.split(",")[1], mediaType, previewUrl: dataUrl };
+      })
+    );
+    t.photos += out.length;
+    bumpTimings();
+    return out;
+  }
+
+  function resetUploadState() {
+    uploadGen.current++;
+    uploadedPhotoUrls.current = {};
+    uploadPromises.current = {};
+    setUploadProgress({ done: 0, failed: 0, total: 0 });
+    timingsRef.current = newTimings();
+    bumpTimings();
+  }
+
+  // Starts uploading photos right away, in the background. Each upload is
+  // retried (3 tries) and failures are not fatal: save retries any photo
+  // that still has no URL, and analysis sends it inline instead.
+  function startBackgroundUploads(items: { idx: number; photo: SlotImage }[]) {
+    const fresh = items.filter(({ idx }) => !(idx in uploadPromises.current) && !uploadedPhotoUrls.current[idx]);
+    if (fresh.length === 0) return;
+    const gen = uploadGen.current;
+    setUploadProgress((p) => ({ ...p, total: p.total + fresh.length }));
+    for (const { idx, photo } of fresh) {
+      const promise = uploadLimiter.current
+        .run(() =>
+          gen !== uploadGen.current
+            ? Promise.resolve(undefined)
+            : timed(timingsRef.current, "upload", () => retry(() => uploadThumbnail(photo.previewUrl), 3))
+        )
+        .then((url) => {
+          if (gen !== uploadGen.current || !url) return undefined;
+          uploadedPhotoUrls.current[idx] = url;
+          setPhotos((prev) => (prev[idx] && !prev[idx].url ? prev.map((p, i) => (i === idx ? { ...p, url } : p)) : prev));
+          setUploadProgress((p) => ({ ...p, done: p.done + 1 }));
+          bumpTimings();
+          return url;
+        })
+        .catch((err) => {
+          console.error("Background photo upload failed:", (err as Error).message);
+          if (gen === uploadGen.current) {
+            delete uploadPromises.current[idx];
+            setUploadProgress((p) => ({ ...p, failed: p.failed + 1 }));
+          }
+          return undefined;
+        });
+      uploadPromises.current[idx] = promise;
+    }
+  }
+
+  // The photo's storage URL: already uploaded, or wait (bounded) for its
+  // in-flight background upload. Never starts a new upload.
+  async function waitForPhotoUrl(idx: number, maxWaitMs = UPLOAD_WAIT_MS): Promise<string | undefined> {
+    const known = uploadedPhotoUrls.current[idx] ?? photos[idx]?.url;
+    if (known) return known;
+    const pending = uploadPromises.current[idx];
+    if (!pending) return undefined;
+    return Promise.race([pending, new Promise<undefined>((r) => setTimeout(() => r(undefined), maxWaitMs))]);
+  }
+
   async function handleFilesSelected(files: FileList | File[] | null) {
     if (!files || files.length === 0) return;
     setError(null);
@@ -532,13 +651,14 @@ export default function BatchUploadPage() {
     }
 
     try {
-      const resized = await Promise.all(
-        fileArray.map(async (file) => {
-          const { dataUrl, mediaType } = await resizeImage(file);
-          return { data: dataUrl.split(",")[1], mediaType, previewUrl: dataUrl };
-        })
-      );
+      if (photos.length === 0) {
+        timingsRef.current = newTimings();
+        setUploadProgress({ done: 0, failed: 0, total: 0 });
+      }
+      const startIndex = photos.length;
+      const resized = await compressFiles(fileArray);
       setPhotos((prev) => [...prev, ...resized]);
+      startBackgroundUploads(resized.map((photo, k) => ({ idx: startIndex + k, photo })));
       // Surfaced, not silent: previously any photos past MAX_PHOTOS were
       // just dropped with the count line reading a smaller-than-expected
       // number and no explanation why.
@@ -577,14 +697,10 @@ export default function BatchUploadPage() {
 
     try {
       const startIndex = photos.length;
-      const resized = await Promise.all(
-        fileArray.map(async (file) => {
-          const { dataUrl, mediaType } = await resizeImage(file);
-          return { data: dataUrl.split(",")[1], mediaType, previewUrl: dataUrl };
-        })
-      );
+      const resized = await compressFiles(fileArray);
       const newIndices = resized.map((_, k) => startIndex + k);
       setPhotos((prev) => [...prev, ...resized]);
+      startBackgroundUploads(resized.map((photo, k) => ({ idx: startIndex + k, photo })));
       setGroups((prev) => {
         const next = prev.map((g) => [...g]);
         next[gIdx] = [...next[gIdx], ...newIndices];
@@ -728,17 +844,18 @@ export default function BatchUploadPage() {
     }
 
     setStep("grouping");
+    const groupingStart = Date.now();
 
     try {
-      const thumbnails: Thumbnail[] = await Promise.all(
-        photos.map(async (p) => {
+      const thumbnails: Thumbnail[] = await mapLimit(photos, COMPRESS_CONCURRENCY,
+        async (p) => {
           const { dataUrl, mediaType } = await resizeFromDataUrl(
             p.previewUrl,
             THUMB_DIMENSION,
             THUMB_QUALITY
           );
           return { data: dataUrl.split(",")[1], mediaType };
-        })
+        }
       );
 
       const totalPhotos = thumbnails.length;
@@ -871,6 +988,8 @@ export default function BatchUploadPage() {
       setStep("upload");
     } finally {
       setGroupingProgress("");
+      recordSpan(timingsRef.current, "grouping", groupingStart, Date.now(), photos.length);
+      bumpTimings();
     }
   }
 
@@ -1000,11 +1119,52 @@ export default function BatchUploadPage() {
     });
   }
 
-  function groupImagesForRequest(group: number[]) {
-    return group.slice(0, MAX_PHOTOS_PER_ITEM).map((idx) => ({
-      data: photos[idx].data,
-      mediaType: photos[idx].mediaType,
-    }));
+  // Every photo of the item (up to MAX_ANALYSIS_PHOTOS), in order. Uploaded
+  // photos go by URL (keeps the request small); a photo whose upload isn't
+  // done goes inline, but only up to MAX_PHOTOS_PER_ITEM of those so the
+  // request stays under Vercel's body-size limit.
+  async function groupImagesForRequest(group: number[]) {
+    const idxs = group.slice(0, MAX_ANALYSIS_PHOTOS);
+    const urls = await Promise.all(idxs.map((idx) => waitForPhotoUrl(idx)));
+    const out: { url?: string; data?: string; mediaType?: string }[] = [];
+    let inline = 0;
+    idxs.forEach((idx, k) => {
+      if (urls[k]) out.push({ url: urls[k] });
+      else if (inline < MAX_PHOTOS_PER_ITEM && photos[idx]) {
+        out.push({ data: photos[idx].data, mediaType: photos[idx].mediaType });
+        inline++;
+      }
+    });
+    return out;
+  }
+
+  // One analyze-batch call for one item, retried after a pause when
+  // OpenAI rate-limited it (the server already backed off once inside).
+  async function analyzeItem(group: number[]): Promise<{ results?: AiResult[]; error?: string }> {
+    const images = await groupImagesForRequest(group);
+    for (let attempt = 1; ; attempt++) {
+      const start = Date.now();
+      let data: { results?: AiResult[]; error?: string };
+      try {
+        data = await apiFetch<{ results?: AiResult[]; error?: string }>("/api/analyze-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ groups: [{ images }] }),
+        });
+      } catch (error) {
+        data = { error: error instanceof Error ? error.message : "Analysis failed" };
+      }
+      recordSpan(timingsRef.current, "analysis", start, Date.now());
+      const r = data.results?.[0];
+      if (r?.rateLimited && attempt <= ANALYSIS_RATE_LIMIT_RETRIES) {
+        timingsRef.current.retries++;
+        await delay(retryDelayMs(attempt, { isRateLimit: true }));
+        continue;
+      }
+      if (r && !r.error) recordItemServer(timingsRef.current, r.timings);
+      bumpTimings();
+      return data;
+    }
   }
 
   // Free, synchronous, no network call -- see matchStoreCategoryByKeyword.
@@ -1130,22 +1290,10 @@ export default function BatchUploadPage() {
     // slips past this. Side benefit over the old sequential loop: one
     // item's network hiccup no longer aborts the whole batch — each item
     // now fails on its own instead of taking every other item down with it.
-    const ANALYSIS_CONCURRENCY = 3;
     let doneCount = 0;
 
     async function analyzeOne(i: number) {
-      let data: { results?: AiResult[]; error?: string };
-      try {
-        data = await apiFetch<{ results?: AiResult[]; error?: string }>("/api/analyze-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            groups: [{ images: groupImagesForRequest(groups[i]) }],
-          }),
-        });
-      } catch (error) {
-        data = { error: error instanceof Error ? error.message : "Analysis failed" };
-      }
+      const data = await analyzeItem(groups[i]);
 
       const result: AiResult = !data.results
         ? { itemType: "", brand: "", color: "", size: "", condition: "Good - minor flaws", flaws: "", suggestedTitle: "", error: data.error || "Analysis failed" }
@@ -1234,6 +1382,9 @@ export default function BatchUploadPage() {
   const PRICING_CONCURRENCY = 3;
 
   async function fetchOnePricing(result: AiResult, i: number) {
+    return timed(timingsRef.current, "pricing", () => fetchOnePricingInner(result, i)).finally(bumpTimings);
+  }
+  async function fetchOnePricingInner(result: AiResult, i: number) {
     const firstPhotoIdx = (groups[i] ?? [])[0];
     const image = firstPhotoIdx !== undefined ? photos[firstPhotoIdx]?.data : undefined;
     try {
@@ -1322,13 +1473,7 @@ export default function BatchUploadPage() {
 
     try {
       const group = groups[index] ?? [];
-      const data = await apiFetch<{ results?: AiResult[]; error?: string }>("/api/analyze-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          groups: [{ images: groupImagesForRequest(group) }],
-        }),
-      });
+      const data = await analyzeItem(group);
 
       if (!data.results) {
         throw new Error(data.error || "Retry failed");
@@ -1398,6 +1543,9 @@ export default function BatchUploadPage() {
   // distracted, navigates away, or loses their connection before ever
   // touching "Save draft".
   async function handleSaveDraft(index: number, opts?: { silent?: boolean }): Promise<string | null> {
+    return timed(timingsRef.current, "save", () => handleSaveDraftInner(index, opts)).finally(bumpTimings);
+  }
+  async function handleSaveDraftInner(index: number, opts?: { silent?: boolean }): Promise<string | null> {
     // NOTE: this used to short-circuit with `if (draftIds[index]) return
     // draftIds[index];`, and handleListOnEbay only ever called this when
     // no draft existed yet — so editing a row in the results table (title,
@@ -1441,7 +1589,7 @@ export default function BatchUploadPage() {
       // still reliably the group's first/front photo.
       const uploadOutcomes = await Promise.all(
         group.map(async (photoIdx) => {
-          const cachedUrl = uploadedPhotoUrls.current[photoIdx];
+          const cachedUrl = uploadedPhotoUrls.current[photoIdx] ?? (await waitForPhotoUrl(photoIdx, 60_000));
           if (cachedUrl) return cachedUrl;
           const dataUrl = photos[photoIdx]?.previewUrl;
           if (!dataUrl) return null;
@@ -1812,8 +1960,22 @@ export default function BatchUploadPage() {
         return changed ? next : prev;
       });
     };
+    const syncSpans = () => {
+      const mine = new Set(Object.values(draftIds));
+      const spans = queue
+        .getItems()
+        .filter((it) => mine.has(it.draftId) && it.startedAt && it.finishedAt)
+        .map((it) => ({ start: it.startedAt as number, end: it.finishedAt as number }));
+      setPublishSpans((prev) => (prev.length === spans.length && prev.every((p, k) => p.end === spans[k].end) ? prev : spans));
+    };
     sync();
-    return queue.subscribe(sync);
+    syncSpans();
+    const unsubA = queue.subscribe(sync);
+    const unsubB = queue.subscribe(syncSpans);
+    return () => {
+      unsubA();
+      unsubB();
+    };
   }, [draftIds]);
 
   // Once every item is live, the crash-recovery snapshot isn't needed.
@@ -2172,6 +2334,7 @@ export default function BatchUploadPage() {
 
       {step === "review" && (
         <>
+          <BatchTimingsPanel timings={timingsSnap} upload={uploadProgress} />
           <p className="text-sm text-[var(--text-secondary)] mb-4">
             Fix any mistakes before analyzing: use &ldquo;Move to&rdquo; under a
             photo to put it in another item (or a new one), drag it on a
@@ -2180,8 +2343,8 @@ export default function BatchUploadPage() {
             the second group to merge them. If it merged two items
             together, tap <SquarePlus className="inline w-3 h-3 -mt-0.5" /> (new item starts here) on
             the photo where the second item starts to split them apart.
-            Only the first {MAX_PHOTOS_PER_ITEM} photos per item will be
-            used for analysis, in the order shown.
+            Every photo of an item (up to {MAX_ANALYSIS_PHOTOS}) is analyzed; tag and
+            front shots are read at full detail.
           </p>
 
           {groupingNotices.length > 0 && (
@@ -2239,10 +2402,10 @@ export default function BatchUploadPage() {
                   <p className="text-xs text-[var(--text-secondary)]">
                     Item {gIdx + 1} &middot; {group.length} photo
                     {group.length !== 1 ? "s" : ""}
-                    {group.length > MAX_PHOTOS_PER_ITEM && (
+                    {group.length > MAX_ANALYSIS_PHOTOS && (
                       <span style={{ color: "var(--danger)" }}>
                         {" "}
-                        (only first {MAX_PHOTOS_PER_ITEM} will be used)
+                        (only first {MAX_ANALYSIS_PHOTOS} will be analyzed)
                       </span>
                     )}
                   </p>
@@ -2394,6 +2557,7 @@ export default function BatchUploadPage() {
       {step === "results" && (
         <div className="flex flex-col gap-4">
           <AIDisclaimer />
+          <BatchTimingsPanel timings={timingsSnap} publishSpans={publishSpans} upload={uploadProgress} />
           {results.length > 1 && (
             <>
               <div className="flex items-center justify-between gap-2">

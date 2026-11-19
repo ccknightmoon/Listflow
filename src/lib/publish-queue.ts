@@ -27,6 +27,9 @@ export interface PublishItem {
   needsConnect?: boolean;
   needsReconnect?: boolean;
   addedAt: number;
+  /** When this run started / finished (ms) -- for the batch timing panel. */
+  startedAt?: number;
+  finishedAt?: number;
 }
 
 export interface ListResponse {
@@ -53,17 +56,17 @@ export function createPublishQueue(publish: Publisher, concurrency = PUBLISH_CON
 
   async function runOne(item: PublishItem) {
     running++;
-    update(item.draftId, { status: "listing", error: undefined });
+    update(item.draftId, { status: "listing", error: undefined, startedAt: Date.now(), finishedAt: undefined });
     try {
       const r = await (item.run ? item.run() : publish(item.draftId));
       if (r.error || r.connect || r.reconnect) {
-        update(item.draftId, { status: "failed", error: r.error ?? "eBay didn't accept this listing.", needsConnect: !!r.connect, needsReconnect: !!r.reconnect });
+        update(item.draftId, { status: "failed", error: r.error ?? "eBay didn't accept this listing.", needsConnect: !!r.connect, needsReconnect: !!r.reconnect, finishedAt: Date.now() });
       } else {
-        update(item.draftId, { status: "listed", url: r.url ?? null });
+        update(item.draftId, { status: "listed", url: r.url ?? null, finishedAt: Date.now() });
         if (typeof window !== "undefined") window.dispatchEvent(new Event("listflow:counts-changed"));
       }
     } catch (e) {
-      update(item.draftId, { status: "failed", error: (e as Error).message || "Network error — tap retry." });
+      update(item.draftId, { status: "failed", error: (e as Error).message || "Network error — tap retry.", finishedAt: Date.now() });
     } finally {
       running--;
       pump();
