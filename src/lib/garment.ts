@@ -169,6 +169,9 @@ export function sanitizeForItem(aspects: AspectMap, kind: GarmentKind, opts: { v
         && !opts.photoFeatures.some((f) => lc(f) === lc(v))) {
         removed.push({ name, value: v, why: "doesn't fit this kind of item and wasn't seen in the photos" }); continue;
       }
+      if (n === "brand" && isLeagueOrTeam(v, [...get(aspects, "Team"), ...get(aspects, "League")])) {
+        removed.push({ name, value: v, why: "a league/team is not the brand (the maker is, e.g. Nike)" }); continue;
+      }
       if ((n === "vintage" && lc(v) === "no")) { removed.push({ name, value: v, why: "not verified" }); continue; }
       if ((n === "vintage" || n === "decade" || n === "year manufactured") && !opts.vintageEvidence) { removed.push({ name, value: v, why: "no evidence in the photos" }); continue; }
       keep.push(v);
@@ -228,4 +231,17 @@ export const PHOTO_ONLY_ASPECTS = new Set(["features", "accents", "closure", "pa
  */
 export function defsForKind<T extends { name: string; required: boolean }>(defs: T[], kind: GarmentKind): T[] {
   return defs.filter((d) => d.required || aspectFitsKind(d.name, kind));
+}
+
+const LEAGUES = /^(nfl|nba|mlb|nhl|mls|wnba|ncaa|nfl players|nfl team apparel|nfl pro line|nba authentics?|mlb genuine merchandise)$/i;
+
+/** True when a "brand" is really a league or team (Brand must be the maker, e.g. Nike/Reebok). */
+export function isLeagueOrTeam(brand: string, teamsAndLeagues: string[] = []): boolean {
+  const b = brand.trim();
+  if (!b) return false;
+  if (LEAGUES.test(b)) return true;
+  return teamsAndLeagues.some((t) => {
+    const x = t.trim().toLowerCase();
+    return !!x && (x === b.toLowerCase() || x.endsWith(" " + b.toLowerCase()) || b.toLowerCase().includes(x));
+  });
 }

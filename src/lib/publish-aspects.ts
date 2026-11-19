@@ -3,7 +3,8 @@
 // category's eBay metadata, only the category's own aspects, garment guard,
 // duplicates removed.
 import { aspectsFromDraft, measurementAspects, measurementsFromDescription, mergeAspects, sanitizeStoredSpecifics, type AspectDef, type Aspects, type DraftFacts, type Measurement } from "@/lib/item-specifics";
-import { classifyGarment, dedupeAspects, defsForKind, measurementKeysFor, sanitizeForItem, type GarmentKind } from "@/lib/garment";
+import { classifyGarment, defsForKind, measurementKeysFor, type GarmentKind } from "@/lib/garment";
+import { normalizeSpecifics } from "@/lib/normalize-specifics";
 
 export interface PublishAspects {
   aspects: Aspects;
@@ -22,9 +23,11 @@ export function buildPublishAspects(
   const keys = measurementKeysFor(kind);
   const ms = measurementsAll.filter((m) => keys.size === 0 || keys.has(m.key));
   const fitting = defsForKind(defs, kind);
-  const required = defs.filter((d) => d.required).map((d) => d.name);
   const vintageOk = (/^y/i.test(draft.vintage ?? "") && !!draft.year_manufactured) || !!stored?.aspects?.["Vintage"]?.length;
-  const merged = mergeAspects([aspectsFromDraft(draft), measurementAspects(ms, fitting), stored?.aspects ?? {}], fitting, { onlyKnown: true });
-  const aspects = dedupeAspects(sanitizeForItem(merged.aspects, kind, { vintageEvidence: vintageOk, requiredAspects: required }).aspects, fitting.map((d) => d.name));
-  return { aspects, missingRequired: mergeAspects([aspects], fitting).missingRequired, measurements: ms, kind };
+  // Fixed draft columns + measurements + saved specifics, then the same
+  // normalization the review screens use (src/lib/normalize-specifics.ts).
+  const layered = mergeAspects([aspectsFromDraft(draft), measurementAspects(ms, fitting), stored?.aspects ?? {}], fitting, { onlyKnown: true }).aspects;
+  const n = normalizeSpecifics(layered, defs, { kind, vintageEvidence: vintageOk });
+  const aspects = n.aspects;
+  return { aspects, missingRequired: n.missingRequired, measurements: ms, kind };
 }

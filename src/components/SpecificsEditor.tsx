@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, FolderTree, Loader2, Search } from "lucide-react";
 import { apiFetch } from "@/lib/api";
 import AspectPicker from "@/components/AspectPicker";
+import { normalizeSpecifics } from "@/lib/normalize-specifics";
 import { isRejectedValue, matchAllowedValue, missingRequiredAspects, suggestAllowedValues, type AspectDef, type Aspects } from "@/lib/item-specifics";
 
 /**
@@ -78,6 +79,23 @@ export default function SpecificsEditor({
       .catch(() => {});
     return () => { cancelled = true; };
   }, [givenDefs, categoryId, title, itemType]);
+
+  // Re-validate saved/older values once per category as soon as eBay's list
+  // is loaded: drafts and batch items analyzed before the current rules get
+  // cleaned (invalid values, extra aspects, two values in a single-value
+  // aspect, a league as Brand, features that don't fit). The cleaned values
+  // go through onChange, so the next autosave stores them. It runs once per
+  // category, so the seller's own later edits aren't overridden.
+  const normalizedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!defs.length || disabled) return;
+    const key = `${catId ?? ""}:${defs.length}`;
+    if (normalizedFor.current === key) return;
+    normalizedFor.current = key;
+    const n = normalizeSpecifics(aspects, defs, { title, itemType, photoFeatures: [] });
+    if (n.changed) onChange(n.aspects, { categoryId: catId, missingRequired: n.missingRequired });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per category/defs load, by design
+  }, [defs, catId, disabled]);
 
   const missing = missingRequiredAspects(aspects, defs);
   const missingKey = missing.join("|");

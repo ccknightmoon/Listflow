@@ -62,7 +62,13 @@ export default function AspectPicker({
   const useRemote = !!def.valuesTruncated && !!categoryId && query.trim().length >= 2;
   // eBay's list for this aspect; curated suggestions only for free-text
   // aspects eBay lists nothing for (also covers older saved analyses).
-  const base = useMemo(() => optionsFor(def).values, [def]);
+  // Never an empty list on open: eBay's values, else curated suggestions
+  // (free text only), plus whatever is currently selected.
+  const base = useMemo(() => {
+    const list = optionsFor(def).values;
+    const extra = values.filter((v) => !list.some((x) => x.toLowerCase() === v.toLowerCase()));
+    return [...(def.mode === "SELECTION_ONLY" ? [] : extra), ...list];
+  }, [def, values]);
   const options = useMemo(() => (useRemote && remote) ? remote : rankOptions(base, query, 5000), [useRemote, remote, base, query]);
   const custom = offerCustom(query, options, freeText);
   const rows: Array<{ kind: "custom"; value: string } | { kind: "opt"; value: string }> = useMemo(
@@ -174,7 +180,9 @@ export default function AspectPicker({
           onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
         >
           {rows.length === 0 ? (
-            <p className="text-xs p-3" style={{ color: "var(--text-tertiary)" }}>{loading && useRemote ? "Searching…" : "No matching values."}</p>
+            <p className="text-xs p-3" style={{ color: "var(--text-tertiary)" }}>
+              {loading && useRemote ? "Searching…" : query.trim() ? "No matching values." : freeText ? "eBay lists no values for this — type your own above." : "eBay lists no values for this aspect."}
+            </p>
           ) : (
             <div style={{ height: rows.length * ROW, position: "relative" }}>
               {rows.slice(start, end).map((r, k) => {

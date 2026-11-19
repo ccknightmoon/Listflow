@@ -1335,7 +1335,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
       <SpecificsEditor
         aspects={specifics?.aspects ?? {}}
-        categoryId={specifics?.categoryId ?? null}
+        // A category saved before paths were recorded isn't trusted (it may be
+        // the old wrong pick): re-pick from the title, same as publishing does.
+        categoryId={specifics?.categoryPath ? specifics.categoryId ?? null : null}
         categoryPath={specifics?.categoryPath ?? null}
         categoryNeedsReview={specifics?.categoryNeedsReview}
         issues={categoryIssues}

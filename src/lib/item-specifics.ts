@@ -73,6 +73,7 @@ const EQUIVALENT_GROUPS: string[][] = [
   ["macau", "macao"],
   ["dominican republic", "dominican rep"],
   ["el salvador", "salvador"],
+  ["fall", "autumn"],
 ];
 const EQUIV = new Map<string, string[]>();
 for (const g of EQUIVALENT_GROUPS) for (const m of g) EQUIV.set(m, g);
@@ -206,20 +207,63 @@ export function splitCombined(v: string): string[] {
   return parts.length > 1 ? parts : [v];
 }
 
-/** Values for one aspect: whole value if eBay knows it, else its valid parts. */
+const ALL_SEASONS = /^(all[- ]?seasons?|year[- ]?round|all[- ]?year|four seasons|4 seasons)$/i;
+const FOUR_SEASONS = ["Spring", "Summer", "Fall", "Winter"];
+
+/**
+ * Values for one aspect: the whole value if eBay knows it, else its valid
+ * parts ("Fall/Winter" → Fall, Winter). "All Seasons" → eBay's own
+ * all-season value if listed, else the four seasons (multi-value only).
+ * Single-value aspects always end up with ONE value.
+ */
 function matchWithSplit(v: string, def: AspectDef): string[] {
-  const whole = matchAllowedValue(v, def);
   const listed = (x: string | null) => !!x && def.values.some((a) => a === x);
-  // Whole value is an eBay value (or free text with no list): keep it.
-  if (whole && (listed(whole) || def.values.length === 0)) return [whole];
-  // Single-value free text keeps the seller's combined wording ("Cotton/Polyester").
-  if (!def.multi && def.mode !== "SELECTION_ONLY") return whole ? [whole] : [];
-  const parts = splitCombined(v);
-  if (parts.length > 1) {
-    const matched = parts.map((p) => matchAllowedValue(p, def)).filter((x): x is string => !!x && (listed(x) || def.mode !== "SELECTION_ONLY"));
-    // Use the split only if every part is a real eBay value.
-    if (matched.length === parts.length && matched.every(listed)) return [...new Set(matched)];
+  const cleaned = cleanAspectInput(v);
+  if (ALL_SEASONS.test(cleaned)) {
+    const own = def.values.find((a) => ALL_SEASONS.test(a));
+    if (own) return [own];
+    if (def.multi) {
+      const four = FOUR_SEASONS.map((sn) => def.values.find((a) => a.toLowerCase() === sn.toLowerCase()) ?? (def.values.length === 0 ? sn : null)).filter((x): x is string => !!x);
+      if (four.length) return four;
+    }
+    return def.mode === "SELECTION_ONLY" ? [] : [capLength(cleaned)];
   }
+  // An exact eBay value wins outright ("Big & Tall", "Hook & Loop").
+  if (def.values.some((a) => a.toLowerCase() === cleaned.toLowerCase())) return [def.values.find((a) => a.toLowerCase() === cleaned.toLowerCase())!];
+  // Multi-value: a combined value whose parts are ALL eBay values is split
+  // before any fuzzy/containment match could grab just one part.
+  if (def.multi) {
+    const parts = splitCombined(v);
+    if (parts.length > 1) {
+      const m = parts.map((p) => matchAllowedValue(p, def));
+      if (m.every((x) => !!x && (listed(x) || def.values.length === 0))) return [...new Set(m as string[])];
+    }
+  }
+  // Single-value with a list: "Fall/Winter" → its FIRST valid part (not
+  // whichever part a containment match happens to find).
+  if (!def.multi && def.values.length > 0 && (def.mode === "SELECTION_ONLY" || /,/.test(v))) {
+    const parts = splitCombined(v);
+    if (parts.length > 1) {
+      const first = parts.map((p) => matchAllowedValue(p, def)).find((x) => listed(x));
+      if (first) return [first];
+    }
+  }
+  const whole = matchAllowedValue(v, def);
+  if (whole && (listed(whole) || def.values.length === 0) && !(!def.multi && /,/.test(whole))) return [whole];
+  const parts = def.multi || def.mode === "SELECTION_ONLY" || def.values.length > 0 ? splitCombined(v) : v.split(/\s*,\s*/).filter(Boolean);
+  if (parts.length > 1) {
+    const matched = parts.map((p) => matchAllowedValue(p, def)).filter((x): x is string => !!x);
+    const valid = matched.filter((x) => listed(x) || (def.mode !== "SELECTION_ONLY" && def.values.length === 0));
+    if (def.multi) {
+      // Use the split only if every part is a real eBay value.
+      if (valid.length === parts.length) return [...new Set(valid)];
+    } else if (valid.length && (def.mode === "SELECTION_ONLY" || /,/.test(v))) {
+      return [valid[0]]; // "V-Neck, Round" → "V-Neck"
+    } else if (def.mode !== "SELECTION_ONLY" && /,/.test(v)) {
+      return [capLength(parts[0])];
+    }
+  }
+  // Single-value free text keeps combined wording like "Cotton/Polyester".
   return whole ? [whole] : [];
 }
 
