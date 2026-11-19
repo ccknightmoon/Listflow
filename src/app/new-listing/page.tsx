@@ -30,7 +30,8 @@ import {
 import { Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
 import { apiFetch } from "@/lib/api";
-import { AiResult, formatMeasurements, storedSpecificsFrom, type StoredSpecifics } from "@/lib/ai-result";
+import { AiResult, formatMeasurements, storedSpecificsFrom, currentConfidence, type StoredSpecifics } from "@/lib/ai-result";
+import ConfidenceBadge from "@/components/ConfidenceBadge";
 import SpecificsEditor from "@/components/SpecificsEditor";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import { estimateShipping, type ShippingMode } from "@/lib/shipping";
@@ -247,7 +248,15 @@ export default function NewListingPage() {
     if (!autoList || loading || pricingLoading) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot trigger
     setAutoList(false);
-    if (aiResult) void handleListOnEbay();
+    if (!aiResult) return;
+    // One tap only when the item is Ready; otherwise stop on the review
+    // screen with the exact fields to check.
+    const c = currentConfidence({ ...aiResult, suggestedTitle: title, itemSpecifics: specifics?.aspects ?? aiResult.itemSpecifics, missingRequired: missingSpecifics }, photos.length);
+    if (c.ready || !aiResult.confidence) void handleListOnEbay();
+    else {
+      setListError(`Needs a look before listing: ${c.reasons.filter((r) => r.blocking || r.points >= 15).map((r) => `${r.field} — ${r.message}`).join(" • ")}`);
+      setListStatus("error");
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fires when analysis + pricing settle
   }, [autoList, loading, pricingLoading, aiResult]);
 
@@ -1068,6 +1077,9 @@ export default function NewListingPage() {
         </div>
       )}
 
+      {aiResult?.confidence && (
+        <ConfidenceBadge className="mb-3" confidence={currentConfidence({ ...aiResult, suggestedTitle: title, itemSpecifics: specifics?.aspects ?? aiResult.itemSpecifics, missingRequired: missingSpecifics }, photos.length)} />
+      )}
       {aiResult && (specifics || aiResult.aspectDefs?.length) ? (
         <SpecificsEditor
           aspects={specifics?.aspects ?? {}}

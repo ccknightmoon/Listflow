@@ -1,4 +1,6 @@
 import type { Condition } from "@/lib/pricing";
+import { assessConfidence } from "@/lib/confidence";
+import { titleIssues } from "@/lib/seo-title";
 
 // Shape of a single item's AI vision analysis, as returned by
 // /api/analyze-item and /api/analyze-batch (see src/lib/vision-prompt.ts for
@@ -40,6 +42,9 @@ export interface AiResult {
   garmentKind?: string;
   /** Self-check contradictions (title vs category vs Type vs measurements). */
   issues?: string[];
+  /** Ready / Needs a look (src/lib/confidence.ts). */
+  confidence?: import("./confidence").Confidence;
+  evidence?: { brandFromTag: boolean; sizeFromTag: boolean; materialFromTag?: boolean; countryFromTag?: boolean; singleStitch?: boolean; dateCode?: string | null };
   /** Category item specifics, eBay names → values. */
   itemSpecifics?: Record<string, string[]>;
   missingRequired?: string[];
@@ -70,4 +75,22 @@ export function formatMeasurements(r: AiResult): string {
   if (r.waist) parts.push(`Waist: ${r.waist}`);
   if (r.inseam) parts.push(`Inseam: ${r.inseam}`);
   return parts.length > 0 ? `Measurements: ${parts.join(", ")}.` : "";
+}
+
+/**
+ * Ready / Needs a look for an item as it is NOW (after the seller's edits):
+ * same rules as the server, re-run on the current title and specifics.
+ */
+export function currentConfidence(r: Pick<AiResult, "evidence" | "missingRequired" | "issues" | "categoryNeedsReview" | "suggestedTitle" | "itemSpecifics">, photoCount?: number) {
+  const aspects = r.itemSpecifics ?? {};
+  return assessConfidence({
+    categoryNeedsReview: r.categoryNeedsReview,
+    issues: r.issues,
+    missingRequired: r.missingRequired,
+    titleIssues: titleIssues(r.suggestedTitle ?? "", aspects),
+    brandFromTag: !!r.evidence?.brandFromTag,
+    brandUnbranded: /^unbranded$/i.test(aspects["Brand"]?.[0] ?? ""),
+    sizeFromTag: !!r.evidence?.sizeFromTag,
+    photoCount,
+  });
 }

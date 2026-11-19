@@ -39,8 +39,9 @@ import {
 import { getPriceSuggestion, Condition, PriceSuggestion } from "@/lib/pricing";
 import { uploadThumbnail } from "@/lib/storage";
 import { apiFetch } from "@/lib/api";
-import { AiResult as BaseAiResult, formatMeasurements, storedSpecificsFrom } from "@/lib/ai-result";
+import { AiResult as BaseAiResult, formatMeasurements, storedSpecificsFrom, currentConfidence } from "@/lib/ai-result";
 import SpecificsEditor from "@/components/SpecificsEditor";
+import ConfidenceBadge from "@/components/ConfidenceBadge";
 import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
 import { estimateIsHeavy, estimateShipping, type ShippingMode } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
@@ -1718,14 +1719,23 @@ export default function BatchUploadPage() {
   // app-wide background publish queue. Publishing carries on if Sel leaves
   // this page (progress in the tray on every screen); saved drafts mean
   // nothing is lost even if the app closes.
-  async function handleListAllOnEbay() {
+  // Ready = high confidence, nothing required missing, category fits, title
+  // agrees with the specifics (src/lib/confidence.ts), re-checked on the
+  // item as it is now (after any edits).
+  const isReadyItem = (i: number) => {
+    const r = results[i];
+    return !!r && !r.error && !r.pending && currentConfidence(r, groups[i]?.length).ready;
+  };
+
+  async function handleListAllOnEbay(onlyReady = false) {
     const indices = results
       .map((_, i) => i)
-      .filter((i) => !results[i].error && !results[i].pending && listStatus[i] !== "listed" && listStatus[i] !== "listing");
+      .filter((i) => !results[i].error && !results[i].pending && listStatus[i] !== "listed" && listStatus[i] !== "listing")
+      .filter((i) => !onlyReady || isReadyItem(i));
 
     if (indices.length === 0) return;
     if (!(await confirmAction({
-      title: `List ${indices.length} item${indices.length === 1 ? "" : "s"} on eBay?`,
+      title: `List ${indices.length}${onlyReady ? " ready" : ""} item${indices.length === 1 ? "" : "s"} on eBay?`,
       message: "They publish in the background — keep working or leave this page; progress shows in the tray.",
       confirmLabel: "List now",
     }))) return;
@@ -2464,12 +2474,23 @@ export default function BatchUploadPage() {
             const failedCount = results.filter((r) => r.error).length;
             const failedListingCount = results.filter((r, i) => !r.error && listStatus[i] === "error").length;
             const anyRetrying = Object.values(retrying).some(Boolean);
+            const readyCount = results.filter((r, i) => !r.error && !r.pending && listStatus[i] !== "listed" && listStatus[i] !== "listing" && isReadyItem(i)).length;
             return (
               <div className="flex flex-col gap-2">
+                {readyCount > 0 && !allListed && (
+                  <button
+                    onClick={() => void handleListAllOnEbay(true)}
+                    disabled={listingAll || savingAll}
+                    className="btn btn-primary w-full"
+                  >
+                    <Upload className="w-4 h-4" /> List all Ready ({readyCount})
+                    {unlistedCount > readyCount && <span className="text-xs font-normal opacity-80">· {unlistedCount - readyCount} need a look</span>}
+                  </button>
+                )}
                 <button
-                  onClick={handleListAllOnEbay}
+                  onClick={() => void handleListAllOnEbay(false)}
                   disabled={listingAll || savingAll || unlistedCount === 0}
-                  className="btn btn-primary w-full"
+                  className={`btn w-full ${readyCount > 0 && !allListed ? "" : "btn-primary"}`}
                 >
                   {listingAll ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -2719,6 +2740,7 @@ export default function BatchUploadPage() {
 
             return (
               <div key={i} id={`result-item-${i}`} className="card overflow-hidden">
+                <ConfidenceBadge confidence={currentConfidence(result, group.length)} />
                 {saveStatus[i] !== "saved" && (
                   <div className="flex items-center gap-2 px-4 pt-3">
                     <button
@@ -3177,3 +3199,4 @@ function MiniStat({
     </div>
   );
 }
+
