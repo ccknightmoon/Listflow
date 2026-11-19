@@ -7,63 +7,74 @@ import { ITEM_VISION_PROMPT as PROMPT } from "@/lib/vision-prompt";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { enrichVisionResult } from "@/lib/listing-enrich";
+import { withBackoff } from "@/lib/backoff";
+import { ALL_HIGH_UP_TO, MAX_ANALYSIS_PHOTOS, planDetail, TAG_FINDER_PROMPT, type Detail, type TagFinderAnswer } from "@/lib/photo-plan";
 
 export const runtime = "nodejs";
 // Vision + category specifics fill can take a while on big photo sets.
 export const maxDuration = 60;
 
-const MAX_ATTEMPTS = 3;
-const NORMAL_RETRY_DELAY_MS = 1000;
-const RATE_LIMIT_RETRY_DELAY_MS = 15000;
+type InImage = { data?: string; mediaType?: string; url?: string };
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+// Only our own uploaded photos (Supabase storage) are passed to OpenAI by URL.
+function isOwnPhotoUrl(u: string): boolean {
+  try {
+    const url = new URL(u);
+    const base = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://invalid.local");
+    return url.protocol === "https:" && url.host === base.host && url.pathname.startsWith("/storage/v1/object/public/");
+  } catch {
+    return false;
+  }
 }
 
-async function analyzeGroup(
-  apiKey: string,
-  images: { data: string; mediaType: string }[]
-) {
-  // Standard detail, not "low" — this is the bulk vision-analysis path that
-  // reads tag text and tape-measure numbers; low-detail tiles make that
-  // meaningfully worse, and this path matters most for "auto-fill everything."
-  const imageContent = images.map((img) => ({
-    type: "image_url" as const,
-    image_url: {
-      url: `data:${img.mediaType};base64,${img.data}`,
-    },
-  }));
+/** OpenAI image part: an uploaded photo by URL (no request-size limit), else inline data. */
+function imagePart(img: InImage, detail: Detail) {
+  const url = img.url && isOwnPhotoUrl(img.url) ? img.url : `data:${img.mediaType ?? "image/jpeg"};base64,${img.data ?? ""}`;
+  return { type: "image_url" as const, image_url: { url, detail } };
+}
 
-  let lastError: Error | null = null;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    try {
-      const data = await openAIPost(apiKey, {
-        model: visionModel(),
-        max_tokens: 2000,
-        response_format: { type: "json_object" },
-        messages: [
-          {
-            role: "user",
-            content: [{ type: "text", text: PROMPT }, ...imageContent],
-          },
-        ],
-      }) as { choices?: { message?: { content?: string } }[] };
-
-      const rawText = data.choices?.[0]?.message?.content ?? "";
-      const cleaned = rawText.replace(/```json|```/g, "").trim();
-      return JSON.parse(cleaned);
-    } catch (err) {
-      lastError = err as Error;
-      const isRateLimit = (err as { isRateLimit?: boolean }).isRateLimit;
-
-      if (attempt < MAX_ATTEMPTS) {
-        await delay(isRateLimit ? RATE_LIMIT_RETRY_DELAY_MS : NORMAL_RETRY_DELAY_MS * attempt);
-      }
-    }
+/** Cheap low-detail pass: which photo is the front, which show tags/tape. */
+async function findTags(apiKey: string, images: InImage[]): Promise<TagFinderAnswer | null> {
+  try {
+    const data = (await withBackoff(() => openAIPost(apiKey, {
+      model: visionModel(),
+      max_tokens: 100,
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: [{ type: "text", text: TAG_FINDER_PROMPT }, ...images.map((img) => imagePart(img, "low"))] }],
+    }), 2)) as { choices?: { message?: { content?: string } }[] };
+    return JSON.parse(data.choices?.[0]?.message?.content ?? "{}") as TagFinderAnswer;
+  } catch {
+    return null; // fall back to the front + last-shots heuristic
   }
+}
 
-  throw lastError;
+/**
+ * Pass A (vision) over EVERY photo of the item: front and tag/tape shots
+ * at full detail, the rest at low detail (Volume Phase 1). Rate limits are
+ * retried with backoff (src/lib/backoff.ts).
+ */
+async function analyzeGroup(apiKey: string, imagesIn: InImage[], timings: Record<string, number>) {
+  const images = imagesIn.slice(0, MAX_ANALYSIS_PHOTOS);
+  let t = Date.now();
+  const finder = images.length > ALL_HIGH_UP_TO ? await findTags(apiKey, images) : null;
+  timings.tagFinderMs = Date.now() - t;
+  const plan = planDetail(images.length, finder);
+  const content = images.flatMap((img, i) => [
+    { type: "text" as const, text: `Photo ${i}${plan[i] === "high" ? " (full detail)" : ""}:` },
+    imagePart(img, plan[i]),
+  ]);
+  t = Date.now();
+  const data = (await withBackoff(() => openAIPost(apiKey, {
+    model: visionModel(),
+    max_tokens: 2000,
+    response_format: { type: "json_object" },
+    messages: [{ role: "user", content: [{ type: "text", text: PROMPT }, ...content] }],
+  }), 3)) as { choices?: { message?: { content?: string } }[] };
+  timings.visionMs = Date.now() - t;
+  timings.photos = images.length;
+  timings.highDetail = plan.filter((d) => d === "high").length;
+  const rawText = data.choices?.[0]?.message?.content ?? "";
+  return JSON.parse(rawText.replace(/```json|```/g, "").trim());
 }
 
 export async function POST(req: NextRequest) {
@@ -79,7 +90,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: { groups?: { images: { data: string; mediaType: string }[] }[] };
+  let body: { groups?: { images: InImage[] }[] };
 
   try {
     body = await req.json();
@@ -120,11 +131,17 @@ export async function POST(req: NextRequest) {
       results.push({ error: AI_USAGE_LIMIT_MESSAGE });
       continue;
     }
+    const timings: Record<string, number> = {};
     try {
-      const result = await analyzeGroup(apiKey, groups[i].images);
-      results.push(await enrichVisionResult(apiKey, result, runWithEbay));
+      const result = await analyzeGroup(apiKey, groups[i].images ?? [], timings);
+      const t = Date.now();
+      const enriched = await enrichVisionResult(apiKey, result, runWithEbay);
+      timings.enrichMs = Date.now() - t;
+      // Per-stage timings: returned to the page and logged for Vercel logs.
+      console.log(JSON.stringify({ event: "analyze_item", ...timings }));
+      results.push({ ...enriched, timings });
     } catch (err) {
-      results.push({ error: (err as Error).message });
+      results.push({ error: (err as Error).message, rateLimited: !!(err as { isRateLimit?: boolean }).isRateLimit, timings });
     }
 
   }

@@ -3,6 +3,8 @@ import { request } from "node:https";
 interface OpenAIError extends Error {
   status?: number;
   isRateLimit?: boolean;
+  /** From OpenAI's retry-after(-ms) headers on 429s. */
+  retryAfterMs?: number;
 }
 
 // Without a timeout, a stalled connection to OpenAI hung indefinitely — and
@@ -40,6 +42,10 @@ export function openAIPost(apiKey: string, body: object): Promise<object> {
               );
               err.status = res.statusCode;
               err.isRateLimit = res.statusCode === 429;
+              const ms = Number(res.headers["retry-after-ms"]);
+              const sec = Number(res.headers["retry-after"]);
+              if (Number.isFinite(ms) && ms > 0) err.retryAfterMs = ms;
+              else if (Number.isFinite(sec) && sec > 0) err.retryAfterMs = sec * 1000;
               reject(err);
             }
           } catch {
