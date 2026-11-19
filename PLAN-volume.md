@@ -1,4 +1,4 @@
-# Listflow at volume: 50 items / ~450 photos a day (plan only, nothing built)
+# Listflow at volume: 50 items / ~450 photos a day
 
 **Goal:** shoot all day, and by the time Sel sits down every item is already a draft. Most are marked **Ready**, Sel reviews in seconds each, taps **List all Ready**, and publishing finishes in the background with the phone closed.
 
@@ -96,3 +96,24 @@ For photo-heavy items the two models cost about the same, and gpt-4o likely read
 - Time-gap grouping mistakes (e.g. Sel re-shoots a tag later). Mitigation: unclear gaps go to AI, plus easy merge/split in review.
 - The server queue running an item twice. Mitigation: each job is claimed by one worker only, and publishing already refuses to publish the same draft twice.
 - Cost creep. Mitigation: the daily limit plus the spend alert.
+
+---
+
+## Progress notes: Phase 1 (branch feat/volume-phase1)
+
+Built and tested; not yet measured on a real batch.
+
+| Item | Status | Where |
+|---|---|---|
+| Every photo analyzed (up to 16 per item). With more than 6 photos, a cheap low-detail pass finds the front and tag shots; those (max 6) go at full detail, the rest at low detail | Done | `src/lib/photo-plan.ts`, `src/app/api/analyze-batch/route.ts` |
+| Uploaded photos sent to OpenAI by URL (only our own Supabase photo URLs are accepted), so requests stay small | Done | same |
+| Analysis 6 at a time; OpenAI rate limits back off (honors retry-after) on the server, and the page retries a rate-limited item up to twice more | Done | `src/lib/backoff.ts`, batch page |
+| 500-photo batches; compression and grouping thumbnails run 4 at a time | Done | batch page |
+| Background upload: each photo uploads as soon as it is compressed (4 at a time, 3 tries); save and analysis reuse it | Done | batch page, `src/lib/concurrency.ts` |
+| AI cap 10,000/month + 600/day safety limit + estimated-spend alert ($75/month default, `AI_MONTHLY_SPEND_ALERT_USD` to change) | Done; **daily limit needs migration 028** | `src/lib/ai-usage.ts`, `/api/ai-usage` |
+| eBay field lists, allowed conditions and category suggestions saved in the database for 1 day | Done; **needs migration 028** | `src/lib/metadata-cache.ts` |
+| Timing per stage (compress, upload, grouping, analysis + server breakdown, pricing, save, publish), "Batch timings" panel with Copy | Done | `src/lib/batch-timings.ts`, `src/components/BatchTimingsPanel.tsx` |
+
+Migration `supabase-migrations/028_volume_daily_ai_limit_and_ebay_cache.sql` is written, **not applied**. Without it the app works as before (monthly cap only, in-memory eBay caches).
+
+Next measurement: run one real 50-item batch, tap **Copy timings**, and paste the numbers here.

@@ -5,6 +5,7 @@
 import { inventoryRequest, getSafeFallbackCategory } from "@/lib/ebay-inventory";
 import { classifyGarment, categoryQueries, type GarmentKind } from "@/lib/garment";
 import { parseSuggestions, pickFitting, type CategoryPick, type Suggestion } from "@/lib/category-choice";
+import { dbCacheGet, dbCacheSet } from "@/lib/metadata-cache";
 
 const cache = new Map<string, { at: number; s: Suggestion[] }>();
 const TTL = 6 * 60 * 60 * 1000;
@@ -13,11 +14,18 @@ export async function suggestCategories(query: string): Promise<Suggestion[]> {
   const key = query.toLowerCase();
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL) return hit.s;
+  // Shared 1-day database copy (metadata-cache.ts) for cold instances.
+  const saved = await dbCacheGet<Suggestion[]>(`suggest:${key}`);
+  if (Array.isArray(saved) && saved.length) {
+    cache.set(key, { at: Date.now(), s: saved });
+    return saved;
+  }
   try {
     const r = await inventoryRequest("GET", `/commerce/taxonomy/v1/category_tree/0/get_category_suggestions?q=${encodeURIComponent(query)}`);
     if (r.status >= 400) return [];
     const s = parseSuggestions(r.data);
     cache.set(key, { at: Date.now(), s });
+    if (s.length) dbCacheSet(`suggest:${key}`, s);
     return s;
   } catch {
     return [];

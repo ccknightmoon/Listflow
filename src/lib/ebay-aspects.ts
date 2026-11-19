@@ -1,10 +1,13 @@
 // eBay category metadata used for listing quality: item aspects (Taxonomy
 // API getItemAspectsForCategory) and allowed conditions (Metadata API
 // getItemConditionPolicies). Category metadata is the same for every
-// seller, so it's cached by category id (12h), in memory per instance.
+// seller, so it's cached by category id (12h) in memory per instance, with a
+// shared 1-day copy in the database (metadata-cache.ts, migration 028) so
+// a cold instance doesn't have to ask eBay again.
 import { inventoryRequest } from "@/lib/ebay-inventory";
 import { parseAspectDefs, CONDITION_ID_TO_ENUM, type AspectDef } from "@/lib/item-specifics";
 import { optionsFor } from "@/lib/aspect-fallbacks";
+import { dbCacheGet, dbCacheSet } from "@/lib/metadata-cache";
 
 const TTL_MS = 12 * 60 * 60 * 1000;
 const aspectCache = new Map<string, { at: number; defs: AspectDef[] }>();
@@ -25,11 +28,19 @@ export async function fetchAspectDefs(categoryId: string): Promise<AspectDef[]> 
   const hit = aspectCache.get(categoryId);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.defs;
   return once(`a:${categoryId}`, async () => {
+    const saved = await dbCacheGet<AspectDef[]>(`aspects:${categoryId}`);
+    if (Array.isArray(saved) && saved.length) {
+      aspectCache.set(categoryId, { at: Date.now(), defs: saved });
+      return saved;
+    }
     try {
       const r = await inventoryRequest("GET", `/commerce/taxonomy/v1/category_tree/0/get_item_aspects_for_category?category_id=${categoryId}`);
       if (r.status >= 400) return [];
       const defs = parseAspectDefs(r.data);
-      if (defs.length) aspectCache.set(categoryId, { at: Date.now(), defs });
+      if (defs.length) {
+        aspectCache.set(categoryId, { at: Date.now(), defs });
+        dbCacheSet(`aspects:${categoryId}`, defs);
+      }
       return defs;
     } catch {
       return [];
@@ -43,11 +54,17 @@ export async function fetchAllowedConditions(categoryId: string): Promise<string
   const hit = conditionCache.get(categoryId);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.enums;
   return once(`c:${categoryId}`, async () => {
+    const saved = await dbCacheGet<{ enums: string[] | null }>(`conditions:${categoryId}`);
+    if (saved && "enums" in saved) {
+      conditionCache.set(categoryId, { at: Date.now(), enums: saved.enums });
+      return saved.enums;
+    }
     try {
       const r = await inventoryRequest("GET", `/sell/metadata/v1/marketplace/EBAY_US/get_item_condition_policies?filter=categoryIds:%7B${categoryId}%7D`);
       if (r.status >= 400) return null;
       const enums = parseConditionPolicy(r.data);
       conditionCache.set(categoryId, { at: Date.now(), enums });
+      dbCacheSet(`conditions:${categoryId}`, { enums });
       return enums;
     } catch {
       return null;
