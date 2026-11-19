@@ -117,3 +117,41 @@ Built and tested; not yet measured on a real batch.
 Migration `supabase-migrations/028_volume_daily_ai_limit_and_ebay_cache.sql` is written, **not applied**. Without it the app works as before (monthly cap only, in-memory eBay caches).
 
 Next measurement: run one real 50-item batch, tap **Copy timings**, and paste the numbers here.
+
+---
+
+## Progress notes: Phase 3, server-side background processing (branch feat/server-queue)
+
+Built and tested with mocked AI/eBay; not yet run against the live database (needs migration 029).
+
+**How it works**
+- Batch Upload gets two extra buttons (only once 029 is applied): **Analyze in the background** (review step: your groups, each item handed off as soon as its photos are uploaded) and **Group & analyze in the background** (upload step: the server groups with AI, or uses your ✂ markers, then analyzes). After the hand-off the phone can be closed.
+- The server makes each item into a draft (Pass A/B, category, specifics, title, price) with its Ready / Needs a look status. **Background batches** (`/batches`) shows progress and items as they finish, with **List all Ready**, Retry, Stop and an optional browser notification. A small pill at the top shows "Analyzing 23/50… · you can close the app" on every page.
+- "List all Ready" there creates publish jobs that finish with the app closed (2 at a time per seller).
+
+**Queue (migration 029, `listing_jobs`)**: per user with RLS (sellers can only read their own rows; writes are server-only). Enqueue is idempotent (unique batch + item + kind). Drafts are idempotent (`drafts.source_job_id` unique). The AI result is checkpointed, so a retry never pays for the AI again. Publishing reuses the existing never-twice guard. Leases are 90 s, so a crashed worker's job is picked up again. After 3 attempts a job is dead ("Needs a look") with its error and a Retry button. Per-seller limits: 6 analyses and 2 publishes running at once. The AI monthly/daily caps are checked per job on the server.
+
+**Worker on Vercel Hobby (free)**: `/api/jobs/worker` claims up to 6 jobs, works ~45 s (under the 60 s limit), then starts a fresh copy of itself while work remains (self-chaining). It is started on every hand-off ("kick"), and a sweep on every app open restarts anything stalled. No cron is needed (Hobby allows only 2 daily crons, and both are already used).
+
+**Optional upgrades (pluggable, no code changes)**
+- `JOBS_TRIGGER=qstash` + `QSTASH_TOKEN` (Upstash QStash free tier): hand-offs and chain steps are delivered by QStash with retries, so a dropped chain can't stall until the next app open.
+- Vercel Pro: allows a frequent cron as a backup sweep (add `/api/jobs/worker` to `vercel.json`; it accepts `CRON_SECRET`) and longer functions.
+- Inngest: could replace the trigger; not wired.
+- `JOBS_WORKER_SECRET` (optional): otherwise a secret derived from the service-role key is used.
+
+**Not built**: time-gap grouping (Phase 2); Supabase Realtime (polling every 5–6 s instead); push notifications while the app is fully closed (needs Web Push; iPhone only supports it for Home Screen apps).
+
+## Free-plan limits at ~50 items / 450 photos a day (checked Nov 18, 2026)
+
+| Limit | Now | At 50 items/day | Action |
+|---|---|---|---|
+| Supabase Storage 1 GB | 319 MB in 718 photos (avg 455 KB). 275 MB of that is 612 photos no draft uses; 32 MB unpublished drafts; 12 MB published | +70–200 MB/day (batch photos ~150–250 KB est.; New Listing ~450 KB). Full in ~4–10 days with no cleanup | Apply 030: listed items' photos are deleted 3 days after listing (eBay keeps copies). 14 days would need ~1–2.8 GB, which doesn't fit. Turn on "unused photos" once to free ~275 MB. |
+| Supabase egress 5 GB/month | Not readable here (dashboard → Usage) | Each photo is read ~2–3 times (OpenAI, eBay at publish, app views): ~4–18 GB/month (estimate) | Likely over. Supabase Pro (~$25/month: 100 GB storage, 250 GB egress), or smaller photos. |
+| eBay Trading API 5,000 calls/day | Not readable here (Developer Analytics API) | Low hundreds/day (estimate; incl. 1 GetItem per cleaned item) | None |
+| eBay Inventory/Sell REST 2M/day | — | ~10 calls per publish → ~500/day | None |
+| eBay Browse (pricing) | — | ~1–2 per item → ~100/day | None |
+| Vercel invocations 1M/month | — | Worker ~20/day + polling while a page is open | None |
+| Vercel Active CPU 4 h/month, memory 360 GB-h | — | Waiting on OpenAI/eBay barely uses CPU. ~0.5 GB-h/day memory | Watch the Usage page |
+| Vercel data transfer 100 GB | — | Small (photos come from Supabase) | None |
+| Vercel function time 60 s | — | Worker stays under 45 s and chains | None |
+| Vercel Hobby use | — | Hobby is for non-commercial use only; an eBay business is commercial | Move to Vercel Pro ($20/month) |

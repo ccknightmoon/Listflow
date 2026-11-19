@@ -13,6 +13,7 @@ import { MAX_ANALYSIS_PHOTOS } from "@/lib/photo-plan";
 import { retryDelayMs } from "@/lib/backoff";
 import { newTimings, recordItemServer, recordSpan, timed, type BatchTimings, type ItemServerTiming } from "@/lib/batch-timings";
 import BatchTimingsPanel, { type PublishSpan } from "@/components/BatchTimingsPanel";
+import { enqueueGroup, enqueueItems, fetchBatches } from "@/lib/jobs/client";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -379,6 +380,15 @@ export default function BatchUploadPage() {
   const [timingsSnap, setTimingsSnap] = useState<BatchTimings>(() => timingsRef.current);
   const bumpTimings = () => setTimingsSnap({ ...timingsRef.current });
   const [publishSpans, setPublishSpans] = useState<PublishSpan[]>([]);
+  // Server-side background processing (Volume Phase 3, migration 029).
+  // null = unknown yet; false = not switched on (today's in-app flow only).
+  const [bgAvailable, setBgAvailable] = useState<boolean | null>(null);
+  const [handoff, setHandoff] = useState<string | null>(null);
+  useEffect(() => {
+    fetchBatches()
+      .then((d) => setBgAvailable(d.available))
+      .catch(() => setBgAvailable(false));
+  }, []);
   const pauseRef = useRef(false);
   const cancelRef = useRef(false);
   // Tracks the batch_jobs id for whichever bulk listing run
@@ -1250,6 +1260,94 @@ export default function BatchUploadPage() {
         prev ??
         "You've reached this month's AI usage limit -- some items only got the free keyword-based store category suggestion instead of AI's. You can still pick manually, or retry once it resets."
       );
+    }
+  }
+
+  // Every photo's storage URL, uploading any that the background upload
+  // hasn't finished (or that failed). Throws if a photo can't be uploaded.
+  async function ensurePhotoUrls(indices: number[], onProgress?: (done: number) => void): Promise<string[]> {
+    let done = 0;
+    return mapLimit(indices, UPLOAD_CONCURRENCY, async (idx) => {
+      let url = await waitForPhotoUrl(idx, 120_000);
+      if (!url) {
+        url = await retry(() => uploadThumbnail(photos[idx].previewUrl), 3);
+        uploadedPhotoUrls.current[idx] = url;
+      }
+      onProgress?.(++done);
+      return url;
+    });
+  }
+
+  // "Analyze in background": hands each item to the server queue as soon
+  // as its photos are uploaded. After that the phone can be closed.
+  async function handleAnalyzeInBackground() {
+    setError(null);
+    const batchId = crypto.randomUUID();
+    const items = groups.map((g, i) => ({ i, g })).filter(({ g }) => g.length > 0);
+    try {
+      let sent = 0;
+      const total = items.reduce((n, { g }) => n + g.length, 0);
+      let uploaded = 0;
+      for (let k = 0; k < items.length; k += 10) {
+        const slice = items.slice(k, k + 10);
+        const withUrls = [];
+        for (const { i, g } of slice) {
+          const urls = await ensurePhotoUrls(g.slice(0, MAX_ANALYSIS_PHOTOS), () => {
+            uploaded++;
+            setHandoff(`Uploading photos ${Math.min(uploaded, total)}/${total} — keep the app open until this finishes…`);
+          });
+          withUrls.push({ key: String(i).padStart(4, "0"), photoUrls: urls });
+        }
+        const r = await enqueueItems(batchId, withUrls);
+        if (r.available === false) throw new Error(r.message || "Background processing isn't available.");
+        sent += withUrls.length;
+        setHandoff(`Handed ${sent}/${items.length} items to the server…`);
+        window.dispatchEvent(new Event("listflow:jobs-started"));
+      }
+      void clearBatchRecovery().catch(() => {});
+      router.push(`/batches?batch=${batchId}`);
+    } catch (err) {
+      setError(`Couldn't hand the batch to the server: ${(err as Error).message}. Nothing was lost — you can retry, or analyze here.`);
+    } finally {
+      setHandoff(null);
+    }
+  }
+
+  // "Group & analyze in background" from the upload step: uploads every
+  // photo, then the server groups (or uses the markers) and analyzes.
+  async function handleGroupInBackground() {
+    setError(null);
+    const batchId = crypto.randomUUID();
+    try {
+      if (anyManualMarks) {
+        const g = buildGroupsFromDividers(manualDividers, newItemStarts, photos.length);
+        setGroups(g);
+        // Reuse the per-item hand-off with the marker-based groups.
+        const items = g.map((grp, i) => ({ i, grp })).filter(({ grp }) => grp.length > 0);
+        let up = 0;
+        const total = items.reduce((n, { grp }) => n + grp.length, 0);
+        const payload = [];
+        for (const { i, grp } of items) {
+          const urls = await ensurePhotoUrls(grp.slice(0, MAX_ANALYSIS_PHOTOS), () => setHandoff(`Uploading photos ${++up}/${total} — keep the app open until this finishes…`));
+          payload.push({ key: String(i).padStart(4, "0"), photoUrls: urls });
+        }
+        for (let k = 0; k < payload.length; k += 50) {
+          const r = await enqueueItems(batchId, payload.slice(k, k + 50));
+          if (r.available === false) throw new Error(r.message || "Background processing isn't available.");
+        }
+      } else {
+        const all = photos.map((_, i) => i);
+        const urls = await ensurePhotoUrls(all, (d) => setHandoff(`Uploading photos ${d}/${all.length} — keep the app open until this finishes…`));
+        const r = await enqueueGroup(batchId, urls);
+        if (r.available === false) throw new Error(r.message || "Background processing isn't available.");
+      }
+      window.dispatchEvent(new Event("listflow:jobs-started"));
+      void clearBatchRecovery().catch(() => {});
+      router.push(`/batches?batch=${batchId}`);
+    } catch (err) {
+      setError(`Couldn't hand the batch to the server: ${(err as Error).message}. Nothing was lost — you can retry, or continue here.`);
+    } finally {
+      setHandoff(null);
     }
   }
 
@@ -2320,10 +2418,18 @@ export default function BatchUploadPage() {
                   );
                 })}
               </div>
-              <button onClick={handleGroupPhotos} className="btn btn-primary w-full">
+              <button onClick={handleGroupPhotos} className="btn btn-primary w-full" disabled={!!handoff}>
                 <Sparkles className="w-4 h-4" />
                 {anyManualMarks ? "Split into items" : "Group photos into items"}
               </button>
+              {bgAvailable && (
+                <BackgroundHandoff
+                  label={anyManualMarks ? "Split & analyze in the background" : "Group & analyze in the background"}
+                  note={anyManualMarks ? "Uses your markers. You won't review the groups first." : "AI groups the photos on the server, then analyzes each item. You won't review the groups first — fix any mix-ups in the drafts."}
+                  busy={handoff}
+                  onClick={handleGroupInBackground}
+                />
+              )}
             </>
           )}
         </>
@@ -2553,10 +2659,18 @@ export default function BatchUploadPage() {
             Add empty group
           </button>
 
-          <button onClick={handleAnalyzeBatch} className="btn btn-primary w-full">
+          <button onClick={handleAnalyzeBatch} className="btn btn-primary w-full" disabled={!!handoff}>
             <Sparkles className="w-4 h-4" />
             Analyze & price all items
           </button>
+          {bgAvailable && (
+            <BackgroundHandoff
+              label="Analyze in the background"
+              note="Each item goes to the server as soon as its photos are uploaded. Drafts appear in Background batches and Drafts."
+              busy={handoff}
+              onClick={handleAnalyzeInBackground}
+            />
+          )}
         </>
       )}
 
@@ -3370,3 +3484,17 @@ function MiniStat({
   );
 }
 
+
+function BackgroundHandoff({ label, note, busy, onClick }: { label: string; note: string; busy: string | null; onClick: () => void }) {
+  return (
+    <div className="mt-3 flex flex-col gap-1">
+      <button type="button" onClick={onClick} className="btn w-full" disabled={!!busy}>
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+        {label}
+      </button>
+      <p className="text-xs text-center" style={{ color: "var(--text-secondary)" }} role="status" aria-live="polite">
+        {busy ?? `${note} Once it's handed off you can close the app — we'll keep working.`}
+      </p>
+    </div>
+  );
+}
