@@ -44,7 +44,7 @@ import { Redis } from "@upstash/redis";
 // authentication, reopening exactly the bypass this middleware was
 // rewritten to close. Do not reintroduce a blanket "/api" public rule.
 const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms", "/forgot-password", "/reset-password", "/manifest.webmanifest"];
-const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout", "/api/cron"];
+const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout", "/api/cron", "/api/jobs/worker"];
 
 // Self-service account deletion (src/lib/account-deletion.ts): a signed-in
 // user with a pending deletion request is locked to /account/pending-deletion
