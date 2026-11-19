@@ -1,0 +1,550 @@
+// Publishing one draft to eBay. Shared by POST /api/ebay/list (signed-in
+// seller) and the background queue worker (Volume Phase 3), which runs it
+// with the service-role client -- so EVERY drafts query below is scoped to
+// ctx.userId explicitly, not left to RLS.
+import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  upsertInventoryItem, createOffer, updateOffer, deleteOffer, deleteInventoryItem,
+  getOfferBySku, getAllOffers, publishOffer, getSafeFallbackCategory,
+  ensureMerchantLocation, recreateMerchantLocation, CONDITION_MAP, getConditionCandidates, inventoryRequest,
+} from "@/lib/ebay-inventory";
+import { invalidateAccessTokenCache } from "@/lib/ebay-oauth";
+import { ebayContext, type EbayConnectionContext } from "@/lib/ebay-request-context";
+import { LISTING_SHIPPING_MODE, isShippingPackageError, type PackageVariant } from "@/lib/shipping";
+import { chooseCalculatedPolicy, summarizeFulfillmentPolicies, type FulfillmentPolicySummary, type RawFulfillmentPolicy } from "@/lib/calculated-policy";
+import { createTtlDedupeCache } from "@/lib/ttl-cache";
+import { setListingStoreCategory } from "@/lib/ebay-store-categories";
+import { assignSequentialSku } from "@/lib/sku-assign";
+import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
+import { classifyGarment, categoryFits } from "@/lib/garment";
+import { chooseCategory } from "@/lib/ebay-category";
+
+
+interface EbayApiError {
+  errorId?: number;
+  message?: string;
+  longMessage?: string;
+  parameters?: Array<{ name?: string; value?: string }>;
+}
+
+// Every "why did the listing fail" message in this route ultimately comes
+// from this shape. eBay's `parameters` array is where the ACTUAL rejected
+// field/value shows up -- e.g. for an "Invalid <ShippingPackage>" error
+// this is often the only place that says which package field or value was
+// the problem. Every failRelist(...) call in this route should describe
+// its error through this helper instead of hand-picking longMessage vs
+// message, so nothing here has to be diagnosed blind from a bare error
+// string again.
+function describeEbayError(err: EbayApiError | undefined, fallback: string): string {
+  const base = err?.longMessage ?? err?.message ?? fallback;
+  const params = err?.parameters?.filter((p) => p?.name || p?.value)
+    .map((p) => `${p.name ?? "?"}=${p.value ?? "?"}`)
+    .join(", ");
+  const idPart = err?.errorId != null ? ` (errorId ${err.errorId})` : "";
+  return params ? `${base}${idPart} [${params}]` : `${base}${idPart}`;
+}
+
+// The seller's fulfillment policies, cached briefly per user so a batch
+// "List all" checks eBay once, not once per item. Failed fetches aren't
+// cached (null).
+const policyCache = createTtlDedupeCache<FulfillmentPolicySummary[] | null>();
+async function loadFulfillmentPolicies(userId: string): Promise<FulfillmentPolicySummary[] | null> {
+  return policyCache.get(
+    userId,
+    5 * 60_000,
+    async () => {
+      try {
+        const res = await inventoryRequest("GET", "/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US");
+        if (res.status >= 400) return null;
+        const raw = (res.data as { fulfillmentPolicies?: RawFulfillmentPolicy[] }).fulfillmentPolicies ?? [];
+        return summarizeFulfillmentPolicies(raw);
+      } catch {
+        return null;
+      }
+    },
+    (v) => v !== null,
+  );
+}
+
+export interface PublishBody {
+  draftId?: string;
+  shippingMode?: unknown;
+  shippingCost?: unknown;
+  customSku?: string;
+  isHeavy?: unknown;
+  allowRelist?: unknown;
+}
+
+export interface PublishContext {
+  supabase: SupabaseClient;
+  userId: string;
+  connection: EbayConnectionContext | null;
+}
+
+export async function publishDraft(ctx: PublishContext, body: PublishBody): Promise<NextResponse> {
+  const { supabase, userId } = ctx;
+  const { draftId, shippingMode: rawShippingMode, shippingCost: rawShippingCost, customSku: requestCustomSku, isHeavy: rawIsHeavy, allowRelist: rawAllowRelist } = body;
+  // Only drafts/[id]'s explicit "Relist on eBay" button (shown once a
+  // draft already has a live listing) sends this as true -- every other
+  // caller (new-listing, batch-upload, the Drafts bulk "List on eBay",
+  // and any lost-response retry of those) never legitimately wants to
+  // blow away an already-successful listing, so it stays false by default.
+  const allowRelist = rawAllowRelist === true;
+  if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
+
+  // Calculated shipping is the only mode (Nov 15, 2026). Whatever the
+  // client sends (shippingMode/isHeavy/shippingCost) or the draft has saved
+  // ("free", "buyer_pays") is ignored; eBay quotes each buyer a real rate
+  // from the package weight/size declared on the inventory item.
+  void rawShippingMode; void rawIsHeavy; void rawShippingCost;
+  const shippingMode = LISTING_SHIPPING_MODE;
+  const shippingCost: number | undefined = undefined;
+  const { data: settingsRow } = await supabase
+    .from("app_settings")
+    .select("store_description_footer")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const storeFooter = settingsRow?.store_description_footer || null;
+
+  const connection = ctx.connection;
+  if (!connection) {
+    // 200, not 400: apiFetch() throws on any non-2xx status before the
+    // caller ever sees the parsed body, so a non-200 here would make
+    // every `if (data.connect)` check below unreachable dead code --
+    // the seller would just see a generic thrown-error message with no
+    // "Connect eBay" link. Matches the pattern already used by
+    // /api/ebay/sales, /ship, /store, /offers, /messages for this exact
+    // signal.
+    return NextResponse.json({ error: "eBay not connected. Authorize your account to start listing.", connect: true }, { status: 200 });
+  }
+  return ebayContext.run(connection, async () => {
+  // Set once we know this call is purging an already-live listing to
+  // recreate it (an explicit "Relist on eBay" on a draft that's
+  // already listed) -- declared here, not inside the try block, so the
+  // catch block below can see it too.
+  let wasAlreadyListed = false;
+  try {
+    const { data: draft, error: dbError } = await supabase
+      .from("drafts")
+      .select("*")
+      .eq("id", draftId)
+      .eq("user_id", userId)
+      .single();
+
+    if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
+
+    // Idempotent-publish guard. Without this, a retry that re-submits an
+    // item whose FIRST call actually already succeeded on eBay's side (the
+    // response just never made it back -- a dropped connection, a batch
+    // "retry failed listings" re-processing something that wasn't really
+    // still failed) would run this whole handler again: purge the just-
+    // created offer/inventory item and publish a brand new one, silently
+    // replacing a live listing (losing its views/watchers) instead of
+    // recognizing it already worked. Short-circuits to the same success
+    // shape a fresh publish returns. The one legitimate case that DOES
+    // want exactly that delete-and-recreate behavior -- editing an
+    // already-listed draft and pushing the changes live -- opts in with
+    // allowRelist: true (see drafts/[id]/page.tsx's handlePublish).
+    if (draft.ebay_listing_id && !allowRelist) {
+      return NextResponse.json({
+        success: true,
+        listingId: draft.ebay_listing_id,
+        url: `https://www.ebay.com/itm/${draft.ebay_listing_id}`,
+        alreadyListed: true,
+      });
+    }
+
+    // From here on, if this is a relist of an already-live draft, the
+    // purge below deletes that live offer before trying to recreate it
+    // -- eBay blocks condition/category changes on an inventory item
+    // with prior offers, so there's no way to edit-in-place. If
+    // anything after the purge fails, the live listing is already gone
+    // but drafts.ebay_listing_id would still point at it, so the UI
+    // would keep showing "View on eBay"/"Relist" for a dead listing.
+    // failRelist() is the one place every error return in this
+    // sequence goes through: it clears ebay_listing_id and says
+    // plainly that the old listing ended, instead of leaving Supabase
+    // and eBay disagreeing about whether the item is live.
+    wasAlreadyListed = Boolean(draft.ebay_listing_id && allowRelist);
+    const failRelist = async (payload: Record<string, unknown>, status = 400) => {
+      if (wasAlreadyListed) {
+        await supabase.from("drafts").update({ ebay_listing_id: null }).eq("id", draftId).eq("user_id", userId);
+        return NextResponse.json(
+          {
+            ...payload,
+            listingEnded: true,
+            error: `${payload.error ?? "Relist failed"} Your previous live listing was ended while relisting and could not be re-published -- it is no longer live on eBay. Fix the issue above and try listing it again.`,
+          },
+          { status }
+        );
+      }
+      return NextResponse.json(payload, { status });
+    };
+    const draftPhotoCount = Array.isArray(draft.photo_urls) ? draft.photo_urls.length : draft.thumbnail_url ? 1 : 0;
+    if (draftPhotoCount < 1) return NextResponse.json({ error: "Add at least one photo before listing." }, { status: 400 });
+    if (draftPhotoCount > 24) return NextResponse.json({ error: "eBay allows up to 24 photos per listing." }, { status: 400 });
+    if (!draft.title?.trim()) return NextResponse.json({ error: "Add a title before listing." }, { status: 400 });
+    if (draft.title.trim().length > 80) return NextResponse.json({ error: "Keep the title to 80 characters or fewer." }, { status: 400 });
+    if (typeof draft.suggested_price !== "number" || !Number.isFinite(draft.suggested_price) || draft.suggested_price <= 0) {
+      return NextResponse.json({ error: "Set a valid price before listing." }, { status: 400 });
+    }
+    if (!draft.condition || !CONDITION_MAP[draft.condition]) {
+      return NextResponse.json({ error: "Choose a valid item condition before listing." }, { status: 400 });
+    }
+
+    // Pick a CALCULATED shipping policy from the seller's real eBay
+    // policies (saved Settings choice first, then eBay's default, then the
+    // only/first one). Fails with a step-by-step message if none exists.
+    const policyChoice = chooseCalculatedPolicy(
+      await loadFulfillmentPolicies(userId),
+      connection.policies.shippingCalculatedId,
+    );
+    if (!policyChoice.ok) {
+      return NextResponse.json({ error: policyChoice.error, needsCalculatedPolicy: true }, { status: 400 });
+    }
+    if (policyChoice.policyId !== connection.policies.shippingCalculatedId) {
+      // Remember the auto-picked policy so Settings shows it (best-effort).
+      await supabase
+        .from("ebay_connections")
+        .update({ shipping_calculated_policy_id: policyChoice.policyId, updated_at: new Date().toISOString() })
+        .eq("user_id", userId);
+    }
+    // buildListingPolicies() reads this from the request context.
+    connection.policies.shippingCalculatedId = policyChoice.policyId;
+
+    // Auto-assign the next sequential SKU if none is set. Safe under batch
+    // "List all": the DB's UNIQUE (user_id, custom_sku) decides who wins a
+    // number, losers back off and retry (see src/lib/sku-assign.ts).
+    let assignedSku = (typeof requestCustomSku === "string" ? requestCustomSku.trim() : "") || (draft.custom_sku as string | null);
+    if (!assignedSku) {
+      const skuOutcome = await assignSequentialSku({
+        // RLS scopes this to the signed-in user; the row count stays small.
+        // Parsed numerically in JS because custom_sku is text ("9" > "100").
+        readSkus: async () => {
+          const { data } = await supabase.from("drafts").select("custom_sku").eq("user_id", userId).not("custom_sku", "is", null);
+          return (data ?? []).map((r) => r.custom_sku as string | null);
+        },
+        tryClaim: async (candidate) => {
+          const { data: skuRow, error: skuError } = await supabase
+            .from("drafts")
+            .update({ custom_sku: candidate })
+            .eq("id", draftId)
+            .eq("user_id", userId)
+            .is("custom_sku", null)
+            .select("id")
+            .maybeSingle();
+          if (skuError) {
+            return skuError.code === "23505" ? { kind: "conflict" } : { kind: "error", message: skuError.message };
+          }
+          return skuRow ? { kind: "claimed" } : { kind: "already_set" };
+        },
+        readCurrent: async () => {
+          const { data } = await supabase.from("drafts").select("custom_sku").eq("id", draftId).eq("user_id", userId).maybeSingle();
+          return (data?.custom_sku as string | null) ?? null;
+        },
+      });
+      if (!skuOutcome.ok) {
+        return skuOutcome.reason === "error"
+          ? NextResponse.json({ error: "Could not assign a SKU safely. Please try again." }, { status: 500 })
+          : NextResponse.json({ error: skuOutcome.message }, { status: 409 });
+      }
+      assignedSku = skuOutcome.sku;
+    }
+    const autoSku = String(parseInt(draftId.replace(/-/g, "").slice(0, 8), 16) % 1000000);
+    const sku = assignedSku;
+    // Legacy SKU formats used before the numeric format was introduced
+    const legacyFullSku = `listflow${draftId.replace(/-/g, "")}`;
+    const legacyShortSku = `listflow${draftId.replace(/-/g, "").slice(0, 8)}`;
+    const legacyHyphenSku = `listflow-${draftId}`;
+    // The category the AI filled item specifics for (saved with the draft)
+    // keeps aspects and category consistent; older drafts look it up.
+    // A stored category is only trusted if its path fits the garment (a
+    // jersey never goes to a pants leaf); otherwise re-pick garment-aware.
+    const stored = sanitizeStoredSpecifics(draft.item_specifics);
+    const kind = classifyGarment(draft.item_type, draft.title);
+    // Drafts saved before category paths were stored (no path) are re-picked.
+    const storedOk = !!stored?.categoryId && !!stored.categoryPath && categoryFits(kind, stored.categoryPath).ok;
+    const categoryId = storedOk
+      ? stored!.categoryId!
+      : (await chooseCategory({ title: draft.title, itemType: draft.item_type, brand: draft.brand })).categoryId ?? getSafeFallbackCategory(draft.title || "");
+
+    await ensureMerchantLocation();
+
+    // Purge all stale offers and the inventory item before recreating.
+    // eBay blocks condition changes on inventory items with prior offers — deleting everything
+    // gives us a guaranteed clean slate with the correct condition and category.
+    // Always include autoSku so that switching from auto→custom SKU cleans up the old auto entry
+    // Each candidate SKU's cleanup (find its offers, delete them, delete the
+    // inventory item) is completely independent of every other candidate's —
+    // this used to run one full SKU at a time, serializing up to 5 rounds of
+    // network calls back-to-back on the app's most-used action. Running them
+    // concurrently doesn't change the result (each SKU's own offers/inventory
+    // item are untouched by what happens to the others), just how long it
+    // takes to get there.
+    const skusToClean = [...new Set([sku, autoSku, legacyFullSku, legacyShortSku, legacyHyphenSku])];
+    await Promise.all(skusToClean.map(async (candidateSku) => {
+      const existingRes = await getOfferBySku(candidateSku);
+      const existingOffers = (existingRes.data as { offers?: Array<{ offerId: string }> }).offers ?? [];
+      await Promise.all(existingOffers.map((existing) => deleteOffer(existing.offerId)));
+      await deleteInventoryItem(candidateSku);
+    }));
+
+    const itemResult = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter);
+    if (itemResult.status >= 400) {
+      const errData = itemResult.data as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
+      const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(itemResult.data);
+      return failRelist({ error: msg }, 400);
+    }
+    // eBay-required fields for this category that the AI/draft data didn't
+    // cover — surfaced so the frontend can warn the seller before they treat
+    // this listing as "auto-filled and done." A successful publish below
+    // means eBay accepted the listing without these, but they may still be
+    // worth filling in for search visibility.
+    let missingRequiredAspects = itemResult.missingRequiredAspects ?? [];
+
+    let offerId: string | undefined;
+    const offerResult = await createOffer(sku, draft.suggested_price, categoryId, shippingMode, shippingCost);
+    offerId = (offerResult.data as { offerId?: string }).offerId;
+
+    if (offerResult.status >= 400) {
+      const errData = offerResult.data as { errors?: Array<{ errorId?: number; message?: string; longMessage?: string }> };
+      const err0 = errData.errors?.[0];
+      const msg = (err0?.message ?? "").toLowerCase();
+
+      if (msg.includes("already exists")) {
+        // Offer already exists — find it by trying both SKU formats, then scanning all offers
+        const skusToTry = [sku, `listflow-${draftId}`];
+        let foundViaSku: string | undefined;
+        for (const candidateSku of skusToTry) {
+          const res = await getOfferBySku(candidateSku);
+          const offers = (res.data as { offers?: Array<{ offerId: string }> }).offers;
+          offerId = offers?.[0]?.offerId;
+          if (offerId) { foundViaSku = candidateSku; break; }
+        }
+        if (!offerId) {
+          const allRes = await getAllOffers();
+          const allOffers = (allRes.data as { offers?: Array<{ offerId: string; sku?: string }> }).offers ?? [];
+          const match = allOffers.find(o => skusToTry.includes(o.sku ?? ""));
+          offerId = match?.offerId;
+          foundViaSku = match?.sku;
+        }
+        if (!offerId) {
+          return failRelist({ error: "Offer already exists but could not be retrieved. Please contact eBay support." }, 500);
+        }
+        if (foundViaSku && foundViaSku !== sku) {
+          // Old-SKU offer: delete it so we can create a fresh one linked to the current inventory item
+          await deleteOffer(offerId);
+          const freshResult = await createOffer(sku, draft.suggested_price, categoryId, shippingMode, shippingCost);
+          offerId = (freshResult.data as { offerId?: string }).offerId;
+          if (freshResult.status >= 400 || !offerId) {
+            const e = (freshResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
+            return failRelist({ error: e?.message ?? "Failed to create offer after deleting old one" }, 400);
+          }
+        } else {
+          // Same-SKU offer: update price, category, and merchant location
+          await updateOffer(offerId, draft.suggested_price, categoryId, shippingMode, shippingCost);
+        }
+
+      } else if (msg.includes("location")) {
+        // Merchant location not found — recreate it and retry once
+        await recreateMerchantLocation();
+        const retryResult = await createOffer(sku, draft.suggested_price, categoryId, shippingMode, shippingCost);
+        offerId = (retryResult.data as { offerId?: string }).offerId;
+        if (retryResult.status >= 400 || !offerId) {
+          const retryErr = (retryResult.data as { errors?: Array<{ message?: string }> }).errors?.[0];
+          return failRelist({ error: `Location fix failed: ${retryErr?.message ?? JSON.stringify(retryResult.data)}` }, 400);
+        }
+
+      } else {
+        const errMsg = err0?.longMessage ?? err0?.message ?? "Failed to create offer";
+        return failRelist({ error: errMsg }, 400);
+      }
+    }
+
+    if (!offerId) return failRelist({ error: "No offer ID returned" }, 500);
+
+    // Try publishing right away instead of always paying a fixed wait for
+    // eBay's inventory service to index the item first -- this used to be
+    // a flat 1500ms tax on every single listing, win or lose, on the
+    // app's most-used action. If eBay genuinely hasn't indexed the item
+    // yet, this first attempt fails fast and cheaply; only then do we
+    // wait and retry the identical publish call once, before falling
+    // into the broader error handling below (unchanged from here on).
+    // Worst case (indexing really does need the full ~1500ms) costs one
+    // extra failed round trip versus before; best case -- most listings,
+    // if eBay's real indexing time is usually under that -- costs nothing.
+    let publishResult = await publishOffer(offerId);
+    if (publishResult.status >= 400) {
+      await new Promise((r) => setTimeout(r, 1500));
+      publishResult = await publishOffer(offerId);
+    }
+    // "Invalid <ShippingPackage>" (errorId 25101): the item's declared
+    // package type isn't one this seller's shipping policy accepts. Re-send
+    // the inventory item with weight + dimensions only (no packageType) and
+    // publish the SAME offer again -- publishOffer reads the inventory item
+    // fresh, so no offer delete/recreate is needed. One retry, no loop.
+    let packageVariant: PackageVariant = "typed";
+    if (publishResult.status >= 400) {
+      const firstErr = (publishResult.data as { errors?: EbayApiError[] }).errors?.[0];
+      if (isShippingPackageError(firstErr)) {
+        const repack = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter, "untyped");
+        if (repack.status < 400) {
+          packageVariant = "untyped";
+          publishResult = await publishOffer(offerId);
+        }
+      }
+    }
+    if (publishResult.status >= 400) {
+      const publishErr = (publishResult.data as { errors?: EbayApiError[] }).errors?.[0];
+      const errMsg = describeEbayError(publishErr, "");
+
+      const errLower = errMsg.toLowerCase();
+      // Package errors are not category problems -- e.g. "The package weight
+      // is not valid or is missing" contains "missing" and used to send a
+      // shipping problem down the category/condition fallback below.
+      const needsCategoryFallback = !isShippingPackageError(publishErr) && (
+        errLower.includes("condition") ||
+        errLower.includes("item specific") ||
+        errLower.includes("missing") ||
+        errLower.includes("inseam") ||
+        errLower.includes("required") ||
+        errLower.includes("not found") ||
+        errLower.includes("product not found") ||
+        errLower.includes("cannot publish"));
+
+      if (needsCategoryFallback) {
+        // categoryId is immutable on an existing offer — delete and recreate with safe clothing category.
+        // Also handles "item specific missing" errors caused by wrong taxonomy category (e.g. shirt → pants).
+        await deleteOffer(offerId);
+        // Deliberately left as an unconditional wait, unlike the two
+        // try-then-retry spots elsewhere in this route: the loop below
+        // tries several conditions and just `continue`s past whichever
+        // upsertInventoryItem call fails, with no way to tell "this
+        // condition is genuinely invalid" apart from "the delete above
+        // hasn't propagated yet." Removing this wait risks silently
+        // burning through every entry in conditionsToTry on a listing
+        // that would have worked fine with it, which is a worse outcome
+        // than the flat 2s here -- this is also a rare path (only
+        // reached when the very first publish attempt already failed for
+        // a real category/condition reason), so the payoff for
+        // optimizing it is much smaller than the primary publish wait.
+        await new Promise((r) => setTimeout(r, 2000));
+        const safeCategory = getSafeFallbackCategory(draft.title || "");
+        // Only ever retry with the item's OWN actual condition — never widen
+        // to a better OR a worse one. This used to fall back to
+        // "USED_EXCELLENT" for brand-new items just to force a listing
+        // through, which meant a live eBay listing could silently claim a
+        // "New with tags" item was actually used -- and, separately, a
+        // second fallback below used to escalate USED_ACCEPTABLE to
+        // USED_GOOD on a category-rejection retry, which had the opposite
+        // problem: a flawed item could silently list as "Good - minor
+        // flaws" when the seller had actually marked it "Fair - notable
+        // flaws," with the description/photos unchanged. A wrong condition
+        // on a public listing is an "item not as described" risk either
+        // direction, not a cosmetic bug -- if retrying with the item's
+        // real condition still fails, report the error instead of trying
+        // to relabel it.
+        // getConditionCandidates gives the item's real condition tier in
+        // every API spelling eBay might currently accept for this item
+        // type (apparel categories now require the newer PRE_OWNED_* enum
+        // values; everything else still uses the older USED_* ones) --
+        // always the same tier, never a different one.
+        const conditionsToTry = getConditionCandidates(draft.condition, draft.title || "");
+
+        for (const tryCondition of conditionsToTry) {
+          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter, packageVariant);
+          if (upsertResult.status >= 400) continue;
+          missingRequiredAspects = upsertResult.missingRequiredAspects ?? missingRequiredAspects;
+          // Same try-then-retry-once-on-failure treatment as the primary
+          // publish attempt above, for the same reason -- this was a flat
+          // 1500ms wait on every fallback attempt whether or not eBay
+          // actually needed it.
+          let freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, shippingMode, shippingCost);
+          if (freshOffer.status >= 400) {
+            await new Promise((r) => setTimeout(r, 1500));
+            freshOffer = await createOffer(sku, draft.suggested_price, safeCategory, shippingMode, shippingCost);
+          }
+          const freshOfferId = (freshOffer.data as { offerId?: string }).offerId;
+          if (freshOffer.status >= 400 || !freshOfferId) continue;
+          publishResult = await publishOffer(freshOfferId);
+          offerId = freshOfferId;
+          if (publishResult.status < 400) break;
+          await deleteOffer(freshOfferId);
+        }
+      }
+
+      if (publishResult.status >= 400) {
+        const retryErr = (publishResult.data as { errors?: EbayApiError[] }).errors?.[0];
+        const initialCat = categoryId;
+        const safecat = getSafeFallbackCategory(draft.title || "");
+        return failRelist({ error: `${describeEbayError(retryErr, "Failed to publish listing")} [initial cat:${initialCat}, safe cat:${safecat}]` }, 400);
+      }
+    }
+
+    const rawListingId = (publishResult.data as { listingId?: string | number }).listingId;
+    const listingId = rawListingId != null ? String(rawListingId) : undefined;
+    if (listingId) {
+      // Also records that it went out with calculated shipping (old drafts
+      // were saved as "free"/"buyer_pays").
+      await supabase.from("drafts").update({ ebay_listing_id: listingId, shipping_mode: LISTING_SHIPPING_MODE }).eq("id", draftId).eq("user_id", userId);
+      // Real listing start for days-to-sell (migration 026). Separate,
+      // best-effort write: if the column doesn't exist yet this fails on
+      // its own and never affects the listing ID saved above.
+      await supabase.from("drafts").update({ ebay_listed_at: new Date().toISOString() }).eq("id", draftId).eq("user_id", userId);
+    }
+
+    // Store category isn't settable through the REST Inventory API's
+    // create/publish flow — it's applied as a separate Trading API call once
+    // there's a real ItemID to revise. Best-effort: a failure here doesn't
+    // undo an otherwise-successful listing, just surfaces as a warning.
+    let storeCategoryWarning: string | undefined;
+    const storeCategoryId = (draft as { store_category_id?: string | null }).store_category_id;
+    if (listingId && storeCategoryId) {
+      const catResult = await setListingStoreCategory(listingId, String(storeCategoryId));
+      if (!catResult.success) {
+        storeCategoryWarning = `Listed, but couldn't set the store category: ${catResult.error ?? "unknown error"}. You can set it manually on eBay.`;
+      }
+    }
+
+    return NextResponse.json({
+      success: true,
+      listingId,
+      url: listingId ? `https://www.ebay.com/itm/${listingId}` : null,
+      missingRequiredAspects: missingRequiredAspects.length > 0 ? missingRequiredAspects : undefined,
+      storeCategoryWarning,
+    });
+  } catch (err) {
+    const msg = (err as Error).message ?? "";
+    const isTokenExpired = msg.toLowerCase().includes("invalid_grant") ||
+      msg.toLowerCase().includes("token expired") ||
+      msg.toLowerCase().includes("invalid access token") ||
+      msg.toLowerCase().includes("oauth");
+    if (wasAlreadyListed) {
+      // Same reasoning as failRelist() above: whatever failed, it failed
+      // after the live listing was already purged, so Supabase must
+      // stop claiming it's still listed.
+      await supabase.from("drafts").update({ ebay_listing_id: null }).eq("id", draftId).eq("user_id", userId);
+    }
+    if (isTokenExpired) {
+      // Force the next attempt to fetch a fresh token instead of reusing
+      // the cached one that just failed.
+      invalidateAccessTokenCache();
+      // 200, not 401: a 401 here isn't this app session expiring, it's
+      // this seller's eBay token expiring -- but apiFetch() treats ANY
+      // 401 as an app-session expiry and force-navigates the whole
+      // browser to /login, so this used to silently log the seller out
+      // of Listflow mid-listing instead of showing "Reconnect eBay."
+      // Same dead-code problem as the connect:true case above, too.
+      return NextResponse.json({
+        error: wasAlreadyListed
+          ? "eBay token expired mid-relist. Your previous live listing was ended and could not be re-published -- reconnect eBay, then try listing it again."
+          : "eBay token expired. Reconnect eBay to continue listing.",
+        reconnect: true,
+        listingEnded: wasAlreadyListed || undefined,
+      }, { status: 200 });
+    }
+    return NextResponse.json({ error: msg, listingEnded: wasAlreadyListed || undefined }, { status: 500 });
+  }
+  });
+}

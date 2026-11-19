@@ -1,4 +1,5 @@
 import type { getServerSupabase } from "./auth";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { decryptToken } from "./ebay-token-crypto";
 import type { EbayConnectionContext } from "./ebay-request-context";
 
@@ -14,6 +15,30 @@ export async function requireEbayConnection(auth: {
   const { data } = await auth.supabase.from("ebay_connections").select("*").maybeSingle();
   if (!data) return null;
 
+  return {
+    userId: data.user_id,
+    ebayUserId: data.ebay_user_id,
+    refreshToken: decryptToken(data.encrypted_refresh_token),
+    policies: {
+      shippingFreeId: data.shipping_free_policy_id,
+      shippingHeavyId: data.shipping_heavy_policy_id,
+      shippingCalculatedId: data.shipping_calculated_policy_id,
+      returnPolicyId: data.return_policy_id,
+    },
+  };
+}
+
+/**
+ * Same as requireEbayConnection, for server-side background work that runs
+ * with the service-role client (no signed-in session): scoped to `userId`
+ * explicitly instead of relying on RLS.
+ */
+export async function ebayConnectionForUser(
+  db: SupabaseClient,
+  userId: string
+): Promise<EbayConnectionContext | null> {
+  const { data } = await db.from("ebay_connections").select("*").eq("user_id", userId).maybeSingle();
+  if (!data) return null;
   return {
     userId: data.user_id,
     ebayUserId: data.ebay_user_id,
