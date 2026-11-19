@@ -25,7 +25,9 @@ import {
   DollarSign,
   Mail,
   Images,
+  HardDrive,
 } from "lucide-react";
+import PhotoCleanupSettings from "@/components/PhotoCleanupSettings";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
 import { EBAY_STANDARD_FEE_PERCENT } from "@/lib/ebay-fees";
@@ -629,6 +631,15 @@ export default function SettingsPage() {
         {error && (
           <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{error}</p>
         )}
+      </SettingsSection>
+
+      <SettingsSection
+        delay="d3"
+        title="Photo storage"
+        description="Free storage is 1 GB. Listed items' photos can be cleared from Listflow's storage after a while, since eBay hosts its own copies."
+        icon={HardDrive}
+      >
+        <PhotoCleanupSettings />
       </SettingsSection>
 
       <SettingsSection

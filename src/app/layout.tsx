@@ -1,4 +1,5 @@
 import PublishTray from "@/components/PublishTray";
+import JobsIndicator from "@/components/JobsIndicator";
 import BottomNav from "@/components/BottomNav";
 import Sidebar from "@/components/Sidebar";
 import ConfirmHost from "@/components/ConfirmHost";
@@ -81,6 +82,7 @@ export default async function RootLayout({
         <Sidebar />
         <BottomNav />
         <PublishTray />
+        <JobsIndicator />
         <ConfirmHost />
       </body>
     </html>
