@@ -8,6 +8,10 @@
 //  5. fit the title and flag required aspects that are still empty.
 // Runs inside an eBay request context (taxonomy calls use the seller's token).
 import { openAIPost } from "@/lib/openai-request";
+import { textModel } from "@/lib/ai-models";
+import { buildAspectSchema, parseSchemaAnswer } from "@/lib/aspect-schema";
+import { seoTitle, titleIssues } from "@/lib/seo-title";
+import { assessConfidence, type Confidence } from "@/lib/confidence";
 import { chooseCategory } from "@/lib/ebay-category";
 import { classifyGarment, consistencyIssues, dedupeAspects, defsForKind, measurementKeysFor, PHOTO_ONLY_ASPECTS, sanitizeForItem, type GarmentKind } from "@/lib/garment";
 import { fetchAspectDefs, defsForClient } from "@/lib/ebay-aspects";
@@ -17,6 +21,10 @@ import {
 } from "@/lib/item-specifics";
 
 export interface EnrichedListing {
+  /** Ready vs Needs a look, with the exact fields (src/lib/confidence.ts). */
+  confidence: Confidence;
+  /** Which facts were read from tags/labels (evidence) vs. inferred from the look. */
+  evidence: TagEvidence;
   categoryId: string | null;
   categoryPath: string | null;
   categoryNeedsReview: boolean;
@@ -42,17 +50,54 @@ export function visionMeasurements(v: Vision): Measurement[] {
   });
 }
 
-export function visionFacts(v: Vision) {
+export interface TagEvidence {
+  brandFromTag: boolean;
+  sizeFromTag: boolean;
+  materialFromTag: boolean;
+  countryFromTag: boolean;
+  singleStitch: boolean;
+  dateCode: string | null;
+}
+
+const tagOf = (v: Vision) => ((v.tag && typeof v.tag === "object" ? v.tag : {}) as Record<string, unknown>);
+
+/** "100% Polyester" → "Polyester"; "50% Cotton 50% Polyester" → "Cotton/Polyester" (largest first). */
+export function fiberToMaterial(fiber: string): string {
+  const parts = [...fiber.matchAll(/(\d{1,3})\s*%\s*([A-Za-z][A-Za-z ]*?)(?=\s*\d|\s*[,/;]|$)/g)]
+    .map((m) => ({ pct: Number(m[1]), name: m[2].trim().replace(/\b\w/g, (c) => c.toUpperCase()) }))
+    .filter((p) => p.name && p.pct > 0)
+    .sort((a, b) => b.pct - a.pct);
+  if (!parts.length) return fiber.trim();
+  return parts.slice(0, 2).map((p) => p.name).join("/");
+}
+
+/** Pass A tag facts (OCR) — these win over anything inferred from the look. */
+export function tagEvidence(v: Vision): TagEvidence & { brand: string; size: string; material: string; country: string } {
+  const t = tagOf(v);
+  const brand = str(t.brand), size = str(t.size), fiber = str(t.fiber), country = str(t.madeIn);
   return {
-    title: str(v.suggestedTitle), brand: str(v.brand), color: str(v.color), size: str(v.size), department: str(v.department),
-    item_type: str(v.itemType), style: str(v.style), material: str(v.material), theme: str(v.theme), sleeve_length: str(v.sleeveLength),
+    brand, size, material: fiber ? fiberToMaterial(fiber) : "", country,
+    brandFromTag: !!brand, sizeFromTag: !!size, materialFromTag: !!fiber, countryFromTag: !!country,
+    singleStitch: v.singleStitch === true || v.singleStitch === "true",
+    dateCode: str(t.dateCode) || null,
+  };
+}
+
+export function visionFacts(v: Vision) {
+  const t = tagEvidence(v);
+  return {
+    title: str(v.suggestedTitle), brand: t.brand || str(v.brand), color: str(v.color), size: t.size || str(v.size), department: str(v.department),
+    item_type: str(v.itemType), style: str(v.style), material: t.material || str(v.material), theme: str(v.theme), sleeve_length: str(v.sleeveLength),
     neckline: str(v.neckline), fit: str(v.fit), pattern: str(v.pattern), vintage: str(v.vintage), character: str(v.character),
     character_family: str(v.characterFamily), year_manufactured: str(v.yearManufactured), season: str(v.season),
   };
 }
 
 function visionSpecifics(v: Vision): Aspects {
-  const s = (v.specifics && typeof v.specifics === "object" ? v.specifics : {}) as Record<string, unknown>;
+  const s = { ...((v.specifics && typeof v.specifics === "object" ? v.specifics : {}) as Record<string, unknown>) };
+  // A "Made in" tag is the evidence for country of manufacture.
+  const madeIn = str(tagOf(v).madeIn);
+  if (madeIn) s["Country/Region of Manufacture"] = madeIn;
   const out: Aspects = {};
   for (const [k, val] of Object.entries(s)) {
     const t = str(val);
@@ -126,10 +171,26 @@ ${JSON.stringify(ask)}
 Answer as JSON: {"aspects":[{"name":"<exact aspect name>","values":["…"]}]}`;
 }
 
+export function passBPrompt(facts: Record<string, unknown>, itemDescription: string): string {
+  return `You fill eBay item specifics for a secondhand listing.
+THE ITEM IS: ${itemDescription}.
+Use ONLY the facts below, which were read from the item's photos and tags.
+Return null for any aspect the facts don't directly support. Never guess.
+Where an aspect has a fixed list, pick the value that truly describes this
+item, or null — never a "closest" value that contradicts it.
+Brand is the maker (from the tag), never a league or team. Players, teams and
+leagues go in Player/Team/League/Sport, never Character. Material is the
+fiber from the tag ("jersey"/"knit" are constructions). Multi-value aspects
+list each value separately (e.g. Season: ["Fall","Winter"]).
+
+FACTS:
+${JSON.stringify(facts, null, 1)}`;
+}
+
 /** Vintage/decade only with evidence: the vision step said vintage AND gave an era/date. */
 export function vintageEvidence(v: Vision): boolean {
   const yes = /^y/i.test(str(v.vintage));
-  return yes && !!(str(v.era) || str(v.yearManufactured) || /(©|\(c\)|copyright)\s*(19|20)\d\d|\b(19[5-9]\d)\b/i.test(str(v.tagText)));
+  return yes && !!(str(v.era) || str(v.yearManufactured) || str(tagOf(v).dateCode) || /(©|\(c\)|copyright)\s*(19|20)\d\d|\b(19[5-9]\d)\b/i.test(str(v.tagText)));
 }
 
 const specific = (v: Vision, k: string) => str(((v.specifics ?? {}) as Record<string, unknown>)[k]);
@@ -159,27 +220,30 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
   const baseMerge = mergeAspects([aspectsFromDraft(facts), visionSpecifics(v), measurementAspects(ms, defs)], defs, only);
   const base = sanitizeForItem(baseMerge.aspects, kind, { vintageEvidence: evidence, photoFeatures, requiredAspects: required }).aspects;
 
+  // Pass B: fill the category's own schema (enums for eBay values) from
+  // the Pass A facts only. Anything without evidence comes back null.
   let ai: Aspects = {};
-  const ask = aspectsToAsk(defs, base);
-  if (ask.length > 0) {
+  const passAFacts = {
+    ...facts, tag: tagOf(v), tagText: str(v.tagText), printedText: str(v.printedText), era: str(v.era), flaws: str(v.flaws),
+    seenFeatures: photoFeatures, specifics: v.specifics ?? {}, measurements: measurementLines(ms),
+  };
+  if (defs.length > 0) {
     try {
+      const sch = buildAspectSchema(defs);
       const res = (await openAIPost(apiKey, {
-        model: "gpt-4o-mini",
-        max_tokens: 1200,
-        response_format: { type: "json_schema", json_schema: { name: "item_specifics", strict: true, schema: FILL_SCHEMA } },
-        messages: [{
-          role: "user",
-          content: fillPrompt(
-            { ...facts, tagText: str(v.tagText), era: str(v.era), flaws: str(v.flaws), specifics: v.specifics ?? {}, measurements: measurementLines(ms) },
-            ask,
-            `${facts.item_type || kind}${hints.team ? ` (${hints.team})` : ""}${cat?.categoryPath ? ` — eBay category: ${cat.categoryPath}` : ""}`,
-          ),
-        }],
+        model: textModel(),
+        max_tokens: 1500,
+        response_format: { type: "json_schema", json_schema: { name: "item_specifics", strict: true, schema: sch.schema } },
+        messages: [{ role: "user", content: passBPrompt(passAFacts, `${facts.item_type || kind}${hints.team ? ` (${hints.team})` : ""}${cat?.categoryPath ? ` — eBay category: ${cat.categoryPath}` : ""}`) }],
       })) as { choices?: { message?: { content?: string } }[] };
-      // The text-only step can't see the item: it may not add visual
-      // aspects (features, color, closure…) the photos didn't show.
-      const raw = parseAiAspects(JSON.parse(res.choices?.[0]?.message?.content ?? "{}"));
-      for (const k of Object.keys(raw)) if (PHOTO_ONLY_ASPECTS.has(k.toLowerCase())) delete raw[k];
+      const raw = parseSchemaAnswer(JSON.parse(res.choices?.[0]?.message?.content ?? "{}"), sch);
+      // Visual aspects only if the photo step actually reported that value.
+      const factsText = JSON.stringify(passAFacts).toLowerCase();
+      for (const k of Object.keys(raw)) {
+        if (!PHOTO_ONLY_ASPECTS.has(k.toLowerCase())) continue;
+        raw[k] = raw[k].filter((x) => factsText.includes(x.toLowerCase()));
+        if (!raw[k].length) delete raw[k];
+      }
       ai = sanitizeForItem(raw, kind, { vintageEvidence: evidence, photoFeatures, requiredAspects: required }).aspects;
     } catch {
       ai = {};
@@ -195,6 +259,11 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
     .map((d) => `${d.name}: "${d.value}" isn't one of eBay's values — pick one from the list.`);
   const issues = [...consistencyIssues({ title: titleForCategory, kind, categoryPath: cat?.categoryPath ?? null, aspects: merged.aspects, measurementKeys: ms.map((m) => m.key) }), ...new Set(rejected)];
   if (cat?.needsReview) issues.unshift("Couldn't find an eBay category that clearly fits this item — please choose one.");
+  // SEO title from the validated specifics (never contradicts them); the
+  // AI's own title only if the specifics are too thin to build one.
+  const ev = tagEvidence(v);
+  const composed = seoTitle(merged.aspects, { vintage: evidence, era: evidence ? str(v.era) || null : null, singleStitch: ev.singleStitch, graphic: /graphic/i.test(str(v.pattern)) || !!str(v.printedText) && kind === "top" });
+  const finalTitle = composed.split(" ").length >= 4 ? composed : chooseTitle(v, merged.aspects);
   return {
     categoryId,
     categoryPath: cat?.categoryPath ?? null,
@@ -205,7 +274,18 @@ export async function enrichListing(apiKey: string, v: Vision): Promise<Enriched
     missingRequired: merged.missingRequired,
     aspectDefs: defsForClient(defs),
     measurementsList: ms,
-    suggestedTitle: chooseTitle(v, merged.aspects),
+    suggestedTitle: finalTitle,
+    evidence: ev,
+    confidence: assessConfidence({
+      categoryNeedsReview: !!cat?.needsReview,
+      issues,
+      missingRequired: merged.missingRequired,
+      titleIssues: titleIssues(finalTitle, merged.aspects),
+      brandFromTag: ev.brandFromTag,
+      brandUnbranded: /^unbranded$/i.test(merged.aspects["Brand"]?.[0] ?? ""),
+      sizeFromTag: ev.sizeFromTag,
+      hasMeasurements: ms.length > 0,
+    }),
   };
 }
 

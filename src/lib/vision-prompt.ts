@@ -39,6 +39,17 @@ Respond with ONLY a JSON object (no markdown) in this exact shape:
   "department": "Men, Women, Unisex Adult, Boys or Girls — from the tag or an obvious cut; empty if unclear",
   "brand": "brand exactly as on the tag/label/print, or 'Unbranded' only if clearly unbranded; empty if you can't read it",
   "tagText": "transcribe EVERY readable word on tags/labels: brand, size, RN number, style/model number, fabric %, 'Made in …', care text. Empty if no tag visible.",
+  "tag": {
+    "brand": "brand EXACTLY as printed on the neck/brand tag, else empty",
+    "size": "size EXACTLY as printed on the size tag, else empty",
+    "rn": "RN/CA number if printed (e.g. 'RN 54156'), else empty",
+    "styleNumber": "style/model/product number if printed, else empty",
+    "fiber": "fiber content EXACTLY as on the care tag (e.g. '100% Polyester', '50% Cotton 50% Polyester'), else empty",
+    "madeIn": "country after 'Made in' on a tag (e.g. 'Honduras'), else empty",
+    "dateCode": "any date/copyright/manufacture date printed on a tag or the print (e.g. '© 1994', '03/98'), else empty"
+  },
+  "printedText": "the exact words/numbers printed or embroidered on the item itself (graphics, team, player name, number), else empty",
+  "singleStitch": "true ONLY if a single row of stitching on the sleeve/bottom hem is clearly visible in a close-up; otherwise false",
   "color": "main color(s), e.g. 'Brown' or 'Navy, White'",
   "size": "size exactly as on the tag, e.g. 'XL', 'L Tall', '32x30', '10.5'. Empty if no size tag is visible. Never estimate.",
   "condition": "one of: New with tags, New without tags, Excellent used, Good - minor flaws, Fair - notable flaws. Be honest: any visible flaw means at most 'Good - minor flaws'.",

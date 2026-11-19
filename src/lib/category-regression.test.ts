@@ -2,6 +2,7 @@
 // #88 jersey was put in a pants/joggers category and filled with pants
 // specifics. Runs the REAL category picker, aspect filler and guards against
 // a fake eBay taxonomy whose FIRST suggestion is deliberately wrong.
+import { passBAnswer } from "@/test/pass-b";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { ai } = vi.hoisted(() => ({ ai: vi.fn() }));
@@ -70,15 +71,15 @@ import { enrichListing } from "./listing-enrich";
 
 // The text model "helpfully" picks the closest allowed values — the second half of the bug.
 function aiPicksClosest() {
-  ai.mockImplementation(async (_k: string, body: { messages: Array<{ content: string }> }) => {
-    const p = body.messages[0].content;
-    const out: Array<{ name: string; values: string[] }> = [];
-    if (p.includes('"name":"Type"') && p.includes("Joggers")) out.push({ name: "Type", values: ["Joggers"] });
-    if (p.includes('"name":"Closure"')) out.push({ name: "Closure", values: ["Snap"] });
-    if (p.includes('"name":"Character"')) out.push({ name: "Character", values: ["IRVIN"] });
-    if (p.includes('"name":"Character Family"')) out.push({ name: "Character Family", values: ["Dallas Cowboys"] });
-    if (p.includes('"name":"Vintage"')) out.push({ name: "Vintage", values: ["No"] });
-    return { choices: [{ message: { content: JSON.stringify({ aspects: out }) } }] };
+  ai.mockImplementation(async (_k: string, body: unknown) => {
+    const props = JSON.stringify((body as { response_format?: unknown }).response_format ?? {});
+    const out: Record<string, string> = {};
+    if (props.includes("Joggers")) out.Type = "Joggers";
+    out.Closure = "Snap";
+    out.Character = "IRVIN";
+    out["Character Family"] = "Dallas Cowboys";
+    out.Vintage = "No";
+    return passBAnswer(body, out);
   });
 }
 

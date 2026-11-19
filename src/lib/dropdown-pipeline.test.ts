@@ -1,6 +1,7 @@
 // End-to-end validity: AI fill → normalize → dropdown options → publish
 // payload. Every value that reaches a dropdown or eBay must be valid for the
 // CURRENT category's eBay metadata.
+import { passBAnswer } from "@/test/pass-b";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { ai } = vi.hoisted(() => ({ ai: vi.fn() }));
@@ -64,10 +65,10 @@ import { parseAspectDefs, type AspectDef, type Aspects } from "./item-specifics"
 // The text model returns sloppy values on purpose.
 beforeEach(() => {
   ai.mockReset();
-  ai.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ aspects: [
-    { name: "Season", values: ["Fall/Winter"] }, { name: "Country/Region of Manufacture", values: ["USA"] },
-    { name: "Product", values: ["jersey"] }, { name: "Rise", values: ["mid rise"] }, { name: "Made Up Aspect", values: ["x"] },
-  ] }) } }] });
+  // Pass B answers within the schema; sloppy free-text values still need cleaning.
+  ai.mockImplementation(async (_k: string, body: unknown) => passBAnswer(body, {
+    Season: ["Fall/Winter"], "Country/Region of Manufacture": "United States", Product: "Jersey", Rise: "Mid",
+  }));
 });
 
 function assertValid(aspects: Aspects, defs: AspectDef[], label: string) {

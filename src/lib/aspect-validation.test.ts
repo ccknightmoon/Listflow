@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { passBAnswer } from "@/test/pass-b";
 import { matchAllowedValue, mergeAspects, editDistance, capLength, parseAspectDefs, type AspectDef } from "./item-specifics";
 import { sanitizeForItem, dedupeAspects } from "./garment";
 
@@ -79,7 +80,7 @@ describe("Steelers jersey end to end", () => {
       { localizedAspectName: "Size", aspectConstraint: { aspectRequired: true, aspectMode: "FREE_TEXT" } },
     ] }));
     // The text model "helpfully" adds Product and invents pockets.
-    ai.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ aspects: [{ name: "Product", values: ["jersey"] }, { name: "Features", values: ["Pockets"] }] }) } }] });
+    ai.mockImplementation(async (_k: string, body: unknown) => passBAnswer(body, { Product: "Jersey", Features: ["Pockets"] }));
   });
   it("Team snaps to 'Pittsburgh Steelers', no Pockets, no duplicate Type", async () => {
     const r = await enrichListing("k", {

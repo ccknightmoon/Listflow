@@ -5,6 +5,7 @@ vi.mock("@/lib/openai-request", () => ({ openAIPost: (...a: unknown[]) => ai(...
 vi.mock("@/lib/ebay-category", () => ({ chooseCategory: (...a: unknown[]) => cat(...a) }));
 vi.mock("@/lib/ebay-aspects", () => ({ fetchAspectDefs: (...a: unknown[]) => defs(...a), defsForClient: (d: unknown) => d }));
 
+import { passBAnswer } from "@/test/pass-b";
 import { enrichListing, enrichVisionResult, chooseTitle, visionMeasurements, brandFirst } from "./listing-enrich";
 import { parseAspectDefs } from "./item-specifics";
 
@@ -59,7 +60,7 @@ describe("enrichListing", () => {
   });
 
   it("uses the text model's answer only for aspects the photos didn't fill, and never lets it override them", async () => {
-    ai.mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ aspects: [{ name: "Outer Shell Material", values: ["cotton canvas"] }, { name: "Brand", values: ["Dickies"] }] }) } }] });
+    ai.mockImplementation(async (_k: string, body: unknown) => passBAnswer(body, { "Outer Shell Material": "cotton canvas", Brand: "Dickies" }));
     const r = await enrichListing("k", CARHARTT);
     expect(r.itemSpecifics["Outer Shell Material"]).toEqual(["Cotton Canvas"]);
     expect(r.itemSpecifics.Brand).toEqual(["Carhartt"]);
@@ -105,5 +106,40 @@ describe("helpers", () => {
   it("composes a title when the AI's is missing or too short", () => {
     const t = chooseTitle({ suggestedTitle: "Jersey", itemType: "Jersey" }, { Brand: ["Mitchell & Ness"], Department: ["Men"], Team: ["Dallas Cowboys"], Player: ["Michael Irvin"], Size: ["52"], Color: ["Blue"], Vintage: ["Yes"] });
     expect(t).toBe("Mitchell & Ness Vintage Men's Jersey Dallas Cowboys Michael Irvin Size 52 Blue");
+  });
+});
+
+import { fiberToMaterial, tagEvidence } from "./listing-enrich";
+describe("Pass A evidence (tag OCR) wins", () => {
+  it("fiber content → material, largest first", () => {
+    expect(fiberToMaterial("100% Polyester")).toBe("Polyester");
+    expect(fiberToMaterial("50% Cotton 50% Polyester")).toBe("Cotton/Polyester");
+    expect(fiberToMaterial("60% cotton, 40% polyester")).toBe("Cotton/Polyester");
+    expect(fiberToMaterial("Cotton blend")).toBe("Cotton blend");
+  });
+  it("tag brand/size/fiber/country override what the model guessed from the look", async () => {
+    const r = await enrichListing("k", {
+      ...CARHARTT, brand: "Dickies", size: "L",
+      tag: { brand: "Carhartt", size: "XL", fiber: "100% Cotton", madeIn: "USA" },
+    });
+    expect(r.itemSpecifics.Brand).toEqual(["Carhartt"]);
+    expect(r.itemSpecifics.Size).toEqual(["XL"]);
+    expect(r.itemSpecifics["Country/Region of Manufacture"]).toEqual(["United States"]);
+    expect(r.evidence).toMatchObject({ brandFromTag: true, sizeFromTag: true, countryFromTag: true });
+    expect(tagEvidence({ tag: {} }).brandFromTag).toBe(false);
+  });
+  it("tagged, complete items are Ready with a title that agrees with the specifics", async () => {
+    ai.mockImplementation(async (_k: string, body: unknown) => (await import("@/test/pass-b")).passBAnswer(body, {}));
+    const r = await enrichListing("k", { ...CARHARTT, tag: { brand: "Carhartt", size: "XL" } });
+    expect(r.confidence.status).toBe("ready");
+    expect(r.suggestedTitle).toMatch(/^Carhartt/);
+    expect(r.suggestedTitle).toMatch(/Size XL/);
+    expect(r.suggestedTitle.length).toBeLessThanOrEqual(80);
+  });
+  it("no tag evidence for brand and size → Needs a look, naming those fields", async () => {
+    ai.mockImplementation(async (_k: string, body: unknown) => (await import("@/test/pass-b")).passBAnswer(body, {}));
+    const r = await enrichListing("k", { ...CARHARTT, tag: {} });
+    expect(r.confidence.status).toBe("needs-look");
+    expect(r.confidence.reasons.map((x) => x.field)).toEqual(expect.arrayContaining(["Brand", "Size"]));
   });
 });
