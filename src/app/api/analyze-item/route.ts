@@ -1,3 +1,4 @@
+import { visionModel } from "@/lib/ai-models";
 import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const data = await openAIPost(apiKey, {
-      model: "gpt-4o-mini",
+      model: visionModel(),
       max_tokens: 2000,
       response_format: { type: "json_object" },
       messages: [

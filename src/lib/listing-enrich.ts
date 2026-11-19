@@ -343,7 +343,7 @@ export async function refillForCategory(
   if (apiKey && ask.length) {
     try {
       const res = (await openAIPost(apiKey, {
-        model: "gpt-4o-mini",
+        model: textModel(),
         max_tokens: 1000,
         response_format: { type: "json_schema", json_schema: { name: "item_specifics", strict: true, schema: FILL_SCHEMA } },
         messages: [{ role: "user", content: fillPrompt({ title: input.title, itemType: input.itemType, known: base }, ask, `${input.itemType ?? kind} — eBay category: ${input.categoryPath ?? input.categoryId}`) }],

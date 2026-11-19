@@ -1,3 +1,4 @@
+import { visionModel } from "@/lib/ai-models";
 import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
@@ -38,7 +39,7 @@ async function analyzeGroup(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       const data = await openAIPost(apiKey, {
-        model: "gpt-4o-mini",
+        model: visionModel(),
         max_tokens: 2000,
         response_format: { type: "json_object" },
         messages: [

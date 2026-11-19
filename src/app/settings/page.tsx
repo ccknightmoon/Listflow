@@ -945,6 +945,10 @@ export default function SettingsPage() {
         </>)}
       </SettingsSection>
 
+      <SettingsSection delay="d8" title="Listing accuracy" description="Test the listing AI against your own live listings (read-only — nothing on eBay changes)." icon={Sparkles}>
+        <Link href="/benchmark" className="btn text-sm">Open the accuracy benchmark</Link>
+      </SettingsSection>
+
       <SettingsSection delay="d8" title="Account" icon={UserCircle}>
         <button
           onClick={handleSignOut}
