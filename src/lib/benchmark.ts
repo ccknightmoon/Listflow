@@ -1,8 +1,7 @@
 // Accuracy benchmark against Sel's own live listings (gold = Sel's
 // hand-made title, category and item specifics). Pure scoring + parsing;
 // the API routes under /api/benchmark do the (read-only) eBay/AI calls.
-import { xmlFind, xmlFindAll } from "@/lib/ebay-listings";
-import { decodeEntities } from "@/lib/html-entities";
+// Browser-safe: the GetItem parser lives in benchmark-gold.ts (server).
 import { titleIssues } from "@/lib/seo-title";
 import type { Aspects } from "@/lib/item-specifics";
 
@@ -13,28 +12,6 @@ export interface GoldItem {
   categoryPath: string; // "Clothing, Shoes & Accessories > Men > …"
   specifics: Aspects;
   pictures: string[];
-}
-
-/** eBay GetItem (IncludeItemSpecifics) → gold item. */
-export function parseGetItem(body: string): GoldItem | null {
-  const item = xmlFind(body, "Item");
-  const itemId = xmlFind(item, "ItemID");
-  if (!itemId) return null;
-  const cat = xmlFind(item, "PrimaryCategory");
-  const specifics: Aspects = {};
-  for (const nv of xmlFindAll(xmlFind(item, "ItemSpecifics"), "NameValueList")) {
-    const name = decodeEntities(xmlFind(nv, "Name"));
-    const values = xmlFindAll(nv, "Value").map((v) => decodeEntities(v)).filter(Boolean);
-    if (name && values.length) specifics[name] = values;
-  }
-  return {
-    itemId,
-    title: decodeEntities(xmlFind(item, "Title")),
-    categoryId: xmlFind(cat, "CategoryID"),
-    categoryPath: decodeEntities(xmlFind(cat, "CategoryName")).split(":").join(" > "),
-    specifics,
-    pictures: xmlFindAll(xmlFind(item, "PictureDetails"), "PictureURL").filter((u) => /^https:\/\//.test(u)).slice(0, 8),
-  };
 }
 
 export interface Prediction {

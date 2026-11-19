@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { parseGetItem, scoreItem, aggregate, valuesAgree, sampleIds, titleScore } from "./benchmark";
+import { scoreItem, aggregate, valuesAgree, sampleIds, titleScore } from "./benchmark";
+import { parseGetItem } from "./benchmark-gold";
 
 const XML = `<GetItemResponse><Ack>Success</Ack><Item><ItemID>123</ItemID><Title>Nike Dallas Cowboys Michael Irvin #88 Jersey Mens XL Navy</Title>
 <PrimaryCategory><CategoryID>24511</CategoryID><CategoryName>Sports Mem, Cards &amp; Fan Shop:Fan Apparel &amp; Souvenirs:Football-NFL</CategoryName></PrimaryCategory>

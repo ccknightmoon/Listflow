@@ -7,7 +7,8 @@ import { openAIPost } from "@/lib/openai-request";
 import { ITEM_VISION_PROMPT } from "@/lib/vision-prompt";
 import { visionModel } from "@/lib/ai-models";
 import { enrichVisionResult } from "@/lib/listing-enrich";
-import { parseGetItem, scoreItem } from "@/lib/benchmark";
+import { scoreItem } from "@/lib/benchmark";
+import { parseGetItem } from "@/lib/benchmark-gold";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
