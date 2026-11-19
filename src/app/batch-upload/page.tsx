@@ -158,6 +158,9 @@ const DELAY_BETWEEN_CHUNKS_MS = 300;
 // card) -- not imported directly from ai-usage.ts so this client bundle
 // doesn't pull in that file's server-only Supabase service-role client.
 const AI_CAP_MESSAGE = "You've reached this month's AI usage limit. It resets on the 1st.";
+// Daily safety limit (src/lib/ai-usage.ts AI_DAILY_LIMIT_MESSAGE).
+const isDailyCap = (m?: string) => !!m && m.startsWith("You've reached today's AI safety limit");
+const isAiCap = (m?: string) => m === AI_CAP_MESSAGE || isDailyCap(m);
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1234,7 +1237,7 @@ export default function BatchUploadPage() {
           const match = await requestStoreCategoryAi(r);
           if (match) setStoreCategoryChoice((prev) => ({ ...prev, [i]: match }));
         } catch (err) {
-          if ((err as Error).message === AI_CAP_MESSAGE) cappedHit = true;
+          if (isAiCap((err as Error).message)) cappedHit = true;
           // Otherwise leave whatever the free keyword match already set.
         }
       }
@@ -1332,10 +1335,13 @@ export default function BatchUploadPage() {
       // 40-item results screen could easily miss that they're all the
       // same cause. Per-item Retry buttons (rendered below for any item
       // with .error set) still work once the cap resets.
-      const cappedCount = allResults.filter((r) => r.error === AI_CAP_MESSAGE).length;
+      const cappedCount = allResults.filter((r) => isAiCap(r.error)).length;
+      const dailyCapped = allResults.some((r) => isDailyCap(r.error));
       if (cappedCount > 0) {
         setError(
-          `You've reached this month's AI usage limit -- ${cappedCount} item${cappedCount !== 1 ? "s" : ""} below couldn't be analyzed. It resets on the 1st; retry them (or this whole batch) once it does.`
+          dailyCapped
+            ? `You've reached today's AI safety limit -- ${cappedCount} item${cappedCount !== 1 ? "s" : ""} below couldn't be analyzed. It resets at midnight UTC; retry them then.`
+            : `You've reached this month's AI usage limit -- ${cappedCount} item${cappedCount !== 1 ? "s" : ""} below couldn't be analyzed. It resets on the 1st; retry them (or this whole batch) once it does.`
         );
       }
 

@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
 
   for (let i = 0; i < groups.length; i++) {
     if (i >= processLimit) {
-      results.push({ error: AI_USAGE_LIMIT_MESSAGE });
+      results.push({ error: usage.message || AI_USAGE_LIMIT_MESSAGE });
       continue;
     }
     const timings: Record<string, number> = {};

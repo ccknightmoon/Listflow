@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
 
   const usage = await checkAndConsumeAiUsage(auth.user.id, 1);
   if (!usage.allowed) {
-    return NextResponse.json({ error: AI_USAGE_LIMIT_MESSAGE }, { status: 429 });
+    return NextResponse.json({ error: usage.message || AI_USAGE_LIMIT_MESSAGE }, { status: 429 });
   }
 
   const imageContent = images.map((img) => ({
