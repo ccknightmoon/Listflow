@@ -1,3 +1,4 @@
+import { imageListError } from "@/lib/input-validation";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
@@ -33,6 +34,13 @@ export async function POST(req: NextRequest) {
   }
 
   const groups = body.groups ?? [];
+  if (!Array.isArray(groups) || groups.length > 50) {
+    return NextResponse.json({ error: "Send 1–50 items per request." }, { status: 400 });
+  }
+  for (const g of groups) {
+    const bad = imageListError((g as { images?: unknown } | null)?.images, 24);
+    if (bad) return NextResponse.json({ error: bad }, { status: 400 });
+  }
 
   if (groups.length === 0) {
     return NextResponse.json(

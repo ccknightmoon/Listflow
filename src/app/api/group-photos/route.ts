@@ -1,3 +1,4 @@
+import { imageListError } from "@/lib/input-validation";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
@@ -28,6 +29,8 @@ export async function POST(req: NextRequest) {
   }
 
   const images = body.images ?? [];
+  const badImages = imageListError(images, 60);
+  if (badImages && images.length > 0) return NextResponse.json({ error: badImages }, { status: 400 });
 
   if (images.length === 0) {
     return NextResponse.json(

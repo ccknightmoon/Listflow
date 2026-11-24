@@ -1,3 +1,4 @@
+import { imageListError } from "@/lib/input-validation";
 import { visionModel } from "@/lib/ai-models";
 import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
@@ -34,6 +35,8 @@ export async function POST(req: NextRequest) {
   }
 
   const images = body.images ?? [];
+  const badImages = imageListError(images, 24);
+  if (badImages && images.length > 0) return NextResponse.json({ error: badImages }, { status: 400 });
 
   if (images.length === 0) {
     return NextResponse.json(

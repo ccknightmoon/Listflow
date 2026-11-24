@@ -1,3 +1,4 @@
+import { draftFieldsError, isUuid } from "@/lib/input-validation";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { sanitizeStoredSpecifics, isMissingColumnError } from "@/lib/item-specifics";
@@ -58,6 +59,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
+  if (!isUuid(id)) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
+  const fieldsError = draftFieldsError(body);
+  if (fieldsError) return NextResponse.json({ error: fieldsError }, { status: 400 });
   if (!isValidStoreCategoryId(body.storeCategoryId)) {
     return NextResponse.json({ error: "Invalid store category ID." }, { status: 400 });
   }

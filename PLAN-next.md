@@ -57,3 +57,12 @@ Checked the live database (read-only): `public.set_updated_at` still has no fixe
 ### 4c. Weekly backup
 
 No new cron (the free plan's two are used): the existing daily snapshot cron runs the backup when the last one is about a week old. It saves the key tables (drafts, app_settings, ebay_connections with the token still encrypted, sale_costs, active_listing_snapshots, ai_usage_counters) as one gzipped JSON file in a private `backups` storage bucket (created automatically; only the server can read it; newest 8 kept). If `BACKUP_EMAIL_TO` is set in Vercel, the same file is emailed (off-site copy that survives losing the Supabase project). Photos aren't included (too big; published ones live on eBay). This is a safety net, not a replacement for Supabase Pro's daily backups. To run one right away: call the snapshot cron with `?backup=now` (needs `CRON_SECRET`).
+
+### 4e. Server-side input validation sweep
+
+New shared checks in `src/lib/input-validation.ts`, applied where the gaps were:
+- **Drafts create/update** (`POST /api/drafts`, `PATCH /api/drafts/[id]`; also the queue's draft writer through `draftBodyError`): text fields must be text (no objects) with generous length caps; prices must be numbers 0–100,000; `ebayListingId` must be an eBay item number (before, any string could be saved, which could fool the "already listed" guard); photos must be up to 24 https links (or private-photo links); item specifics capped in size. Bad draft IDs return 404 before touching the database.
+- **Bulk delete** (`DELETE /api/drafts`): IDs must be 1–500 UUIDs.
+- **AI routes** (`analyze-batch`, `analyze-item`, `group-photos`, `detect-item-dividers`): image lists checked for count, shape, type and size before any AI usage is counted.
+- **Pricing** (`/api/pricing/suggest`): bad JSON now returns 400 instead of crashing with 500.
+Already fine (checked): eBay price/offer/message/relist/delist routes, settings, sales costs, the queue routes.

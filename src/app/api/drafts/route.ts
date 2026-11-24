@@ -1,3 +1,4 @@
+import { uuidList } from "@/lib/input-validation";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { isMissingColumnError } from "@/lib/item-specifics";
@@ -159,10 +160,9 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const ids = body.ids ?? [];
-
-  if (ids.length === 0) {
-    return NextResponse.json({ error: "No ids provided." }, { status: 400 });
+  const ids = uuidList(body.ids);
+  if (!ids) {
+    return NextResponse.json({ error: "ids must be a list of 1–500 draft IDs." }, { status: 400 });
   }
 
   const { error } = await auth.supabase.from("drafts").delete().in("id", ids).eq("user_id", auth.user.id);

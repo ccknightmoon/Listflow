@@ -1,5 +1,6 @@
 // Draft row building/validation shared by POST /api/drafts and the
 // background queue worker (Volume Phase 3).
+import { draftFieldsError } from "@/lib/input-validation";
 import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
 import { isValidCostBasis } from "@/lib/profit";
 
@@ -23,6 +24,8 @@ type Body = Record<string, any>;
 
 /** Error message for an invalid create body, or null when it's fine. */
 export function draftBodyError(body: Body): string | null {
+  const fields = draftFieldsError(body);
+  if (fields) return fields;
   if (!isValidStoreCategoryId(body.storeCategoryId)) {
     return "Invalid store category ID.";
   }
