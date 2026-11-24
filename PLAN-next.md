@@ -53,3 +53,7 @@ Today every photo is in the public `photos` bucket: anyone with a link can open 
 ### 4d. Migration 024
 
 Checked the live database (read-only): `public.set_updated_at` still has no fixed `search_path`, so **024 is not applied**. The file is ready as-is (`supabase-migrations/024_set_updated_at_search_path.sql`, one safe `alter function`, reversible). Needs Sel's approval.
+
+### 4c. Weekly backup
+
+No new cron (the free plan's two are used): the existing daily snapshot cron runs the backup when the last one is about a week old. It saves the key tables (drafts, app_settings, ebay_connections with the token still encrypted, sale_costs, active_listing_snapshots, ai_usage_counters) as one gzipped JSON file in a private `backups` storage bucket (created automatically; only the server can read it; newest 8 kept). If `BACKUP_EMAIL_TO` is set in Vercel, the same file is emailed (off-site copy that survives losing the Supabase project). Photos aren't included (too big; published ones live on eBay). This is a safety net, not a replacement for Supabase Pro's daily backups. To run one right away: call the snapshot cron with `?backup=now` (needs `CRON_SECRET`).

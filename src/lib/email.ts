@@ -70,3 +70,22 @@ export async function sendDigestEmail(
     return { success: false, error: (err as Error).message };
   }
 }
+
+/** Weekly backup copy by email (off-site), when BACKUP_EMAIL_TO is set. */
+export async function sendBackupEmail(args: { to: string; filename: string; content: Buffer; summary: string }): Promise<{ success: boolean; error?: string }> {
+  const resend = getClient();
+  if (!resend) return { success: false, error: "RESEND_API_KEY is not configured." };
+  try {
+    const { error } = await resend.emails.send({
+      from: "Listflow <onboarding@resend.dev>",
+      to: args.to,
+      subject: `Listflow weekly backup ${args.filename}`,
+      text: `Attached: Listflow's weekly backup of its key tables (gzipped JSON).\n\n${args.summary}\n\nKeep this email; it's your off-site copy.`,
+      attachments: [{ filename: args.filename, content: args.content }],
+    });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}

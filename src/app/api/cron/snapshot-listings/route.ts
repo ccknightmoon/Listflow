@@ -5,6 +5,8 @@ import { ebayContext } from "@/lib/ebay-request-context";
 import { fetchListPage } from "@/lib/ebay-listings";
 import { xmlFind } from "@/lib/sales-parse";
 import { fetchEbayIdentity, storeEbayIdentity } from "@/lib/ebay-identity";
+import { maybeRunWeeklyBackup } from "@/lib/backup";
+import { sendBackupEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -71,5 +73,17 @@ export async function GET(req: NextRequest) {
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, () => worker()));
-  return NextResponse.json({ date: today, results });
+
+  // Weekly backup piggybacks on this daily cron (the free plan's two cron
+  // slots are both used). Runs only when the last backup is ~a week old.
+  const backup = await maybeRunWeeklyBackup(supabase, {
+    force: req.nextUrl.searchParams.get("backup") === "now",
+    email: async (file, gz, summary) => {
+      const to = process.env.BACKUP_EMAIL_TO;
+      if (!to) return false;
+      return (await sendBackupEmail({ to, filename: file, content: gz, summary })).success;
+    },
+  }).catch((e) => ({ ran: false, reason: (e as Error).message }));
+
+  return NextResponse.json({ date: today, results, backup });
 }
