@@ -11,3 +11,9 @@ Why: listings made with eBay's Inventory API "cannot be edited through Seller Hu
 - **Never twice:** each listing carries a `UUID` derived from the draft (and the previous listing, for a later relist). If a response is lost and the call is retried, eBay answers "Duplicate UUID used" (error 488) with the existing item number, which is saved instead of listing again. The existing "already listed" guard still runs first.
 - **Updating a listed draft** ("Update on eBay", was "Relist on eBay") now revises the live listing in place with ReviseFixedPriceItem: same item number, watchers kept. If eBay says the listing was made with the Inventory API, it falls back to the old end-and-recreate path for that one listing.
 - **Check with eBay (doesn't list):** new button in the draft editor; runs only the verify step and shows eBay's answer and fee estimate.
+
+## Step 2: edit live listings in place
+
+- "Update on eBay" in the draft editor revises the live listing with **ReviseFixedPriceItem**: title, item specifics, photos, price, quantity, description, condition and condition note, package, store category. Same item number, watchers and history kept.
+- Before revising, Listflow reads the live listing (**GetItem**). If it has ended, you're told to relist instead. Custom item specifics that exist on the listing (common on eBay-made listings) are kept as long as they're still in the draft. A listing made in the eBay app keeps its own category unless you picked one, and its own description HTML is sent back as-is.
+- If eBay refuses a category/condition change (e.g. the listing already has a sale), the revise is retried without them. If the listing turns out to be an Inventory-API listing, the old end-and-recreate path is used for that one listing.

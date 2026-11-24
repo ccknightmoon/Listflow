@@ -6,7 +6,8 @@ import { NextResponse } from "next/server";
 import { tradingRequest, inventoryRequest, getConditionCandidates, getSafeFallbackCategory } from "@/lib/ebay-inventory";
 import { fetchAspectDefs, fetchAllowedConditions } from "@/lib/ebay-aspects";
 import { buildPublishAspects } from "@/lib/publish-aspects";
-import { conditionNote, fitTitle, listingDescriptionHtml, pickCondition } from "@/lib/item-specifics";
+import { conditionNote, fitTitle, isTemplateHtml, listingDescriptionHtml, pickCondition, sanitizeStoredSpecifics } from "@/lib/item-specifics";
+import type { LiveItem } from "@/lib/ebay-item";
 import { buildPackageWeightAndSize } from "@/lib/shipping";
 import { createTtlDedupeCache } from "@/lib/ttl-cache";
 import {
@@ -71,6 +72,29 @@ export function draftPictureUrls(d: Pick<DraftRow, "photo_urls" | "thumbnail_url
   return urls.map((u) => u.replace(/^http:\/\//, "https://")).slice(0, 24);
 }
 
+/** HTML that isn't Listflow's own template (e.g. imported from an eBay-made listing). */
+export function isForeignHtml(desc: unknown): desc is string {
+  return typeof desc === "string" && /<[a-z][^>]*>/i.test(desc) && !isTemplateHtml(desc);
+}
+
+/**
+ * Item specifics eBay accepts on a listing but that aren't in the
+ * category's list ("custom" specifics, common on eBay-made listings) are
+ * dropped by the usual category validation. On a revise, keep the ones the
+ * live listing already has AND the seller still has in the draft.
+ */
+export function keepCustomSpecifics(built: Record<string, string[]>, stored: Record<string, string[]> | undefined, live: Record<string, string[]> | undefined): Record<string, string[]> {
+  if (!stored || !live) return built;
+  const have = new Set(Object.keys(built).map((k) => k.toLowerCase()));
+  const liveNames = new Set(Object.keys(live).map((k) => k.toLowerCase()));
+  const out = { ...built };
+  for (const [name, values] of Object.entries(stored)) {
+    const k = name.toLowerCase();
+    if (!have.has(k) && liveNames.has(k) && values.length) out[name] = values;
+  }
+  return out;
+}
+
 export interface BuiltItem {
   item: TradingItemInput;
   conditionIds: number[];
@@ -91,7 +115,9 @@ export async function buildItemForDraft(draft: DraftRow, opts: { categoryId: str
     missingRequired,
     item: {
       title: fitTitle(draft.title) || "Item",
-      descriptionHtml: listingDescriptionHtml(draft as never, aspects, measurements, opts.storeFooter),
+      // A description brought in from an eBay-made listing (its own HTML) is
+      // sent back as-is; Listflow drafts get the usual generated layout.
+      descriptionHtml: isForeignHtml(draft.description) ? String(draft.description) : listingDescriptionHtml(draft as never, aspects, measurements, opts.storeFooter),
       categoryId: opts.categoryId,
       conditionId: conditionIds[0],
       conditionDescription: conditionNote(draft.condition, draft.flaws),
@@ -215,11 +241,18 @@ export async function publishDraftTrading(a: TradingPublishArgs, call: (c: Tradi
  */
 export async function reviseDraftListing(
   draft: DraftRow,
-  opts: { categoryId: string; sku: string; storeFooter: string | null },
+  opts: { categoryId: string; sku: string; storeFooter: string | null; live?: LiveItem | null },
   call: (c: TradingCall, item: TradingItemInput) => Promise<TradingResult> = tradingItemCall,
 ): Promise<{ ok: boolean; inventoryModel?: boolean; error?: string; warnings?: string[]; missingRequired?: string[] }> {
   const built = await buildItemForDraft(draft, opts);
-  const item: TradingItemInput = { ...built.item, itemId: String(draft.ebay_listing_id) };
+  const stored = sanitizeStoredSpecifics(draft.item_specifics)?.aspects;
+  const item: TradingItemInput = {
+    ...built.item,
+    itemId: String(draft.ebay_listing_id),
+    aspects: keepCustomSpecifics(built.item.aspects ?? {}, stored, opts.live?.specifics),
+    // eBay-made listings keep their own category unless the draft has one.
+    categoryId: opts.live && !sanitizeStoredSpecifics(draft.item_specifics)?.categoryId ? undefined : built.item.categoryId,
+  };
   let r = await call("ReviseFixedPriceItem", item);
   if (!r.ok && isPackageError(r)) r = await call("ReviseFixedPriceItem", { ...item, package: item.package ? { ...item.package, packageType: undefined } : null });
   // A listing with sales can't change category/condition: retry without them.

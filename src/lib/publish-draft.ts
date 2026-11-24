@@ -23,6 +23,7 @@ import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
 import { classifyGarment, categoryFits } from "@/lib/garment";
 import { publishApi } from "@/lib/trading-listing";
 import { publishDraftTrading, reviseDraftListing, type DraftRow } from "@/lib/trading-publish";
+import { getLiveItem } from "@/lib/ebay-item";
 import { chooseCategory } from "@/lib/ebay-category";
 
 
@@ -300,7 +301,14 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
     // legacy listing made with the Inventory API, uses the path below.
     if (publishApi() === "trading") {
       if (wasAlreadyListed) {
-        const r = await reviseDraftListing(draft as DraftRow, { categoryId, sku, storeFooter });
+        // Read the live listing first: keeps its custom item specifics and
+        // tells an Inventory-API listing apart before anything is sent.
+        const liveRes = await getLiveItem(String(draft.ebay_listing_id)).catch(() => null);
+        const live = liveRes && !("error" in liveRes) ? liveRes : null;
+        if (live && live.status && live.status !== "Active") {
+          return NextResponse.json({ error: `This listing is no longer active on eBay (${live.status}). Use Relist on the Listings page.`, listingEnded: true }, { status: 400 });
+        }
+        const r = await reviseDraftListing(draft as DraftRow, { categoryId, sku, storeFooter, live });
         if (r.ok) {
           return NextResponse.json({
             success: true,
