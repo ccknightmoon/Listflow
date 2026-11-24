@@ -4,6 +4,7 @@ import { decryptToken } from "@/lib/ebay-token-crypto";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { fetchListPage } from "@/lib/ebay-listings";
 import { xmlFind } from "@/lib/sales-parse";
+import { fetchEbayIdentity, storeEbayIdentity } from "@/lib/ebay-identity";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,7 +14,7 @@ export const maxDuration = 60;
 // a clear error until it's applied. Scheduled in vercel.json.
 const CONCURRENCY = 5;
 
-type ConnectionRow = { user_id: string; ebay_user_id: string | null; encrypted_refresh_token: string };
+type ConnectionRow = { user_id: string; ebay_user_id: string | null; ebay_eias_token?: string | null; encrypted_refresh_token: string };
 
 async function snapshotOne(
   supabase: ReturnType<typeof getServiceClient>,
@@ -28,6 +29,13 @@ async function snapshotOne(
       policies: {},
     };
     const { body } = await ebayContext.run(connection, () => fetchListPage("ActiveList", 1));
+    // Backfill which eBay user this connection is (needed to match eBay's
+    // account-deletion notifications); one read-only call, once per seller.
+    if (!row.ebay_user_id || (row.ebay_eias_token === null && "ebay_eias_token" in row)) {
+      await ebayContext.run(connection, fetchEbayIdentity)
+        .then((id) => storeEbayIdentity(supabase, row.user_id, id))
+        .catch(() => {});
+    }
     if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) {
       return { userId: row.user_id, error: "eBay error" };
     }

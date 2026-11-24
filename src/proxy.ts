@@ -44,7 +44,9 @@ import { Redis } from "@upstash/redis";
 // authentication, reopening exactly the bypass this middleware was
 // rewritten to close. Do not reintroduce a blanket "/api" public rule.
 const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms", "/forgot-password", "/reset-password", "/manifest.webmanifest"];
-const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout", "/api/cron", "/api/jobs/worker"];
+// "/api/ebay/account-deletion": eBay's Marketplace Account Deletion
+// notifications (signed by eBay, verified in the route itself).
+const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout", "/api/cron", "/api/jobs/worker", "/api/ebay/account-deletion"];
 
 // Self-service account deletion (src/lib/account-deletion.ts): a signed-in
 // user with a pending deletion request is locked to /account/pending-deletion
@@ -106,7 +108,7 @@ export async function proxy(request: NextRequest) {
   // is both public (reachable pre-sign-in) AND rate-limited, and the eBay
   // callback is the only /api path that should skip this entirely (it's a
   // one-time OAuth redirect, not a route a script would hammer).
-  if (redis && pathname.startsWith("/api") && !pathname.startsWith("/api/ebay/callback")) {
+  if (redis && pathname.startsWith("/api") && !pathname.startsWith("/api/ebay/callback") && !pathname.startsWith("/api/ebay/account-deletion")) {
     const isAiPath = AI_RATE_LIMITED_PATHS.some((p) => pathname.startsWith(p));
     const limiter = isAiPath ? aiRatelimit : generalRatelimit;
     if (limiter) {

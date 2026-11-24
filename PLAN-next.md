@@ -27,3 +27,15 @@ Not changed: Settings' own requests (settings, eBay policies, photo storage) are
 On **Background batches** (`/batches`), **Review one by one** opens a full-screen queue: one card per finished draft with its photo, title, price and only the flagged fields (the reasons it isn't Ready). Swipe right (or Enter / →) to approve, left (or ← ) to hold it back, E opens the full editor in a new tab, Esc closes. A missing or flagged price can be typed right on the card; it's saved to the draft before approving. The last card is **List all Ready**.
 
 What gets listed: everything you approved, plus everything the server already marked Ready that you didn't hold back. So "List all Ready" on the page and at the end of the queue agree, with or without a review. Decisions are remembered on this device per batch (they survive a reload). Publishing uses the existing background publish jobs (never twice). Approving a "Needs a look" item with other problems (e.g. a required eBay field) can still fail at publish; it then shows "Listing failed — needs a look" with Retry, as before.
+
+## 4. Security
+
+### 4a. eBay Marketplace Account Deletion endpoint
+
+eBay requires every app that stores eBay user data to either subscribe to these notifications or opt out (only allowed if no eBay data is stored, which isn't Listflow's case). Per eBay's page (checked Nov 24, 2026): *"Failure to comply with this requirement will result in termination of your access to the Developer Tools, and/or reduced access to all or some APIs"*, and a callback that stays unacknowledged is marked down after 24 h, with 30 days to fix it before the developer is "non-compliant". So the production keyset is at risk until this is registered.
+
+- `GET /api/ebay/account-deletion?challenge_code=…` answers eBay's check with `sha256(challengeCode + verificationToken + endpoint)` as JSON.
+- `POST` verifies eBay's `X-EBAY-SIGNATURE` (public key from eBay's Notification API, cached 1 h), then deletes what Listflow holds for that eBay user: the eBay connection (encrypted token, IDs, policy picks) and eBay-derived history (`sale_costs`, `active_listing_snapshots`). Buyer details are never stored. The Listflow login and the seller's own drafts are kept; the seller is just disconnected. It replies 204 only after the delete succeeds (a failure returns 500 so eBay resends). Bad signatures get 412.
+- To match notifications to a seller, Listflow now saves the eBay user ID (and, with **migration 032**, the EIAS token) when eBay is connected, and the daily snapshot cron backfills existing connections (one read-only `GetUser` call per seller).
+- Public route, not rate-limited (eBay can send bursts of up to ~1,500/day).
+- **Sel's steps** are in the final report (env vars + eBay developer portal).

@@ -1,3 +1,6 @@
+import { requireEbayConnection } from "@/lib/ebay-connection";
+import { ebayContext } from "@/lib/ebay-request-context";
+import { fetchEbayIdentity, storeEbayIdentity } from "@/lib/ebay-identity";
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { exchangeCodeForTokens, EBAY_OAUTH_STATE_COOKIE } from "@/lib/ebay-oauth";
@@ -51,6 +54,18 @@ export async function GET(req: NextRequest) {
       return NextResponse.redirect(
         new URL(`/settings?ebay=error&message=${encodeURIComponent(dbError.message)}`, req.url)
       );
+    }
+
+    // Remember which eBay user this is (for eBay's account-deletion
+    // notifications). Best-effort: never blocks connecting.
+    try {
+      const connection = await requireEbayConnection(auth);
+      if (connection) {
+        const identity = await ebayContext.run(connection, fetchEbayIdentity);
+        await storeEbayIdentity(auth.supabase, auth.user.id, identity);
+      }
+    } catch (err) {
+      console.error("eBay identity lookup after connect failed:", (err as Error).message);
     }
 
     return NextResponse.redirect(new URL("/settings?ebay=connected", req.url));
