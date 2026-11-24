@@ -11,3 +11,6 @@ tsconfig.tsbuildinfo
 
 # Stray env backups (e.g. .env.local.save) -- never commit a copy of secrets
 .env*.save
+
+# Local secrets written for Sel to paste elsewhere (never commit)
+ebay-deletion-token.txt
