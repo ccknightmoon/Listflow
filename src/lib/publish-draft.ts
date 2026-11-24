@@ -21,6 +21,8 @@ import { setListingStoreCategory } from "@/lib/ebay-store-categories";
 import { assignSequentialSku } from "@/lib/sku-assign";
 import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
 import { classifyGarment, categoryFits } from "@/lib/garment";
+import { publishApi } from "@/lib/trading-listing";
+import { publishDraftTrading, reviseDraftListing, type DraftRow } from "@/lib/trading-publish";
 import { chooseCategory } from "@/lib/ebay-category";
 
 
@@ -77,6 +79,10 @@ export interface PublishBody {
   customSku?: string;
   isHeavy?: unknown;
   allowRelist?: unknown;
+  /** VerifyAddFixedPriceItem only: checks the listing with eBay without listing it. */
+  verifyOnly?: unknown;
+  /** "Finish on eBay": list as a scheduled listing this many days ahead (1–21). */
+  scheduleDays?: unknown;
 }
 
 export interface PublishContext {
@@ -94,6 +100,8 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
   // and any lost-response retry of those) never legitimately wants to
   // blow away an already-successful listing, so it stays false by default.
   const allowRelist = rawAllowRelist === true;
+  const verifyOnly = body.verifyOnly === true;
+  const scheduleDays = typeof body.scheduleDays === "number" && Number.isInteger(body.scheduleDays) && body.scheduleDays >= 1 && body.scheduleDays <= 21 ? body.scheduleDays : null;
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
   // Publishing changes listings (route and background queue alike): drop the
   // cached listings now and again once the response is sent, so the next
@@ -285,6 +293,37 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
     const categoryId = storedOk
       ? stored!.categoryId!
       : (await chooseCategory({ title: draft.title, itemType: draft.item_type, brand: draft.brand })).categoryId ?? getSafeFallbackCategory(draft.title || "");
+
+    // Trading API (default, PUBLISH_API=trading): ordinary eBay listings that
+    // stay editable in the eBay app; an already-listed draft is revised in
+    // place (same item number, watchers kept). PUBLISH_API=inventory, or a
+    // legacy listing made with the Inventory API, uses the path below.
+    if (publishApi() === "trading") {
+      if (wasAlreadyListed) {
+        const r = await reviseDraftListing(draft as DraftRow, { categoryId, sku, storeFooter });
+        if (r.ok) {
+          return NextResponse.json({
+            success: true,
+            revised: true,
+            listingId: draft.ebay_listing_id,
+            url: `https://www.ebay.com/itm/${draft.ebay_listing_id}`,
+            missingRequiredAspects: r.missingRequired?.length ? r.missingRequired : undefined,
+            warnings: r.warnings?.length ? r.warnings : undefined,
+          });
+        }
+        // The live listing is untouched on any other error.
+        if (!r.inventoryModel) return NextResponse.json({ error: r.error }, { status: 400 });
+      } else {
+        return await publishDraftTrading({
+          supabase, userId, draft: draft as DraftRow, sku, categoryId, storeFooter,
+          shippingProfileId: connection.policies.shippingCalculatedId as string,
+          savedReturnProfileId: connection.policies.returnPolicyId,
+          verifyOnly, scheduleDays,
+        });
+      }
+    } else if (verifyOnly || scheduleDays) {
+      return NextResponse.json({ error: "Checking with eBay and scheduled listings need the Trading API (PUBLISH_API=trading)." }, { status: 400 });
+    }
 
     await ensureMerchantLocation();
 

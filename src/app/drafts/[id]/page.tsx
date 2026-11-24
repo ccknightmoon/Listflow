@@ -15,7 +15,7 @@ import { formatMoney } from "@/lib/format";
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import { ArrowLeft, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight, GripVertical, ShieldCheck } from "lucide-react";
 import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
 import { uploadThumbnail } from "@/lib/storage";
@@ -90,6 +90,10 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [deleting, setDeleting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [listing, setListing] = useState(false);
+  // "Check with eBay": VerifyAddFixedPriceItem only -- validates the listing
+  // and shows the fees without listing anything.
+  const [checking, setChecking] = useState(false);
+  const [checkResult, setCheckResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [showPublishReview, setShowPublishReview] = useState(false);
   const [listingUrl, setListingUrl] = useState<string | null>(null);
   const [justListed, setJustListed] = useState(false);
@@ -467,6 +471,36 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     setShowPublishReview(true);
   }
 
+  async function handleCheckWithEbay() {
+    setChecking(true);
+    setCheckResult(null);
+    try {
+      await saveDraft();
+      const res = await fetch("/api/ebay/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: id, customSku: customSku || undefined, verifyOnly: true }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string; feesTotal?: number | null; warnings?: string[]; missingRequiredAspects?: string[]; connect?: boolean; reconnect?: boolean };
+      if (data.connect) setNeedsConnect(true);
+      if (data.reconnect) setNeedsReconnect(true);
+      if (data.success) {
+        const fee = typeof data.feesTotal === "number" ? ` eBay's listing fee estimate: ${data.feesTotal === 0 ? "$0.00" : `$${data.feesTotal.toFixed(2)}`}.` : "";
+        const extra = [
+          data.missingRequiredAspects?.length ? `Still empty (recommended): ${data.missingRequiredAspects.join(", ")}.` : "",
+          data.warnings?.length ? `eBay notes: ${data.warnings.join(" · ")}` : "",
+        ].filter(Boolean).join(" ");
+        setCheckResult({ ok: true, text: `eBay accepted this listing — nothing was listed.${fee} ${extra}`.trim() });
+      } else {
+        setCheckResult({ ok: false, text: data.error ?? "eBay didn't accept this listing." });
+      }
+    } catch (err) {
+      setCheckResult({ ok: false, text: (err as Error).message });
+    } finally {
+      setChecking(false);
+    }
+  }
+
   async function handlePublish() {
     setListing(true);
     setShowPublishReview(false);
@@ -487,8 +521,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           shippingMode,
           isHeavy: shippingMode === "buyer_pays",
           shippingCost: shippingMode === "buyer_pays" && shippingCost ? parseFloat(shippingCost) : undefined,
-          // This is the one call site that should be allowed to overwrite an
-          // already-live listing -- the button already reads "Relist on eBay"
+          // This is the one call site that should be allowed to change an
+          // already-live listing (Trading API: revised in place, same item
+          // number) -- the button reads "Update on eBay"
           // once `listingUrl` is set (see its label below), so the request
           // makes that same true/false explicit to the server's idempotent-
           // publish guard instead of leaving it to infer intent.
@@ -947,6 +982,12 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           ) : (
             "Consider editing the listing on eBay to fill them in for better search placement."
           )}
+        </div>
+      )}
+
+      {checkResult && (
+        <div className="card p-3 mb-4 text-sm" role="status" style={checkResult.ok ? { borderColor: "var(--success)" } : { borderColor: "var(--warning-border)", background: "var(--warning-bg)", color: "var(--warning-border)" }}>
+          {checkResult.text}
         </div>
       )}
 
@@ -1522,9 +1563,15 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             </button>
             <button onClick={handleList} disabled={listing} className="btn btn-primary flex-1">
               {listing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-              {listing ? "Listing..." : listingUrl ? "Relist on eBay" : "List on eBay"}
+              {listing ? (listingUrl ? "Updating..." : "Listing...") : listingUrl ? "Update on eBay" : "List on eBay"}
             </button>
           </div>
+          {!listingUrl && (
+            <button type="button" onClick={() => void handleCheckWithEbay()} disabled={checking || listing} className="btn w-full text-xs py-2">
+              {checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}
+              {checking ? "Checking with eBay..." : "Check with eBay (doesn't list)"}
+            </button>
+          )}
         </div>
       </div>
     </main>
