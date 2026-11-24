@@ -21,3 +21,9 @@ Not changed: Settings' own requests (settings, eBay policies, photo storage) are
 - Order of precedence: ✂ / "New item starts here" marks (incl. the camera's Next item) → divider-shot detection (if on in Settings) → time pauses → AI grouping.
 - **Hands off to the server queue**: "Group & analyze in the background" now groups locally first (markers or pauses) and hands each item to the queue as soon as its photos are uploaded; it only falls back to the server's AI grouping when neither works. "Analyze in the background" on the review step is unchanged.
 - Not measured yet on Sel's real batches: check how often a pause fools it (merge/split in review) and tell me the typical pace if the thresholds need moving.
+
+## 3. Swipe-to-approve review queue
+
+On **Background batches** (`/batches`), **Review one by one** opens a full-screen queue: one card per finished draft with its photo, title, price and only the flagged fields (the reasons it isn't Ready). Swipe right (or Enter / →) to approve, left (or ← ) to hold it back, E opens the full editor in a new tab, Esc closes. A missing or flagged price can be typed right on the card; it's saved to the draft before approving. The last card is **List all Ready**.
+
+What gets listed: everything you approved, plus everything the server already marked Ready that you didn't hold back. So "List all Ready" on the page and at the end of the queue agree, with or without a review. Decisions are remembered on this device per batch (they survive a reload). Publishing uses the existing background publish jobs (never twice). Approving a "Needs a look" item with other problems (e.g. a required eBay field) can still fail at publish; it then shows "Listing failed — needs a look" with Retry, as before.

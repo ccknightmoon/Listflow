@@ -3,12 +3,14 @@
 import { Suspense, useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ArrowLeft, Bell, CheckCircle2, ExternalLink, Loader2, RotateCw, Send, XCircle } from "lucide-react";
+import { ArrowLeft, Bell, CheckCircle2, ExternalLink, Layers, Loader2, RotateCw, Send, XCircle } from "lucide-react";
 import { cancelBatch, fetchBatches, kickJobs, publishReady, retryJob, type JobRow } from "@/lib/jobs/client";
 import { isBatchActive, progressLine } from "@/lib/jobs/summary";
 import type { BatchProgress } from "@/lib/jobs/types";
 import { confirmAction } from "@/lib/confirm";
 import { itemsFromJobs, statusOf } from "@/lib/jobs/items";
+import ReviewQueue from "@/components/ReviewQueue";
+import { draftIdsToList, loadDecisions, reviewItemsFromJobs, saveDecisions, type Decisions } from "@/lib/review-queue";
 
 const TONE: Record<string, string> = { busy: "var(--accent)", ok: "var(--success)", warn: "var(--warning, #b7791f)", bad: "var(--danger)", muted: "var(--text-secondary)" };
 
@@ -60,9 +62,33 @@ function BatchesInner() {
 
   const items = itemsFromJobs(jobs);
   const group = jobs.find((j) => j.kind === "group");
-  const readyIds = items
-    .filter((it) => it.analyze.status === "done" && it.analyze.result?.ready && it.analyze.draft_id && !it.publish)
-    .map((it) => it.analyze.draft_id!) as string[];
+  // Review queue: decisions (approve / hold back) per batch, kept on this
+  // device. "List all Ready" = server-Ready items not held back + approved.
+  const reviewItems = reviewItemsFromJobs(jobs);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [decisionsFor, setDecisionsFor] = useState<{ batchId: string | null; d: Decisions }>({ batchId: null, d: {} });
+  if (current && decisionsFor.batchId !== current.batchId) setDecisionsFor({ batchId: current.batchId, d: loadDecisions(current.batchId) });
+  const decisions = decisionsFor.d;
+  const readyIds = draftIdsToList(reviewItems, decisions);
+  const decide = (draftId: string, d: "approve" | "hold" | null) => {
+    if (!current) return;
+    setDecisionsFor((prev) => {
+      const next = { ...prev.d };
+      if (d) next[draftId] = d;
+      else delete next[draftId];
+      saveDecisions(current.batchId, next);
+      return { batchId: current.batchId, d: next };
+    });
+  };
+  const savePrice = async (draftId: string, price: number): Promise<string | null> => {
+    try {
+      const res = await fetch(`/api/drafts/${draftId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suggestedPrice: price }) });
+      if (!res.ok) return ((await res.json().catch(() => ({}))) as { error?: string }).error || "Couldn't save the price.";
+      return null;
+    } catch {
+      return "Couldn't save the price — check your connection.";
+    }
+  };
 
   async function run(label: string, fn: () => Promise<unknown>) {
     setBusy(label);
@@ -136,6 +162,9 @@ function BatchesInner() {
             >
               {busy === "publish" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} List all Ready ({readyIds.length})
             </button>
+            <button type="button" className="btn text-sm" disabled={!reviewItems.length || !!busy} onClick={() => setReviewOpen(true)}>
+              <Layers className="w-4 h-4" /> Review one by one ({reviewItems.length})
+            </button>
             {notifyState === "default" && (
               <button type="button" className="btn text-sm" onClick={async () => {
                   await Notification.requestPermission();
@@ -163,6 +192,23 @@ function BatchesInner() {
         </div>
       )}
 
+      {current && (
+        <ReviewQueue
+          open={reviewOpen}
+          items={reviewItems}
+          decisions={decisions}
+          onDecide={decide}
+          onSavePrice={savePrice}
+          listing={busy === "publish"}
+          onListAll={async (ids) => {
+            if (!(await confirmAction({ title: `List ${ids.length} item${ids.length === 1 ? "" : "s"} on eBay?`, message: "They'll be published in the background, even if you close the app.", confirmLabel: "List them" }))) return;
+            setReviewOpen(false);
+            void run("publish", () => publishReady(current.batchId, ids));
+          }}
+          onClose={() => setReviewOpen(false)}
+        />
+      )}
+
       <ul className="flex flex-col gap-2">
         {items.map((it) => {
           const s = statusOf(it);
@@ -180,6 +226,7 @@ function BatchesInner() {
                 <p className="text-sm font-semibold truncate">{a.result?.title || `Item ${a.item_key}`}</p>
                 <p className="text-xs" style={{ color: TONE[s.tone] }}>
                   {s.label}
+                  {a.draft_id && !it.publish && decisions[a.draft_id] ? <span style={{ color: "var(--text-secondary)" }}> · {decisions[a.draft_id] === "approve" ? "approved" : "held back"}</span> : null}
                   {typeof a.result?.price === "number" ? <span style={{ color: "var(--text-secondary)" }}> · ${a.result.price}</span> : null}
                 </p>
                 {failed?.error && <p className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>{failed.error}</p>}
