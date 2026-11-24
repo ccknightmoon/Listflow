@@ -5,6 +5,9 @@ import { confirmAction } from "@/lib/confirm";
 import { takePendingPhotos } from "@/lib/pending-photos";
 import { groupingNoticeLines } from "@/lib/grouping-repair";
 import { buildGroupsFromDividers, countMarkedItems } from "@/lib/manual-dividers";
+import { readCaptureTimeMs } from "@/lib/exif-time";
+import { planTimeGroups, resolveTimeGroups, sameItemFromAiGroups } from "@/lib/time-grouping";
+import BatchCamera, { type CapturedShot } from "@/components/BatchCamera";
 import PhotoDropZone from "@/components/PhotoDropZone";
 import PhotoViewer from "@/components/PhotoViewer";
 import { getPublishQueue } from "@/lib/publish-queue";
@@ -20,6 +23,7 @@ import Link from "next/link";
 import {
   ArrowLeft,
   CloudUpload,
+  Camera,
   Loader2,
   Sparkles,
   Plus,
@@ -61,6 +65,20 @@ interface SlotImage {
   previewUrl: string;
   /** Storage URL once the background upload finishes (also kept across a recovered session). */
   url?: string;
+  /** When it was taken: EXIF camera time (ms, camera clock) or the in-app camera's clock. */
+  takenAt?: number | null;
+  /** The file's own modified time -- only used when no photo in the batch has a camera time. */
+  fileTime?: number | null;
+}
+
+// Times to group by: camera times when every photo has one; file times when
+// none do (Android often keeps the shot time there); mixed -> none (the two
+// clocks can differ by the time-zone offset).
+function groupingTimes(photos: SlotImage[]): Array<number | null> | null {
+  if (photos.length === 0) return null;
+  if (photos.every((p) => typeof p.takenAt === "number")) return photos.map((p) => p.takenAt as number);
+  if (photos.every((p) => typeof p.takenAt !== "number" && typeof p.fileTime === "number")) return photos.map((p) => p.fileTime as number);
+  return null;
 }
 
 // batch-upload additionally tracks a live pricing suggestion and a
@@ -351,6 +369,16 @@ export default function BatchUploadPage() {
   const [bulkStoreCategoryId, setBulkStoreCategoryId] = useState("");
   const [bulkOpen, setBulkOpen] = useState(false); // bulk-edit panel accordion — starts collapsed per mock, opened manually
   const fileInput = useRef<HTMLInputElement | null>(null);
+  // In-app batch camera (src/components/BatchCamera.tsx).
+  const [cameraOpen, setCameraOpen] = useState(false);
+  // Index the next added photo will get -- kept in a ref so rapid shots
+  // between renders still get distinct indices.
+  const photoCountRef = useRef(0);
+  useEffect(() => {
+    // Photos are only ever appended (or the batch cleared / restored), so
+    // never move the counter backwards past shots still being added.
+    photoCountRef.current = photos.length === 0 ? 0 : Math.max(photoCountRef.current, photos.length);
+  }, [photos.length]);
   // Indices the auto-save effect (below handleSaveDraft) has already
   // persisted, so it never re-saves an item just because `results`
   // changed again for an unrelated reason (a pricing lookup landing).
@@ -427,6 +455,7 @@ export default function BatchUploadPage() {
         setStep(restoredStep);
         const restoredPhotos = snapshot.photos as SlotImage[];
         setPhotos(restoredPhotos);
+        photoCountRef.current = restoredPhotos.length;
         restoredPhotos.forEach((p, i) => {
           if (p.url) uploadedPhotoUrls.current[i] = p.url;
         });
@@ -580,8 +609,9 @@ export default function BatchUploadPage() {
     const t = timingsRef.current;
     const out = await mapLimit(fileArray, COMPRESS_CONCURRENCY, (file) =>
       timed(t, "compress", async () => {
-        const { dataUrl, mediaType } = await resizeImage(file);
-        return { data: dataUrl.split(",")[1], mediaType, previewUrl: dataUrl };
+        // EXIF must be read from the original: the canvas resize drops it.
+        const [{ dataUrl, mediaType }, takenAt] = await Promise.all([resizeImage(file), readCaptureTimeMs(file)]);
+        return { data: dataUrl.split(",")[1], mediaType, previewUrl: dataUrl, takenAt, fileTime: file.lastModified || null };
       })
     );
     t.photos += out.length;
@@ -643,6 +673,45 @@ export default function BatchUploadPage() {
     return Promise.race([pending, new Promise<undefined>((r) => setTimeout(() => r(undefined), maxWaitMs))]);
   }
 
+  // One photo from the in-app camera: appended (never replaces the batch),
+  // uploaded right away, and the first photo of each item is marked
+  // "New item starts here" -- so grouping is exact and needs no AI.
+  function addCameraShot(shot: CapturedShot) {
+    if (photoCountRef.current >= MAX_PHOTOS) return;
+    const idx = photoCountRef.current++;
+    if (idx === 0) {
+      timingsRef.current = newTimings();
+      setUploadProgress({ done: 0, failed: 0, total: 0 });
+    }
+    const photo: SlotImage = {
+      data: shot.dataUrl.split(",")[1],
+      mediaType: "image/jpeg",
+      previewUrl: shot.dataUrl,
+      takenAt: shot.takenAt,
+      fileTime: shot.takenAt,
+    };
+    setPhotos((prev) => [...prev, photo]);
+    if (shot.newItem) setNewItemStarts((prev) => new Set(prev).add(idx));
+    startBackgroundUploads([{ idx, photo }]);
+  }
+
+  // Camera fallback (the phone's own camera, one shot at a time).
+  async function addCameraFiles(files: File[], newItem: boolean) {
+    const room = MAX_PHOTOS - photoCountRef.current;
+    const take = files.slice(0, Math.max(room, 0));
+    if (take.length === 0) return;
+    const start = photoCountRef.current;
+    photoCountRef.current += take.length;
+    try {
+      const resized = await compressFiles(take);
+      setPhotos((prev) => [...prev, ...resized]);
+      if (newItem) setNewItemStarts((prev) => new Set(prev).add(start));
+      startBackgroundUploads(resized.map((photo, k) => ({ idx: start + k, photo })));
+    } catch (err) {
+      setError(`Could not process that photo: ${(err as Error).message}`);
+    }
+  }
+
   async function handleFilesSelected(files: FileList | File[] | null) {
     if (!files || files.length === 0) return;
     setError(null);
@@ -669,6 +738,7 @@ export default function BatchUploadPage() {
         setUploadProgress({ done: 0, failed: 0, total: 0 });
       }
       const startIndex = photos.length;
+      photoCountRef.current = Math.max(photoCountRef.current, startIndex + fileArray.length);
       const resized = await compressFiles(fileArray);
       setPhotos((prev) => [...prev, ...resized]);
       startBackgroundUploads(resized.map((photo, k) => ({ idx: startIndex + k, photo })));
@@ -710,6 +780,7 @@ export default function BatchUploadPage() {
 
     try {
       const startIndex = photos.length;
+      photoCountRef.current = Math.max(photoCountRef.current, startIndex + fileArray.length);
       const resized = await compressFiles(fileArray);
       const newIndices = resized.map((_, k) => startIndex + k);
       setPhotos((prev) => [...prev, ...resized]);
@@ -837,6 +908,52 @@ export default function BatchUploadPage() {
     if (successCount > 0) setTimeout(() => router.push("/drafts"), 1200);
   }
 
+  // Grouping by the pauses between shots (no AI for clear pauses). Unclear
+  // pauses get one small AI check each (the photos either side), run in
+  // parallel. Returns null when times can't be used -> caller falls back.
+  async function groupByTime(thumbFor: (idx: number) => Promise<Thumbnail>): Promise<{ groups: number[][]; aiChecks: number } | null> {
+    const times = groupingTimes(photos);
+    if (!times) return null;
+    const plan = planTimeGroups(times);
+    if (!plan.usable) return null;
+    const answers: Record<number, boolean> = {};
+    let aiChecks = 0;
+    if (plan.unclear.length > 0) {
+      setGroupingProgress(`Checking ${plan.unclear.length} unclear pause${plan.unclear.length === 1 ? "" : "s"} between photos…`);
+      await mapLimit(plan.unclear, 3, async (gap) => {
+        try {
+          const images = await Promise.all([...gap.before, ...gap.after].map(thumbFor));
+          const data = await apiFetch<{ groups?: number[][] }>("/api/group-photos", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ images }),
+          });
+          aiChecks++;
+          if (data.groups) answers[gap.k] = sameItemFromAiGroups(data.groups, gap.before.length);
+        } catch {
+          // Unanswered -> treated as a new item (easy to merge in review).
+        }
+      });
+    }
+    return { groups: resolveTimeGroups(plan, answers), aiChecks };
+  }
+
+  async function tryTimeGrouping(thumbFor: (idx: number) => Promise<Thumbnail>): Promise<boolean> {
+    const byTime = await groupByTime(thumbFor);
+    if (!byTime) return false;
+    setGroups(byTime.groups);
+    setGroupingNotices([
+      `Grouped by when each photo was taken${byTime.aiChecks ? ` (${byTime.aiChecks} unclear pause${byTime.aiChecks === 1 ? "" : "s"} checked with AI)` : " (no AI needed)"}. Check the items below — merge or split if a pause fooled it.`,
+    ]);
+    setStep("review");
+    return true;
+  }
+
+  async function makeThumb(idx: number): Promise<Thumbnail> {
+    const { dataUrl, mediaType } = await resizeFromDataUrl(photos[idx].previewUrl, THUMB_DIMENSION, THUMB_QUALITY);
+    return { data: dataUrl.split(",")[1], mediaType };
+  }
+
   async function handleGroupPhotos() {
     setError(null);
 
@@ -860,6 +977,11 @@ export default function BatchUploadPage() {
     const groupingStart = Date.now();
 
     try {
+      // Camera-roll times: group by the pauses between shots -- free for
+      // clear pauses, AI only for the unclear ones (thumbnails made only
+      // for those). Divider-shot detection, when on, goes first (below).
+      if (!autoDetectDividers && (await tryTimeGrouping(makeThumb))) return;
+
       const thumbnails: Thumbnail[] = await mapLimit(photos, COMPRESS_CONCURRENCY,
         async (p) => {
           const { dataUrl, mediaType } = await resizeFromDataUrl(
@@ -922,6 +1044,9 @@ export default function BatchUploadPage() {
         // through to AI-similarity grouping below instead of leaving the
         // seller with nothing.
       }
+
+      // (Divider shots on but none found:) group by the pauses between shots.
+      if (autoDetectDividers && (await tryTimeGrouping(async (idx) => thumbnails[idx]))) return;
 
       const finalGroups: number[][] = [];
       let pending: number[] = [];
@@ -1319,10 +1444,19 @@ export default function BatchUploadPage() {
     setError(null);
     const batchId = crypto.randomUUID();
     try {
-      if (anyManualMarks) {
-        const g = buildGroupsFromDividers(manualDividers, newItemStarts, photos.length);
+      // Groups known without the server's AI: ✂ / "new item" markers (incl.
+      // the in-app camera's "Next item"), else the pauses between shots.
+      let known: number[][] | null = null;
+      if (anyManualMarks) known = buildGroupsFromDividers(manualDividers, newItemStarts, photos.length);
+      else {
+        setHandoff("Grouping by when each photo was taken…");
+        const byTime = await groupByTime(makeThumb).catch(() => null);
+        if (byTime) known = byTime.groups;
+      }
+      if (known) {
+        const g = known;
         setGroups(g);
-        // Reuse the per-item hand-off with the marker-based groups.
+        // Reuse the per-item hand-off with the known groups.
         const items = g.map((grp, i) => ({ i, grp })).filter(({ grp }) => grp.length > 0);
         let up = 0;
         const total = items.reduce((n, { grp }) => n + grp.length, 0);
@@ -2281,8 +2415,8 @@ export default function BatchUploadPage() {
                   },
                   {
                     icon: Sparkles,
-                    label: "AI groups your photos into items",
-                    desc: "Each item's photos get bundled together automatically, then drafted with a title, price, and details.",
+                    label: "Photos are grouped into items",
+                    desc: "By the pauses between your shots (camera-roll photos), by Next item (batch camera), or by AI when neither works. Then each item is drafted with a title, price, and details.",
                   },
                   {
                     icon: ListChecks,
@@ -2308,6 +2442,32 @@ export default function BatchUploadPage() {
               </div>
             </div>
           )}
+
+          <button
+            type="button"
+            onClick={() => setCameraOpen(true)}
+            className="card w-full flex items-center gap-3 p-4 mb-3 text-left"
+            disabled={photos.length >= MAX_PHOTOS || !!handoff}
+          >
+            <span className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: "color-mix(in srgb, var(--accent) 14%, var(--bg-surface))" }}>
+              <Camera className="w-5 h-5" style={{ color: "var(--accent)" }} />
+            </span>
+            <span className="flex-1">
+              <span className="block text-sm font-semibold">Shoot with the batch camera</span>
+              <span className="block text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>
+                Shoot an item, tap <b>Next item</b>, shoot the next. Items are grouped as you go — no AI grouping, and photos upload while you shoot.
+              </span>
+            </span>
+          </button>
+          <BatchCamera
+            open={cameraOpen}
+            maxDimension={MAX_DIMENSION}
+            existingCount={photos.length}
+            maxPhotos={MAX_PHOTOS}
+            onShot={addCameraShot}
+            onFiles={(files, newItem) => void addCameraFiles(files, newItem)}
+            onClose={() => setCameraOpen(false)}
+          />
 
           <PhotoDropZone onFiles={(files) => void handleFilesSelected(files)} label="Drop photos to add them to this batch">
           <div
