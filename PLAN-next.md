@@ -66,3 +66,11 @@ New shared checks in `src/lib/input-validation.ts`, applied where the gaps were:
 - **AI routes** (`analyze-batch`, `analyze-item`, `group-photos`, `detect-item-dividers`): image lists checked for count, shape, type and size before any AI usage is counted.
 - **Pricing** (`/api/pricing/suggest`): bad JSON now returns 400 instead of crashing with 500.
 Already fine (checked): eBay price/offer/message/relist/delist routes, settings, sales costs, the queue routes.
+
+## 5. Pricing suggestions from comparable active listings
+
+In the draft editor, under List price: **Compare with active listings**. It searches eBay (Browse API: text search, plus a search by the first photo) for similar fixed-price items for sale now, then weights each one by how alike it is: same brand, same size (handles M/Medium, 32x30/W32 L30, etc.), new vs used, and title overlap. Free-shipping prices have our shipping estimate taken off (their price includes it). Extreme prices (lots, typos) are dropped.
+
+It shows a **range** (weighted 25th–75th percentile), a **typical** price (weighted median), a **confidence** (high / medium / low, from how many close matches there are and how spread out they are), and the 5 closest listings with links. "Use $X" only fills the price box; you still save. Nothing changes prices automatically, and the existing pricing estimate is unchanged.
+
+Honest limit, also shown on screen: these are **asking prices of items still for sale, not sold prices**. eBay only gives sold prices to apps approved for its Marketplace Insights API, which Listflow doesn't have, and things often sell for less than they're listed at. Uses the screen's current title/brand/size/condition (even unsaved). Rate-limited like the other pricing call.

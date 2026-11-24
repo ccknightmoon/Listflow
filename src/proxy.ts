@@ -88,6 +88,7 @@ const AI_RATE_LIMITED_PATHS = [
   "/api/group-photos",
   "/api/ai/suggest-specifics",
   "/api/pricing/suggest",
+  "/api/pricing/comps",
 ];
 // Accept either Upstash's own variable names or the KV_* names Vercel's
 // Upstash (Marketplace) integration injects when connected from Storage.

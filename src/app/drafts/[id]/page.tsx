@@ -3,6 +3,7 @@
 import CurrencyInput from "@/components/CurrencyInput";
 import Sheet from "@/components/Sheet";
 import PhotoDropZone from "@/components/PhotoDropZone";
+import CompsPanel from "@/components/CompsPanel";
 import SpecificsEditor from "@/components/SpecificsEditor";
 import { sanitizeStoredSpecifics, type StoredSpecificsShape } from "@/lib/item-specifics";
 import { useIsDesktop } from "@/lib/use-is-desktop";
@@ -1255,6 +1256,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             <CurrencyInput value={price} onChange={setPrice} placeholder="0.00" aria-label="List price" />
           </div>
         </div>
+        <CompsPanel draftId={id} title={title} brand={brand} size={size} condition={condition} onUsePrice={(p) => setPrice(String(p))} />
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Cost (what you paid, optional)</label>
           <CurrencyInput value={cost} onChange={setCost} placeholder="0.00" aria-label="What you paid" />
