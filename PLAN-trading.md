@@ -46,3 +46,11 @@ Why: listings made with eBay's Inventory API "cannot be edited through Seller Hu
 - **End listing** already uses Trading `EndItem`, which works for both kinds.
 
 **Legacy listings found:** 4 drafts already have eBay item numbers (created Jun 20 – Sep 11, 2026, no publish date recorded): items 168476823728, 168477212439, 168526572701, 168679902532. If they were listed through Listflow back then, they're Inventory-API listings. Everything above falls back correctly for them.
+
+## Step 7: tests
+
+Mocked Trading responses cover: VerifyAdd success / failure (nothing listed), verify-only (no Add), Add success, warnings, lost-response retry and duplicate UUID (error 488 → existing item number saved, never listed twice), the package / condition / category retries, Revise in place, the Inventory-API refusal (21919474) and its price fallback, GetItem parsing + fingerprint, import into a linked draft, GetSellerEvents parsing, sync decisions (in sync / eBay-only change / conflict / first sync / before migration 034), scheduled listings, and the `/api/ebay/list` route (Trading dispatch, rollback flag, update in place, conflict refusal and forced overwrite). The existing route, regression and queue end-to-end tests run unchanged (the queue still calls the same `publishDraft()`).
+
+## Not verified live
+
+No real eBay call was made from this session (Sel's eBay token can only be decrypted on Vercel). First real check: the **Check with eBay (doesn't list)** button runs VerifyAddFixedPriceItem on a real draft without listing it.
