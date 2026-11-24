@@ -136,3 +136,8 @@ export function draftFieldsFromLiveItem(i: LiveItem) {
     shipping_mode: "calculated",
   };
 }
+
+/** Ended on eBay (scheduled listings that haven't started count as live). */
+export function isEndedStatus(status: string | null | undefined): boolean {
+  return status === "Completed" || status === "Ended";
+}

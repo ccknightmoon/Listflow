@@ -15,7 +15,7 @@ import { formatMoney } from "@/lib/format";
 import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight, GripVertical, ShieldCheck } from "lucide-react";
+import { ArrowLeft, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight, GripVertical, ShieldCheck, CalendarClock } from "lucide-react";
 import { estimateShipping, type ShippingMode } from "@/lib/shipping";
 import { apiFetch } from "@/lib/api";
 import { uploadThumbnail } from "@/lib/storage";
@@ -497,6 +497,39 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       setEbaySync(r.status === "conflict" ? "conflict" : r.status === "ended" ? "ended" : null);
     } catch {
       // Offline / eBay hiccup: editing still works; the update re-checks.
+    }
+  }
+
+  // "Finish on eBay": a real eBay listing scheduled 21 days out, so it shows
+  // in the eBay app under Selling → Scheduled, where it can be finished and
+  // started with "List it now". Fee wording per eBay's US fees page (Nov 2026).
+  async function handleFinishOnEbay() {
+    const ok = await confirmAction({
+      title: "Finish this on eBay?",
+      message: "Listflow lists it on eBay as a scheduled listing that goes live in 3 weeks. It appears in the eBay app under Selling → Scheduled: edit it there and tap \"List it now\" when ready. eBay's US fees page lists scheduling as free; the usual insertion fee rules apply as for any listing (free within your monthly free listings).",
+      confirmLabel: "Schedule on eBay",
+    });
+    if (!ok) return;
+    setListing(true);
+    setError(null);
+    try {
+      await saveDraft();
+      const data = await apiFetch<{ success?: boolean; error?: string; listingId?: string; url?: string; scheduledFor?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: id, customSku: customSku || undefined, scheduleDays: 21 }),
+      });
+      if (data.connect) { setNeedsConnect(true); throw new Error(data.error ?? "Connect eBay first"); }
+      if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error ?? "Reconnect eBay"); }
+      if (!data.success || !data.listingId) throw new Error(data.error ?? "eBay didn't schedule it");
+      await saveDraft({ ebayListingId: String(data.listingId) });
+      setListingUrl(data.url ?? null);
+      setCheckResult({ ok: true, text: `Scheduled on eBay${data.scheduledFor ? ` for ${new Date(data.scheduledFor).toLocaleDateString([], { month: "short", day: "numeric" })}` : ""}. Finish it in the eBay app (Selling → Scheduled) or here.` });
+      window.dispatchEvent(new Event("listflow:counts-changed"));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setListing(false);
     }
   }
 
@@ -1621,6 +1654,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               {listing ? (listingUrl ? "Updating..." : "Listing...") : listingUrl ? "Update on eBay" : "List on eBay"}
             </button>
           </div>
+          {!listingUrl && (
+            <button type="button" onClick={() => void handleFinishOnEbay()} disabled={checking || listing} className="btn w-full text-xs py-2">
+              <CalendarClock className="w-3.5 h-3.5" /> Finish on eBay (scheduled, 3 weeks out)
+            </button>
+          )}
           {!listingUrl && (
             <button type="button" onClick={() => void handleCheckWithEbay()} disabled={checking || listing} className="btn w-full text-xs py-2">
               {checking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ShieldCheck className="w-3.5 h-3.5" />}

@@ -47,7 +47,7 @@ const ENTRIES_PER_PAGE = 200;
 // safety backstop against a runaway loop — 50 * 200 = 10,000 listings.
 const MAX_PAGES = 50;
 
-export type ListType = "ActiveList" | "UnsoldList";
+export type ListType = "ActiveList" | "UnsoldList" | "ScheduledList";
 
 export async function fetchListPage(listType: ListType, page: number) {
   return tradingRequest(

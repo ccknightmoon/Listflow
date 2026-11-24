@@ -11,7 +11,7 @@
 // without it, sync reports "untracked" and changes nothing.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { tradingRequest } from "@/lib/ebay-inventory";
-import { draftFieldsFromLiveItem, getLiveItem, liveItemHash, type LiveItem } from "@/lib/ebay-item";
+import { draftFieldsFromLiveItem, getLiveItem, isEndedStatus, liveItemHash, type LiveItem } from "@/lib/ebay-item";
 import { markSynced } from "@/lib/ebay-item-import";
 import { TRADING_COMPAT_LEVEL } from "@/lib/trading-listing";
 
@@ -25,10 +25,10 @@ export interface SyncDraft {
   ebay_synced_at?: string | null;
 }
 
-/** Saved after the last sync? (2 s slack: marking the sync itself bumps updated_at.) */
+/** Saved after the last sync? (5 s slack: marking the sync itself bumps updated_at.) */
 export function hasLocalEdits(d: SyncDraft): boolean {
   if (!d.ebay_synced_at || !d.updated_at) return false;
-  return Date.parse(d.updated_at) - Date.parse(d.ebay_synced_at) > 2000;
+  return Date.parse(d.updated_at) - Date.parse(d.ebay_synced_at) > 5000;
 }
 
 export function decideSync(d: SyncDraft, liveHash: string, trackingAvailable: boolean): Exclude<SyncStatus, "not-listed" | "ended" | "error"> {
@@ -77,7 +77,7 @@ export async function syncDraftWithEbay(
   if ("error" in live) return { status: "error", error: live.error };
   const hash = liveItemHash(live);
   const summary = { title: live.title, price: live.price, quantity: live.quantity, status: live.status };
-  if (live.status && live.status !== "Active") return { status: "ended", hash, live: summary };
+  if (isEndedStatus(live.status)) return { status: "ended", hash, live: summary };
   if (opts.useEbay) {
     await applyEbayVersion(db, userId, draftId, live);
     return { status: "updated", hash, live: summary };

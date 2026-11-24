@@ -23,7 +23,7 @@ import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
 import { classifyGarment, categoryFits } from "@/lib/garment";
 import { publishApi } from "@/lib/trading-listing";
 import { publishDraftTrading, reviseDraftListing, type DraftRow } from "@/lib/trading-publish";
-import { getLiveItem, liveItemHash } from "@/lib/ebay-item";
+import { getLiveItem, isEndedStatus, liveItemHash } from "@/lib/ebay-item";
 import { markSynced } from "@/lib/ebay-item-import";
 import { chooseCategory } from "@/lib/ebay-category";
 
@@ -310,7 +310,7 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
         // tells an Inventory-API listing apart before anything is sent.
         const liveRes = await getLiveItem(String(draft.ebay_listing_id)).catch(() => null);
         const live = liveRes && !("error" in liveRes) ? liveRes : null;
-        if (live && live.status && live.status !== "Active") {
+        if (live && isEndedStatus(live.status)) {
           return NextResponse.json({ error: `This listing is no longer active on eBay (${live.status}). Use Relist on the Listings page.`, listingEnded: true }, { status: 400 });
         }
         // Never overwrite edits made on eBay (e.g. in the eBay app) since

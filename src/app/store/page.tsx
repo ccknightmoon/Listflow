@@ -438,6 +438,8 @@ export default function StorePage() {
           {!loading && !error && (
             <p className="text-xs text-[var(--text-secondary)]">
               {tab === "active" ? "All active eBay listings" : "Recently ended, unsold listings"}
+              {" · "}
+              <Link href="/store/scheduled" className="underline" style={{ color: "var(--accent)" }}>Scheduled</Link>
             </p>
           )}
         </div>

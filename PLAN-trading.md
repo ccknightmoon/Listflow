@@ -30,3 +30,10 @@ Why: listings made with eBay's Inventory API "cannot be edited through Seller Hu
 - **Background:** on app open (at most every 10 minutes) and in the daily job, `GetSellerEvents` lists what changed on eBay (last 48 h max), and linked drafts without local changes are refreshed (up to 15 per app open, 25 per day).
 - Only eBay-owned fields are copied from eBay (title, price, condition, note, photos, description, specifics, store category, brand/size/colour); SKU, cost and Listflow notes are never touched.
 - **Needs migration 034** for the saved fingerprints and the background sweep. Without it, the conflict check still works within an editing session, and nothing else changes.
+
+## Step 5: Finish on eBay (scheduled listings)
+
+- Draft editor → **Finish on eBay (scheduled, 3 weeks out)**: lists the draft through the same verify + add path with `ScheduleTime` 21 days ahead. It's a real eBay listing that shows in the eBay app under **Selling → Scheduled**, where it can be edited and started with "List it now". Listflow keeps the item number, so it can also be finished here ("Update on eBay" revises it).
+- **Fee (checked Nov 24, 2026):** eBay's US "Selling fees" help page lists *Scheduled Listing* as free (eBay.ca and eBay.co.uk say the same). The usual insertion-fee rules apply as for any listing (free within the monthly free-listing allowance). The confirm dialog says this before anything is sent.
+- **Listings → Scheduled** (`/store/scheduled`): every scheduled listing on eBay (`GetMyeBaySelling` ScheduledList), including ones scheduled in the eBay app, with **Finish** (opens it in Listflow's editor) and View on eBay.
+- The schedule date is saved on the draft with migration 034 (`ebay_scheduled_for`); not needed for any of this to work.
