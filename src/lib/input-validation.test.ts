@@ -34,6 +34,7 @@ describe("uuidList / isPhotoUrl", () => {
     expect(uuidList([U])).toEqual([U]);
     expect(uuidList(["1"])).toBeNull();
     expect(uuidList([])).toBeNull();
-    expect(isPhotoUrl("http://insecure.example/a.jpg")).toBe(false);
+    expect(isPhotoUrl("http://i.ebayimg.com/a.jpg")).toBe(true);
+    expect(isPhotoUrl("data:image/png;base64,AAAA")).toBe(false);
   });
 });

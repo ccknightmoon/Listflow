@@ -26,12 +26,14 @@ export function isMoney(v: unknown, max = 100_000): boolean {
   return v === null || (typeof v === "number" && Number.isFinite(v) && v >= 0 && v <= max);
 }
 
-/** A photo we can store on a draft: an https URL or a private draft-photo link. */
+/** A photo we can store on a draft: a web URL or a private draft-photo link (never data:/javascript:). */
 export function isPhotoUrl(v: unknown): v is string {
   if (typeof v !== "string" || v.length > 2048) return false;
   if (isPrivatePhotoRef(v)) return true;
   try {
-    return new URL(v).protocol === "https:";
+    // http allowed too: older eBay-hosted picture links can be plain http.
+    const p = new URL(v).protocol;
+    return p === "https:" || p === "http:";
   } catch {
     return false;
   }
@@ -59,11 +61,11 @@ export function draftFieldsError(body: Record<string, unknown>): string | null {
   }
   if (body.photoUrls !== undefined && body.photoUrls !== null) {
     if (!Array.isArray(body.photoUrls) || body.photoUrls.length > 24 || !body.photoUrls.every(isPhotoUrl)) {
-      return "photoUrls must be up to 24 https photo links.";
+      return "photoUrls must be up to 24 photo links.";
     }
   }
   if (body.thumbnailUrl !== undefined && body.thumbnailUrl !== null && !isPhotoUrl(body.thumbnailUrl)) {
-    return "thumbnailUrl must be an https photo link, or null.";
+    return "thumbnailUrl must be a photo link, or null.";
   }
   if (body.itemSpecifics !== undefined && body.itemSpecifics !== null && JSON.stringify(body.itemSpecifics).length > 50_000) {
     return "itemSpecifics is too large.";

@@ -61,7 +61,7 @@ No new cron (the free plan's two are used): the existing daily snapshot cron run
 ### 4e. Server-side input validation sweep
 
 New shared checks in `src/lib/input-validation.ts`, applied where the gaps were:
-- **Drafts create/update** (`POST /api/drafts`, `PATCH /api/drafts/[id]`; also the queue's draft writer through `draftBodyError`): text fields must be text (no objects) with generous length caps; prices must be numbers 0–100,000; `ebayListingId` must be an eBay item number (before, any string could be saved, which could fool the "already listed" guard); photos must be up to 24 https links (or private-photo links); item specifics capped in size. Bad draft IDs return 404 before touching the database.
+- **Drafts create/update** (`POST /api/drafts`, `PATCH /api/drafts/[id]`; also the queue's draft writer through `draftBodyError`): text fields must be text (no objects) with generous length caps; prices must be numbers 0–100,000; `ebayListingId` must be an eBay item number (before, any string could be saved, which could fool the "already listed" guard); photos must be up to 24 web links (or private-photo links; never data: or javascript:); item specifics capped in size. Bad draft IDs return 404 before touching the database.
 - **Bulk delete** (`DELETE /api/drafts`): IDs must be 1–500 UUIDs.
 - **AI routes** (`analyze-batch`, `analyze-item`, `group-photos`, `detect-item-dividers`): image lists checked for count, shape, type and size before any AI usage is counted.
 - **Pricing** (`/api/pricing/suggest`): bad JSON now returns 400 instead of crashing with 500.
