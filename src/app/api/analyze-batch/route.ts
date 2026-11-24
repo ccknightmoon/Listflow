@@ -5,6 +5,7 @@ import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { enrichVisionResult } from "@/lib/listing-enrich";
 import { analyzeGroup, type InImage } from "@/lib/analyze-core";
+import { resolveImagesForOpenAI } from "@/lib/private-photos-server";
 
 export const runtime = "nodejs";
 // Vision + category specifics fill can take a while on big photo sets.
@@ -66,7 +67,8 @@ export async function POST(req: NextRequest) {
     }
     const timings: Record<string, number> = {};
     try {
-      const result = await analyzeGroup(apiKey, groups[i].images ?? [], timings);
+      const images = await resolveImagesForOpenAI(groups[i].images ?? [], auth.user.id);
+      const result = await analyzeGroup(apiKey, images, timings);
       const t = Date.now();
       const enriched = await enrichVisionResult(apiKey, result, runWithEbay);
       timings.enrichMs = Date.now() - t;

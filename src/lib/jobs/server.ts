@@ -1,4 +1,5 @@
 // Server helpers shared by the /api/jobs routes. Server only.
+import { parsePrivatePhotoRef } from "@/lib/private-photos";
 import { after } from "next/server";
 import { SupabaseJobStore, isQueueMissing, serviceDb } from "./supabase-store";
 import { triggerWorker } from "./trigger";
@@ -33,6 +34,8 @@ export function kickWorkerAfterResponse(origin: string) {
 /** Our own uploaded photo for THIS user (photos/<userId>/...). */
 export function isUsersPhotoUrl(u: unknown, userId: string): u is string {
   if (typeof u !== "string") return false;
+  const priv = parsePrivatePhotoRef(u);
+  if (priv) return priv.userId === userId.toLowerCase();
   try {
     const url = new URL(u);
     const base = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://invalid.local");

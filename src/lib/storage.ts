@@ -1,4 +1,5 @@
 import { createBrowserClient } from "@supabase/ssr";
+import { privatePhotosEnabled, privatePhotoRef, PRIVATE_BUCKET } from "@/lib/private-photos";
 
 // Uses the same cookie-based browser client as login/BottomNav (not the bare
 // anon singleton from "./supabase") so the upload actually carries the
@@ -51,6 +52,16 @@ export async function uploadThumbnail(dataUrl: string): Promise<string> {
   // isolation migration.
   const userId = await getCachedUserId();
   const filename = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.jpg`;
+
+  // Private draft photos (off unless NEXT_PUBLIC_PRIVATE_DRAFT_PHOTOS=1 and
+  // migration 033 is applied): see src/lib/private-photos.ts.
+  if (privatePhotosEnabled()) {
+    const { error: pErr } = await supabase.storage
+      .from(PRIVATE_BUCKET)
+      .upload(filename, blob, { contentType: "image/jpeg", upsert: false });
+    if (pErr) throw new Error(pErr.message);
+    return privatePhotoRef(filename);
+  }
 
   const { error } = await supabase.storage
     .from("photos")

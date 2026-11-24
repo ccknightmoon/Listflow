@@ -2,6 +2,8 @@
 // seller) and the background queue worker (Volume Phase 3), which runs it
 // with the service-role client -- so EVERY drafts query below is scoped to
 // ctx.userId explicitly, not left to RLS.
+import { isPrivatePhotoRef } from "@/lib/private-photos";
+import { externalPhotoUrls, EBAY_URL_TTL_S } from "@/lib/private-photos-server";
 import { invalidateListingsAround } from "@/lib/ebay-listings";
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -138,6 +140,16 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
       .single();
 
     if (dbError || !draft) return NextResponse.json({ error: "Draft not found" }, { status: 404 });
+
+    // Private draft photos (/api/photos/...): eBay needs readable links, so
+    // swap them for signed URLs here (eBay copies the pictures at publish).
+    // Only this in-memory copy changes; the draft row keeps its own links.
+    if ([...(draft.photo_urls ?? []), draft.thumbnail_url].some((u) => isPrivatePhotoRef(u))) {
+      draft.photo_urls = await externalPhotoUrls(draft.photo_urls ?? [], EBAY_URL_TTL_S, userId);
+      if (isPrivatePhotoRef(draft.thumbnail_url)) {
+        draft.thumbnail_url = (await externalPhotoUrls([draft.thumbnail_url], EBAY_URL_TTL_S, userId))[0] ?? null;
+      }
+    }
 
     // Idempotent-publish guard. Without this, a retry that re-submits an
     // item whose FIRST call actually already succeeded on eBay's side (the

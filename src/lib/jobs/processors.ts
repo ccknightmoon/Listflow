@@ -1,6 +1,8 @@
 // What each background job actually does. Server only. Every external
 // dependency is injectable so the whole pipeline can be tested end to end
 // with mocked AI / eBay / database.
+import { isPrivatePhotoRef } from "@/lib/private-photos";
+import { externalPhotoUrls, OPENAI_URL_TTL_S, resolveImagesForOpenAI } from "@/lib/private-photos-server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AiResult } from "@/lib/ai-result";
 import { currentConfidence } from "@/lib/ai-result";
@@ -33,8 +35,10 @@ export interface ProcessorDeps {
   drafts: DraftWriter;
   checkAiUsage(userId: string, amount: number): Promise<UsageCheckResult>;
   analyze: typeof analyzeAndEnrich;
+  /** Private draft photo links -> signed URLs for OpenAI (identity when there are none). */
+  resolveImages: (images: { url?: string }[], userId: string) => Promise<{ url?: string }[]>;
   price(input: PriceInput): Promise<PriceSuggestion>;
-  fetchImageBase64(url: string): Promise<string | undefined>;
+  fetchImageBase64(url: string, userId?: string): Promise<string | undefined>;
   ebayConnection(userId: string): Promise<EbayConnectionContext | null>;
   publish(ctx: Omit<PublishContext, "supabase">, draftId: string): Promise<{ status: number; json: Record<string, unknown> }>;
   groupChunk(apiKey: string, parts: GroupImagePart[]): Promise<GroupChunkResult>;
@@ -45,7 +49,7 @@ const isRate = (e: unknown) => !!(e as { isRateLimit?: boolean })?.isRateLimit |
 
 export function photoUrlsOf(input: Record<string, unknown>): string[] {
   const raw = Array.isArray(input.photoUrls) ? input.photoUrls : [];
-  return raw.filter((u): u is string => typeof u === "string" && isOwnPhotoUrl(u));
+  return raw.filter((u): u is string => typeof u === "string" && (isOwnPhotoUrl(u) || isPrivatePhotoRef(u)));
 }
 
 // ---------- analyze: photos -> AI (Pass A/B, category, specifics, title) -> price -> draft ----------
@@ -66,7 +70,8 @@ export async function processAnalyze(job: Job, ctx: ProcessorContext, deps: Proc
     const conn = await deps.ebayConnection(userId).catch(() => null);
     const runWithEbay = conn ? <T,>(fn: () => Promise<T>) => ebayContext.run(conn, fn) : null;
     try {
-      const { enriched, timings } = await deps.analyze(deps.apiKey, urls.slice(0, MAX_ANALYSIS_PHOTOS).map((url) => ({ url })), runWithEbay);
+      const images = await deps.resolveImages(urls.slice(0, MAX_ANALYSIS_PHOTOS).map((url) => ({ url })), userId);
+      const { enriched, timings } = await deps.analyze(deps.apiKey, images, runWithEbay);
       r.analysis = enriched;
       r.timings = timings;
     } catch (e) {
@@ -79,7 +84,7 @@ export async function processAnalyze(job: Job, ctx: ProcessorContext, deps: Proc
 
   if (r.pricing === undefined) {
     try {
-      const image = await deps.fetchImageBase64(urls[0]).catch(() => undefined);
+      const image = await deps.fetchImageBase64(urls[0], userId).catch(() => undefined);
       r.pricing = await deps.price({
         title: analysis.suggestedTitle,
         brand: analysis.brand,
@@ -152,7 +157,8 @@ export async function processGroup(job: Job, ctx: ProcessorContext, deps: Proces
     const usage = await deps.checkAiUsage(job.user_id, 1);
     if (!usage.allowed) return { type: "dead", error: usage.message, result: { grouping: state } };
     const chunk = nextChunk(state, urls.length);
-    const parts: GroupImagePart[] = chunk.map((i) => ({ type: "image_url", image_url: { url: urls[i], detail: "low" } }));
+    const chunkUrls = await deps.resolveImages(chunk.map((i) => ({ url: urls[i] })), job.user_id);
+    const parts: GroupImagePart[] = chunkUrls.map((img) => ({ type: "image_url", image_url: { url: img.url as string, detail: "low" } }));
     let answer: GroupChunkResult;
     try {
       answer = await deps.groupChunk(deps.apiKey, parts);
@@ -215,7 +221,12 @@ export function supabaseDraftWriter(db: SupabaseClient): DraftWriter {
 }
 
 /** Fetches one of OUR stored photos as base64 (for eBay image search). */
-export async function fetchOwnPhotoBase64(url: string): Promise<string | undefined> {
+export async function fetchOwnPhotoBase64(url: string, userId?: string): Promise<string | undefined> {
+  if (isPrivatePhotoRef(url)) {
+    if (!userId) return undefined;
+    [url] = await externalPhotoUrls([url], OPENAI_URL_TTL_S, userId);
+    if (!url) return undefined;
+  }
   if (!isOwnPhotoUrl(url)) return undefined;
   const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
   if (!res.ok) return undefined;
@@ -230,6 +241,7 @@ export function productionDeps(db: SupabaseClient, store: JobStore): ProcessorDe
     drafts: supabaseDraftWriter(db),
     checkAiUsage: checkAndConsumeAiUsage,
     analyze: analyzeAndEnrich,
+    resolveImages: (images, userId) => resolveImagesForOpenAI(images, userId),
     price: computePriceSuggestion,
     fetchImageBase64: fetchOwnPhotoBase64,
     ebayConnection: (userId) => ebayConnectionForUser(db, userId),

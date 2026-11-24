@@ -11,6 +11,7 @@
 //   uses, older than 7 days.
 // A photo still used by ANY other draft is never deleted.
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { parsePrivatePhotoRef, PRIVATE_BUCKET } from "@/lib/private-photos";
 
 export const ORPHAN_MIN_AGE_DAYS = 7;
 const MAX_DRAFTS_PER_RUN = 25;
@@ -31,9 +32,17 @@ export interface CleanupDraft {
   thumbnail_url: string | null;
 }
 
-/** "userId/file.jpg" for one of OUR public photo URLs, else null. */
+/** Marks a path in the private bucket (private draft photos, see private-photos.ts). */
+export const PRIVATE_PATH_MARK = "private:";
+
+/**
+ * "userId/file.jpg" for one of OUR public photo URLs, "private:userId/file.jpg"
+ * for a private draft photo link, else null.
+ */
 export function storagePath(url: string | null | undefined, supabaseUrl: string): string | null {
   if (!url) return null;
+  const priv = parsePrivatePhotoRef(url);
+  if (priv) return PRIVATE_PATH_MARK + priv.path;
   try {
     const u = new URL(url);
     const base = new URL(supabaseUrl);
@@ -43,6 +52,22 @@ export function storagePath(url: string | null | undefined, supabaseUrl: string)
   } catch {
     return null;
   }
+}
+
+/** Removes paths from the right bucket(s); returns how many were removed. */
+export async function removeStoragePaths(db: SupabaseClient, paths: string[]): Promise<number> {
+  const pub = paths.filter((p) => !p.startsWith(PRIVATE_PATH_MARK));
+  const priv = paths.filter((p) => p.startsWith(PRIVATE_PATH_MARK)).map((p) => p.slice(PRIVATE_PATH_MARK.length));
+  let removed = 0;
+  if (pub.length) {
+    const { error } = await db.storage.from(BUCKET).remove(pub);
+    if (!error) removed += pub.length;
+  }
+  if (priv.length) {
+    const { error } = await db.storage.from(PRIVATE_BUCKET).remove(priv);
+    if (!error) removed += priv.length;
+  }
+  return removed;
 }
 
 export function draftUrls(d: Pick<CleanupDraft, "photo_urls" | "thumbnail_url">): string[] {
@@ -149,8 +174,7 @@ export async function runPhotoCleanup(deps: CleanupDeps, userId: string, opts: {
       }
       drafts = drafts.map((x) => (x.id === d.id ? { ...x, photo_urls: pics, thumbnail_url: pics[0] } : x));
       if (paths.length) {
-        const { error: rmErr } = await deps.db.storage.from(BUCKET).remove(paths);
-        if (!rmErr) report.photosDeleted += paths.length;
+        report.photosDeleted += await removeStoragePaths(deps.db, paths);
       }
       report.draftsCleaned++;
     }

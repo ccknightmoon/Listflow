@@ -39,3 +39,17 @@ eBay requires every app that stores eBay user data to either subscribe to these 
 - To match notifications to a seller, Listflow now saves the eBay user ID (and, with **migration 032**, the EIAS token) when eBay is connected, and the daily snapshot cron backfills existing connections (one read-only `GetUser` call per seller).
 - Public route, not rate-limited (eBay can send bursts of up to ~1,500/day).
 - **Sel's steps** are in the final report (env vars + eBay developer portal).
+
+### 4b. Private photos for unpublished drafts (off until Sel switches it on)
+
+Today every photo is in the public `photos` bucket: anyone with a link can open it. New design, **off by default** so nothing changes until Sel turns it on:
+
+- With `NEXT_PUBLIC_PRIVATE_DRAFT_PHOTOS=1` (Vercel env var) **and migration 033 applied**, new uploads go to a private bucket, `photos-private`. The draft stores a same-origin link, `/api/photos/<userId>/<file>.jpg`. In the app, that link only works for the signed-in owner (it redirects to a 1-hour signed link), so all existing screens show the photos without changes.
+- **eBay and OpenAI still get readable URLs**: right before sending, the server swaps these links for signed Supabase URLs (1 hour for OpenAI, 1 day for eBay, which copies the pictures when the listing is created). Only the owner's own links are ever signed. Covered: Analyze & list / batch analysis (`/api/analyze-batch`), the server queue (grouping, analysis, image-search pricing), publish (route and queue).
+- **Existing photo URLs are untouched** and keep working; old and new drafts can be mixed.
+- Photo storage cleanup and the account purge handle both buckets. (Fixed on the way: the account purge only ever deleted the first 100 photos.)
+- Not covered: the orphan sweep only looks at the public bucket.
+
+### 4d. Migration 024
+
+Checked the live database (read-only): `public.set_updated_at` still has no fixed `search_path`, so **024 is not applied**. The file is ready as-is (`supabase-migrations/024_set_updated_at_search_path.sql`, one safe `alter function`, reversible). Needs Sel's approval.

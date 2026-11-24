@@ -128,6 +128,7 @@ function setup() {
       return { allowed: true, remaining: 1000, message: "" };
     },
     analyze: analyzeAndEnrich,
+    resolveImages: async (images) => images,
     price: async () => ({ suggestedPrice: 24, avgSold: 25, activeRangeLow: 10, activeRangeHigh: 40, sellOdds: "Medium", comparableSoldCount: 0, comparableActiveCount: 8 }),
     fetchImageBase64: async () => undefined,
     ebayConnection: async (userId) => ({ userId, ebayUserId: "seller", refreshToken: "x", policies: {} }),

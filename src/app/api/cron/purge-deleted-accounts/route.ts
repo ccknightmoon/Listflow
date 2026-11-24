@@ -1,3 +1,4 @@
+import { PRIVATE_BUCKET } from "@/lib/private-photos";
 import { NextRequest, NextResponse } from "next/server";
 import { purgeDateFrom } from "@/lib/account-deletion";
 import { getServiceClient } from "@/lib/supabase-service";
@@ -19,10 +20,18 @@ export const runtime = "nodejs";
 // 003) -- so the only thing this route has to clean up by hand is the
 // "photos" storage bucket, which isn't FK'd to auth.users.
 async function deleteUserPhotos(supabase: ReturnType<typeof getServiceClient>, userId: string) {
-  const { data: files, error: listError } = await supabase.storage.from("photos").list(userId);
-  if (listError || !files || files.length === 0) return;
-  const paths = files.map((f) => `${userId}/${f.name}`);
-  await supabase.storage.from("photos").remove(paths);
+  // Both buckets (public photos + private draft photos, if migration 033 is
+  // applied), page by page: list() returns at most `limit` files per call
+  // (it used to stop at the default 100, leaving the rest behind).
+  for (const bucket of ["photos", PRIVATE_BUCKET]) {
+    for (let guard = 0; guard < 200; guard++) {
+      const { data: files, error: listError } = await supabase.storage.from(bucket).list(userId, { limit: 1000 });
+      if (listError || !files || files.length === 0) break;
+      const paths = files.map((f) => `${userId}/${f.name}`);
+      const { error: rmError } = await supabase.storage.from(bucket).remove(paths);
+      if (rmError) break;
+    }
+  }
 }
 
 export async function GET(req: NextRequest) {

@@ -14,7 +14,10 @@ export function isOwnPhotoUrl(u: string): boolean {
   try {
     const url = new URL(u);
     const base = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL ?? "https://invalid.local");
-    return url.protocol === "https:" && url.host === base.host && url.pathname.startsWith("/storage/v1/object/public/");
+    // Public photos, or short-lived signed links to private draft photos
+    // (src/lib/private-photos-server.ts).
+    return url.protocol === "https:" && url.host === base.host &&
+      (url.pathname.startsWith("/storage/v1/object/public/") || url.pathname.startsWith("/storage/v1/object/sign/photos-private/"));
   } catch {
     return false;
   }

@@ -108,7 +108,7 @@ export async function proxy(request: NextRequest) {
   // is both public (reachable pre-sign-in) AND rate-limited, and the eBay
   // callback is the only /api path that should skip this entirely (it's a
   // one-time OAuth redirect, not a route a script would hammer).
-  if (redis && pathname.startsWith("/api") && !pathname.startsWith("/api/ebay/callback") && !pathname.startsWith("/api/ebay/account-deletion")) {
+  if (redis && pathname.startsWith("/api") && !pathname.startsWith("/api/ebay/callback") && !pathname.startsWith("/api/ebay/account-deletion") && !pathname.startsWith("/api/photos/")) {
     const isAiPath = AI_RATE_LIMITED_PATHS.some((p) => pathname.startsWith(p));
     const limiter = isAiPath ? aiRatelimit : generalRatelimit;
     if (limiter) {
