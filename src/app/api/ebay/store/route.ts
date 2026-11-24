@@ -46,11 +46,11 @@ export async function GET() {
     const all = [...activeListings, ...unsoldListings];
     const ids = all.map((l) => l.listingId).filter(Boolean);
     const draftInfo = new Map<string, { draftId: string; costBasis: number | null }>();
-    for (let i = 0; i < ids.length; i += 200) {
-      const { data } = await auth.supabase
-        .from("drafts")
-        .select("id, ebay_listing_id, cost_basis")
-        .in("ebay_listing_id", ids.slice(i, i + 200));
+    // Draft links/costs in parallel batches (was one batch after another).
+    const batches: string[][] = [];
+    for (let i = 0; i < ids.length; i += 200) batches.push(ids.slice(i, i + 200));
+    const results = await Promise.all(batches.map((b) => auth.supabase.from("drafts").select("id, ebay_listing_id, cost_basis").in("ebay_listing_id", b)));
+    for (const { data } of results) {
       for (const d of data ?? []) {
         draftInfo.set(d.ebay_listing_id as string, { draftId: d.id as string, costBasis: d.cost_basis == null ? null : Number(d.cost_basis) });
       }

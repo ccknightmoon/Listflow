@@ -19,25 +19,44 @@ export interface AiUsage {
 // src/lib/ai-usage.ts for the cap itself.
 const USAGE_WARNING_THRESHOLD = 0.75;
 
+// Sidebar and BottomNav are both mounted (one is hidden by CSS), and
+// batch-upload uses the hook too: share one request per minute instead of
+// firing /api/ai-usage once per caller.
+const SHARED_TTL_MS = 60_000;
+let shared: { at: number; p: Promise<AiUsage | null> } | null = null;
+
+export function parseAiUsage(data: unknown): AiUsage | null {
+  const d = (data ?? {}) as Record<string, unknown>;
+  if (typeof d.used !== "number" || typeof d.limit !== "number" || !(d.limit > 0)) return null;
+  const num = (v: unknown) => (typeof v === "number" ? v : undefined);
+  return {
+    used: d.used,
+    limit: d.limit,
+    dayUsed: num(d.dayUsed),
+    dailyLimit: num(d.dailyLimit),
+    estSpendUsd: num(d.estSpendUsd),
+    spendAlertUsd: num(d.spendAlertUsd),
+  };
+}
+
+export function loadAiUsageShared(fetcher: () => Promise<unknown> = () => fetch("/api/ai-usage").then((r) => r.json()), now = Date.now()): Promise<AiUsage | null> {
+  if (shared && now - shared.at < SHARED_TTL_MS) return shared.p;
+  const p = fetcher().then(parseAiUsage).catch(() => null);
+  shared = { at: now, p };
+  return p;
+}
+
 export function useAiUsageWarning() {
   const [usage, setUsage] = useState<AiUsage | null>(null);
 
   useEffect(() => {
-    fetch("/api/ai-usage")
-      .then((r) => r.json())
-      .then((data) => {
-        if (typeof data.used === "number" && typeof data.limit === "number" && data.limit > 0) {
-          setUsage({
-            used: data.used,
-            limit: data.limit,
-            dayUsed: typeof data.dayUsed === "number" ? data.dayUsed : undefined,
-            dailyLimit: typeof data.dailyLimit === "number" ? data.dailyLimit : undefined,
-            estSpendUsd: typeof data.estSpendUsd === "number" ? data.estSpendUsd : undefined,
-            spendAlertUsd: typeof data.spendAlertUsd === "number" ? data.spendAlertUsd : undefined,
-          });
-        }
-      })
-      .catch(() => {});
+    let alive = true;
+    void loadAiUsageShared().then((u) => {
+      if (alive && u) setUsage(u);
+    });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const { showWarning, message } = aiUsageWarning(usage);

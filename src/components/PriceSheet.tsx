@@ -18,13 +18,15 @@ type Mode = "preset" | "set" | "minus$" | "minus%";
  * watchers" (eBay Negotiation API) as a softer first step.
  */
 export default function PriceSheet({
-  open, items, thumbnail, watchCount, offerEligible, onClose, onApply, onSendOffer,
+  open, items, thumbnail, watchCount, offerEligible, offerAvailable = true, onClose, onApply, onSendOffer,
 }: {
   open: boolean;
   items: CutTarget[];
   thumbnail?: string | null;
   watchCount?: number | null;
   offerEligible?: boolean;
+  /** False when eBay's offer list couldn't be read at all (not connected / no permission). */
+  offerAvailable?: boolean;
   onClose: () => void;
   onApply: (rows: CutRow[]) => void;
   onSendOffer?: (discount: number) => Promise<string | null>;
@@ -207,6 +209,21 @@ export default function PriceSheet({
             </div>
           )}
         </div>
+
+        {single && onSendOffer && !offerEligible && (watchCount ?? 0) > 0 && (
+          <div className="mt-4 pt-4 text-[11px]" style={{ borderTop: "1px solid var(--border)", color: "var(--text-tertiary)" }} role="note">
+            <p className="text-sm font-semibold mb-1" style={{ color: "var(--text-secondary)" }}>Why no &quot;offer to watchers&quot; here?</p>
+            {offerAvailable ? (
+              <p>
+                {watchCount} {watchCount === 1 ? "person is" : "people are"} watching, but eBay hasn&apos;t put this listing on its list of items you can send a watcher offer for.
+                eBay decides that, not Listflow — usually because the watchers added it a while ago, they already got an offer recently, or the listing doesn&apos;t qualify yet.
+                It can show up later. A price drop reaches everyone in the meantime.
+              </p>
+            ) : (
+              <p>Listflow couldn&apos;t read eBay&apos;s watcher-offer list. If this keeps happening, reconnect eBay in Settings so it has permission for offers.</p>
+            )}
+          </div>
+        )}
 
         {single && onSendOffer && offerEligible && (
           <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--border)" }}>

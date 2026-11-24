@@ -1,7 +1,8 @@
 import { tradingRequest } from "@/lib/ebay-inventory";
 import { decodeEntities } from "@/lib/html-entities";
 import { getEbayContext } from "@/lib/ebay-request-context";
-import { createTtlDedupeCache } from "@/lib/ttl-cache";
+import { createSwrCache } from "@/lib/swr-cache";
+import { after } from "next/server";
 
 // Shared XML helpers + eBay "My eBay Selling" listing-fetch logic, used by
 // both /api/ebay/store (all active/unsold listings) and /api/ebay/offers
@@ -106,37 +107,43 @@ async function fetchAllOfListTypeUncached(listType: ListType): Promise<{ items: 
   return { items, total: total || items.length };
 }
 
-// A single Dashboard load fans out to /api/dashboard/stats, /api/ebay/offers,
-// /api/ebay/messages, and /api/ebay/store nearly simultaneously -- and
-// offers, messages, and store all independently call
-// fetchAllOfListTypeUncached("ActiveList") to get essentially the same
-// "every active listing" snapshot. Without this, one dashboard view could
-// mean 3+ near-duplicate GetMyeBaySelling round trips to eBay at once.
-// createTtlDedupeCache (src/lib/ttl-cache.ts) is the same "thundering
-// herd" fix as getAccessToken() in ebay-oauth.ts, pulled out as its own
-// generic, unit-tested module rather than a one-off Map pair here.
-//
-// TTL is deliberately short (15s, not the 2-minute client-side page-cache
-// window in src/lib/page-cache.ts) -- this backs server-side reads that
-// should still reflect a listing edited moments ago; it only exists to
-// collapse requests that land within the same page load, not to replace a
-// real refresh.
-const LISTINGS_CACHE_TTL_MS = 15_000;
+// Offers, messages, store and the dashboard all read "every active
+// listing"; one shared per-seller cache collapses those into one pull.
+// Stale-while-revalidate (Nov 2026 speed pass): a listings pull is ~7
+// big eBay calls for a 1,300-listing store. Within 60s it's reused as-is;
+// up to 10 minutes old it's served instantly while one background refresh
+// runs. Anything that changes listings (list, price, end, relist) calls
+// invalidateListings() so the next read waits for eBay.
+const LISTINGS_FRESH_MS = 60_000;
+const LISTINGS_STALE_MS = 10 * 60_000;
 type ListingsResult = { items: string[]; total: number } | ListTypeError;
-const listingsCache = createTtlDedupeCache<ListingsResult>();
+const listingsCache = createSwrCache<ListingsResult>();
 
-export async function fetchAllOfListType(listType: ListType): Promise<ListingsResult> {
+export async function fetchAllOfListType(listType: ListType, opts: { force?: boolean } = {}): Promise<ListingsResult> {
   const { userId } = getEbayContext();
-  const cacheKey = `${userId}:${listType}`;
-
-  return listingsCache.get(
-    cacheKey,
-    LISTINGS_CACHE_TTL_MS,
+  const r = await listingsCache.get(
+    `${userId}:${listType}`,
+    { freshMs: LISTINGS_FRESH_MS, staleMs: LISTINGS_STALE_MS, force: opts.force },
     () => fetchAllOfListTypeUncached(listType),
-    // Don't cache a failure -- a transient eBay error shouldn't be
-    // replayed to every other concurrent caller for the next 15s.
-    (result) => !isListTypeError(result)
+    // Never cache a failure.
+    (result) => !isListTypeError(result),
   );
+  return r.value;
+}
+
+/** Forget a seller's cached listings (after anything that changes them). */
+export function invalidateListings(userId: string) {
+  listingsCache.invalidatePrefix(`${userId}:`);
+}
+
+/** For mutation routes: invalidate now and again once the response is sent. */
+export function invalidateListingsAround(userId: string) {
+  invalidateListings(userId);
+  try {
+    after(() => invalidateListings(userId));
+  } catch {
+    // outside a request (tests)
+  }
 }
 
 export function toListing(item: string, status: "active" | "ended") {

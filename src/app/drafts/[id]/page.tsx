@@ -11,7 +11,7 @@ import { Z } from "@/lib/z-layers";
 import { EditorSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Loader2, Check, Trash2, Upload, ExternalLink, Sparkles, BadgeCheck, Camera, X, RefreshCw, Copy, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
@@ -105,6 +105,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [photoEditorLayout, setPhotoEditorLayout] = useState<"carousel" | "grid">("carousel");
   const photoScrollerRef = useRef<HTMLDivElement | null>(null);
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  // The fixed bottom action bar grows (listed link, warnings, two rows of
+  // buttons); its real height pads the page so it never covers the photos
+  // or the last fields (it used to be a fixed pb-32).
+  const [bottomBarH, setBottomBarH] = useState(140);
+  const bottomBarObserver = useRef<ResizeObserver | null>(null);
+  const bottomBarRef = useCallback((el: HTMLDivElement | null) => {
+    bottomBarObserver.current?.disconnect();
+    bottomBarObserver.current = null;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setBottomBarH(Math.ceil(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    bottomBarObserver.current = ro;
+  }, []);
   const [photoUndo, setPhotoUndo] = useState<string[] | null>(null);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [dropIdx, setDropIdx] = useState<number | null>(null);
@@ -875,7 +888,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   return (
-    <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-32" style={{ viewTransitionName: "draft-detail" }}>
+    <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8" style={{ viewTransitionName: "draft-detail", paddingBottom: `calc(${bottomBarH}px + var(--tray-offset, 0px) + 28px)`, ["--editor-bar-h" as string]: `${bottomBarH}px` }}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <Link href={draft?.ebay_listing_id ? "/store" : "/drafts"}>
@@ -985,7 +998,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
 
       {/* Desktop (lg): photos + re-analyze on the left (sticky), the form on the right. */}
       <div className="lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:gap-8 lg:items-start">
-      <PhotoDropZone className="lg:sticky lg:top-6" onFiles={(files) => void handleAddListingPhotos(files)} disabled={photoUrls.length >= 24}>
+      <PhotoDropZone className="lg:sticky lg:top-6 lg:max-h-[calc(100vh_-_var(--editor-bar-h,140px)_-_var(--tray-offset,0px)_-_56px)] lg:overflow-y-auto" onFiles={(files) => void handleAddListingPhotos(files)} disabled={photoUrls.length >= 24}>
       {photoUrls.length > 0 ? (
         <div className="mb-4">
           <div className="flex items-center justify-between mb-2">
@@ -1476,7 +1489,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       </div>
       </div>
 
-      <div className="content-bar fixed left-0 right-0 px-5 pt-3 max-w-md mx-auto lg:rounded-2xl lg:pb-3"
+      <div ref={bottomBarRef} className="content-bar fixed left-0 right-0 px-5 pt-3 max-w-md mx-auto lg:rounded-2xl lg:pb-3"
         style={{
           // Sits above the progress tray when it's showing; padded for the iPhone home indicator.
           bottom: "var(--tray-offset, 0px)",

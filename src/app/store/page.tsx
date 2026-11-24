@@ -237,9 +237,13 @@ export default function StorePage() {
   // short pause between calls to stay well inside eBay's rate limits.
   const [priceFor, setPriceFor] = useState<StoreListing[] | null>(null);
   const [offerEligible, setOfferEligible] = useState<Set<string>>(new Set());
+  const [offerAvailable, setOfferAvailable] = useState(true);
   useEffect(() => {
     if (tab !== "active") return;
-    fetch("/api/ebay/offers/watchers").then((r) => r.json()).then((d: { eligible?: string[] }) => setOfferEligible(new Set(d.eligible ?? []))).catch(() => {});
+    fetch("/api/ebay/offers/watchers").then((r) => r.json()).then((d: { eligible?: string[]; available?: boolean }) => {
+      setOfferEligible(new Set(d.eligible ?? []));
+      setOfferAvailable(d.available !== false);
+    }).catch(() => setOfferAvailable(false));
   }, [tab]);
 
   function applyPriceCut(rows: CutRow[]) {
@@ -876,6 +880,7 @@ export default function StorePage() {
         thumbnail={priceFor?.length === 1 ? priceFor[0].thumbnail : null}
         watchCount={priceFor?.length === 1 ? priceFor[0].watchCount ?? null : null}
         offerEligible={priceFor?.length === 1 ? offerEligible.has(priceFor[0].listingId) : false}
+        offerAvailable={offerAvailable}
         onClose={() => setPriceFor(null)}
         onApply={applyPriceCut}
         onSendOffer={priceFor?.length === 1 ? (d) => sendWatcherOffer(priceFor[0], d) : undefined}

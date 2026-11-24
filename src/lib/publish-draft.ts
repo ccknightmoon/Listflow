@@ -2,6 +2,7 @@
 // seller) and the background queue worker (Volume Phase 3), which runs it
 // with the service-role client -- so EVERY drafts query below is scoped to
 // ctx.userId explicitly, not left to RLS.
+import { invalidateListingsAround } from "@/lib/ebay-listings";
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
@@ -92,6 +93,10 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
   // blow away an already-successful listing, so it stays false by default.
   const allowRelist = rawAllowRelist === true;
   if (!draftId) return NextResponse.json({ error: "draftId required" }, { status: 400 });
+  // Publishing changes listings (route and background queue alike): drop the
+  // cached listings now and again once the response is sent, so the next
+  // Listings view reads fresh from eBay.
+  invalidateListingsAround(userId);
 
   // Calculated shipping is the only mode (Nov 15, 2026). Whatever the
   // client sends (shippingMode/isHeavy/shippingCost) or the draft has saved

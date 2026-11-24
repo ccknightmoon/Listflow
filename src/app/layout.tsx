@@ -3,6 +3,7 @@ import JobsIndicator from "@/components/JobsIndicator";
 import BottomNav from "@/components/BottomNav";
 import Sidebar from "@/components/Sidebar";
 import ConfirmHost from "@/components/ConfirmHost";
+import AccentSync from "@/components/AccentSync";
 import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
@@ -84,6 +85,7 @@ export default async function RootLayout({
         <PublishTray />
         <JobsIndicator />
         <ConfirmHost />
+        <AccentSync />
       </body>
     </html>
   );

@@ -385,8 +385,9 @@ img {
   transform: scale(0.94);
 }
 
-.btn:disabled {
-  opacity: 0.6;
+.btn:disabled,
+.btn-primary:disabled {
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none;
 }
@@ -421,3 +422,13 @@ img {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-tint);
 }
+
+/* Search fields draw their own ✕ (clear) button; hide the browser's native
+   one so there aren't two. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
+input[type="search"]::-ms-clear { display: none; }

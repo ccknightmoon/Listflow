@@ -6,6 +6,7 @@
 // the cheapest eBay call for each number, and caches the result per seller
 // for a couple of minutes so flipping back to the Dashboard is instant and
 // costs no eBay calls.
+import { after } from "next/server";
 import { tradingRequest } from "@/lib/ebay-inventory";
 import { extractItemBlocks, xmlFind, xmlFindAll } from "@/lib/ebay-listings";
 import { fetchUnshippedOrders } from "@/lib/ebay-ship-orders";
@@ -198,13 +199,32 @@ export async function buildDashboardSummary(nowMs = Date.now()): Promise<Dashboa
   };
 }
 
-// Per-seller cache (per server instance). In-flight builds are shared so a
-// double-tap doesn't double the eBay calls. Failed numbers come back as
-// null and are simply cached with the rest for the short TTL.
-const summaryCache = new Map<string, { value: DashboardSummary; expires: number }>();
+// Per-seller cache (per server instance), stale-while-revalidate: fresh for
+// SUMMARY_TTL_MS; after that, up to SUMMARY_STALE_MS old, the cached copy is
+// returned straight away while ONE background rebuild runs (kept alive past
+// the response with next/server `after`). So Home never waits on eBay on a
+// repeat visit. In-flight builds are shared so a double-tap doesn't double
+// the eBay calls. Failed numbers come back as null and are cached with the
+// rest (the page keeps its previous value for any null).
+export const SUMMARY_STALE_MS = 15 * 60_000;
+const summaryCache = new Map<string, { value: DashboardSummary; at: number }>();
 const inFlight = new Map<string, Promise<DashboardSummary>>();
 
-/** Cached per seller for SUMMARY_TTL_MS; `fresh` skips the cache and refills it. */
+function rebuild(userId: string, build: () => Promise<DashboardSummary>, now: () => number): Promise<DashboardSummary> {
+  const pending = inFlight.get(userId);
+  if (pending) return pending;
+  const p = build()
+    .then((value) => {
+      for (const [k, v] of summaryCache) if (now() - v.at > SUMMARY_STALE_MS) summaryCache.delete(k);
+      summaryCache.set(userId, { value, at: now() });
+      return value;
+    })
+    .finally(() => inFlight.delete(userId));
+  inFlight.set(userId, p);
+  return p;
+}
+
+/** Cached per seller (see above); `fresh` skips the cache and waits for a rebuild. */
 export function getDashboardSummary(
   userId: string,
   fresh = false,
@@ -212,18 +232,19 @@ export function getDashboardSummary(
   now: () => number = Date.now,
 ): Promise<DashboardSummary> {
   const hit = summaryCache.get(userId);
-  if (!fresh && hit && hit.expires > now()) return Promise.resolve(hit.value);
-  const pending = inFlight.get(userId);
-  if (pending) return pending;
-  const p = build()
-    .then((value) => {
-      for (const [k, v] of summaryCache) if (v.expires <= now()) summaryCache.delete(k);
-      summaryCache.set(userId, { value, expires: now() + SUMMARY_TTL_MS });
-      return value;
-    })
-    .finally(() => inFlight.delete(userId));
-  inFlight.set(userId, p);
-  return p;
+  const age = hit ? now() - hit.at : Infinity;
+  if (!fresh && hit && age < SUMMARY_TTL_MS) return Promise.resolve(hit.value);
+  if (!fresh && hit && age < SUMMARY_STALE_MS) {
+    const bg = rebuild(userId, build, now);
+    bg.catch(() => {});
+    try {
+      after(() => bg.catch(() => {}));
+    } catch {
+      // outside a request (tests): the promise just runs on
+    }
+    return Promise.resolve(hit.value);
+  }
+  return rebuild(userId, build, now);
 }
 
 /** Drop a seller's cached summary (e.g. after they act on an offer). */

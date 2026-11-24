@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { relistItemByListingId, isValidEbayItemId } from "@/lib/ebay-inventory";
 import { requireUser } from "@/lib/auth";
+import { invalidateListingsAround } from "@/lib/ebay-listings";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 
@@ -13,6 +14,9 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  // This changes listings: drop the cached listings now and again once the
+  // response is sent, so the next Listings view reads fresh from eBay.
+  invalidateListingsAround(auth.user.id);
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {

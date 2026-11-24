@@ -12,7 +12,8 @@ import { bucketRevenue, type BucketableSale } from "@/lib/sales-buckets";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { useCountUp } from "@/lib/use-count-up";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
-import { lastSevenDays, type HomeSale } from "@/lib/home-week";
+import { lastSevenDays, homeSalesFromFeed, type HomeSale } from "@/lib/home-week";
+import type { AnalyticsSale } from "@/lib/sales-analytics";
 
 // See src/lib/page-cache.ts. Each of this page's four independent fetches
 // gets its own entry so the hero tile can show last session's numbers the
@@ -25,6 +26,9 @@ const PENDING_OFFERS_CACHE_KEY = "dashboard:pendingOffers";
 const BUYER_QUESTIONS_CACHE_KEY = "dashboard:buyerQuestions";
 const STALE_LISTINGS_CACHE_KEY = "dashboard:staleListings";
 const DRAFT_GAPS_CACHE_KEY = "dashboard:draftGaps";
+const WEEK_SALES_CACHE_KEY = "dashboard:weekSales";
+// The Sales page's own tab cache (src/app/sales/page.tsx FEED_CACHE_KEY).
+const SALES_FEED_CACHE_KEY = "sales-analytics-feed";
 const NO_ITEMS: PublishItem[] = [];
 
 interface DashboardSummaryResponse {
@@ -34,6 +38,8 @@ interface DashboardSummaryResponse {
   weeklyRevenue?: number | null;
   weeklySales?: number | null;
   trendSales?: BucketableSale[] | null;
+  /** Sales-feed lines (Sales page dates) for the last ~9 days, when the server has the feed. */
+  weekSales?: HomeSale[] | null;
   shipCount?: number | null;
   pendingOffers?: number | null;
   buyerQuestions?: number | null;
@@ -52,6 +58,12 @@ interface Stats {
 // full history the Sales page itself offers.
 const TREND_DAYS = 28;
 
+// Placeholder while the first numbers load (instead of a "—" that reads
+// as "no data").
+function NumberSkeleton({ w, h }: { w: number; h: number }) {
+  return <span aria-label="Loading" className="inline-block align-middle rounded-md animate-pulse" style={{ width: w, height: h, background: "var(--glass-line)" }} />;
+}
+
 function greeting(hour: number) {
   if (hour < 5) return "Still up";
   if (hour < 12) return "Good morning";
@@ -68,6 +80,7 @@ export default function DashboardPage() {
   // Backs the hero tile's trend sparkline — null until loaded (or if it
   // fails, which just means the tile shows no sparkline, same as today).
   const [pageOpenedAt] = useState(() => Date.now());
+  const [weekSales, setWeekSales] = useState<HomeSale[] | null>(() => getPageCache<HomeSale[]>(WEEK_SALES_CACHE_KEY) ?? null);
   const [trendSales, setTrendSales] = useState<BucketableSale[] | null>(() => getPageCache<BucketableSale[]>(TREND_SALES_CACHE_KEY) ?? null);
   // Best Offers pending a response -- see store/page.tsx's "Pending
   // offers" card for why this isn't a bottom-nav badge (one GetBestOffers
@@ -132,6 +145,7 @@ export default function DashboardPage() {
         };
         apply(s.shipCount, setShipCount, SHIP_COUNT_CACHE_KEY);
         apply(s.trendSales, setTrendSales, TREND_SALES_CACHE_KEY);
+        apply(s.weekSales, setWeekSales, WEEK_SALES_CACHE_KEY);
         apply(s.pendingOffers, setPendingOffersCount, PENDING_OFFERS_CACHE_KEY);
         apply(s.buyerQuestions, setBuyerQuestionsCount, BUYER_QUESTIONS_CACHE_KEY);
         apply(s.staleListings, setStaleListingsCount, STALE_LISTINGS_CACHE_KEY);
@@ -179,9 +193,15 @@ export default function DashboardPage() {
   // "Last 7 days" in the seller's own time zone, computed exactly like the
   // Sales page's 7-day tab (paid sales, item totals, units). Falls back to
   // the server's number for older cached data without quantities.
-  const week = trendSales && trendSales.every((s) => typeof (s as HomeSale).qty === "number")
-    ? lastSevenDays(trendSales as HomeSale[], pageOpenedAt)
-    : null;
+  // Same numbers as Sales → 7 days. Best source first: the Sales page's feed
+  // if this tab has it, then the server's copy of that feed (weekSales),
+  // then Home's own 28-day pull (order dates).
+  const salesFeed = getPageCache<{ sales?: AnalyticsSale[] }>(SALES_FEED_CACHE_KEY);
+  const weekSource: HomeSale[] | null = salesFeed?.sales
+    ? homeSalesFromFeed(salesFeed.sales, pageOpenedAt)
+    : weekSales
+      ?? (trendSales && trendSales.every((s) => typeof (s as HomeSale).qty === "number") ? (trendSales as HomeSale[]) : null);
+  const week = weekSource ? lastSevenDays(weekSource, pageOpenedAt) : null;
   const revenue = week?.revenue ?? stats?.weeklyRevenue ?? null;
   const displayRevenue = useCountUp(revenue);
   const weeklySales = week?.sales ?? stats?.weeklySales ?? null;
@@ -225,7 +245,7 @@ export default function DashboardPage() {
           <div>
             <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }} title="Item sales, last 7 days (today + 6 days) — same as Sales → 7 days">Last 7 days</p>
             <p className="font-display font-extrabold text-3xl mt-1.5">
-              {displayRevenue !== null ? formatMoneyShort(displayRevenue) : "—"}
+              {displayRevenue !== null ? formatMoneyShort(displayRevenue) : statsLoaded ? "—" : <NumberSkeleton w={96} h={30} />}
             </p>
           </div>
 
@@ -283,7 +303,7 @@ export default function DashboardPage() {
           className="hidden lg:block card d2 stagger p-4 lg:col-start-3 lg:col-span-2 lg:row-start-1 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
         >
           <p className="text-[10.5px] font-bold tracking-wide uppercase" style={{ color: "var(--text-tertiary)" }}>Items sold · 7 days</p>
-          <p className="font-display font-extrabold text-3xl mt-1.5">{weeklySales !== null ? weeklySales : "—"}</p>
+          <p className="font-display font-extrabold text-3xl mt-1.5">{weeklySales !== null ? weeklySales : statsLoaded ? "—" : <NumberSkeleton w={40} h={30} />}</p>
         </Link>
         <Link
           href="/drafts"
@@ -291,7 +311,7 @@ export default function DashboardPage() {
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
           <p className="text-[10px] font-bold" style={{ color: "var(--text-tertiary)" }}>DRAFTS</p>
-          <p className="font-display font-extrabold text-xl mt-1.5">{drafts !== null ? drafts : "—"}</p>
+          <p className="font-display font-extrabold text-xl mt-1.5">{drafts !== null ? drafts : statsLoaded ? "—" : <NumberSkeleton w={32} h={22} />}</p>
         </Link>
         <Link
           href="/store"
@@ -299,7 +319,7 @@ export default function DashboardPage() {
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
           <p className="text-[10px] font-bold" style={{ color: "var(--text-tertiary)" }}>ACTIVE</p>
-          <p className="font-display font-extrabold text-xl mt-1.5">{active !== null ? active : "—"}</p>
+          <p className="font-display font-extrabold text-xl mt-1.5">{active !== null ? active : statsLoaded ? "—" : <NumberSkeleton w={32} h={22} />}</p>
         </Link>
 
         <WeeklyChart trend={trend} trendMax={trendMax} />

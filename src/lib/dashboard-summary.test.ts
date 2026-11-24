@@ -7,6 +7,7 @@ import {
   getDashboardSummary,
   invalidateDashboardSummary,
   SUMMARY_TTL_MS,
+  SUMMARY_STALE_MS,
   type DashboardSummary,
   type SortedPage,
 } from "@/lib/dashboard-summary";
@@ -113,10 +114,16 @@ describe("getDashboardSummary cache", () => {
 
     expect((await getDashboardSummary("u1", true, build, now)).active).toBe(2);
     t += SUMMARY_TTL_MS + 1;
+    // Stale: the cached copy comes back at once and one rebuild runs behind it.
+    expect((await getDashboardSummary("u1", false, build, now)).active).toBe(2);
+    await Promise.resolve(); await Promise.resolve();
     expect((await getDashboardSummary("u1", false, build, now)).active).toBe(3);
+    // Past the stale window: waits for a fresh build.
+    t += SUMMARY_STALE_MS + 1;
+    expect((await getDashboardSummary("u1", false, build, now)).active).toBe(4);
 
-    expect((await getDashboardSummary("u2", false, build, now)).active).toBe(4);
+    expect((await getDashboardSummary("u2", false, build, now)).active).toBe(5);
     invalidateDashboardSummary("u1");
-    expect((await getDashboardSummary("u1", false, build, now)).active).toBe(5);
+    expect((await getDashboardSummary("u1", false, build, now)).active).toBe(6);
   });
 });

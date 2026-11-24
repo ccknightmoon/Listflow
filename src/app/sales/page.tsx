@@ -7,7 +7,7 @@
 // waits on eBay.
 
 import CurrencyInput from "@/components/CurrencyInput";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft, Download, ExternalLink, Lightbulb, Loader2, RefreshCw, Shirt,
@@ -16,6 +16,7 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import { salesNeedsRefresh, SALES_FOLLOWUP_MAX_AGE_S } from "@/lib/sales-freshness";
 import { buildLedger, compareWithSummary, payoutBridge, salesBreakdown, displayLines, LINE_LABELS, type EbaySummaryByStatus, type LedgerTx, type Payout, type PeriodRange } from "@/lib/ledger";
 import { saleEconomics, shippingSplit, categoryProfit, collapseCategories, bestAndWorst, staleListings, storeTips, activeCountAt, exactSellThroughTrend, type Snapshot } from "@/lib/store-insights";
 import {
@@ -40,7 +41,7 @@ interface Feed {
   snapshots?: Snapshot[] | null;
 }
 
-type FeedResponse = Partial<Feed> & { error?: string; connect?: boolean; reconnect?: boolean };
+type FeedResponse = Partial<Feed> & { error?: string; connect?: boolean; reconnect?: boolean; stale?: boolean };
 
 const FEED_CACHE_KEY = "sales-analytics-feed";
 const FEED_CACHE_MS = 5 * 60_000;
@@ -149,34 +150,81 @@ export default function SalesPage() {
   const [showRecon, setShowRecon] = useState(false);
   const [summaries, setSummaries] = useState<Record<string, EbaySummaryByStatus | null | "loading">>({});
 
-  const load = useCallback(async (refresh: boolean) => {
+  // `silent`: a background freshness check -- no spinner, and a failure
+  // keeps the data already on screen instead of showing an error.
+  const silentInFlight = useRef(false);
+  const lastSilentAt = useRef(0);
+  const loadRef = useRef<((refresh: boolean, opts?: { silent?: boolean; maxAgeS?: number; followUp?: boolean }) => Promise<void>) | null>(null);
+  const load = useCallback(async (refresh: boolean, opts: { silent?: boolean; maxAgeS?: number; followUp?: boolean } = {}) => {
+    const silent = !!opts.silent;
+    if (silent) {
+      // At most one quiet check every 5 minutes (so an eBay outage isn't
+      // retried every minute); the follow-up after a stale reply is exempt.
+      if (silentInFlight.current) return;
+      if (!opts.followUp && Date.now() - lastSilentAt.current < 5 * 60_000) return;
+      lastSilentAt.current = Date.now();
+      silentInFlight.current = true;
+    }
     if (refresh) setRefreshing(true);
-    setError(null);
-    setNeedsConnect(false);
-    setNeedsReconnect(false);
+    if (!silent) {
+      setError(null);
+      setNeedsConnect(false);
+      setNeedsReconnect(false);
+    }
+    let followUp = false;
     try {
-      const data = await apiFetch<FeedResponse>(`/api/ebay/sales/analytics${refresh ? "?refresh=1" : ""}`);
+      const qs = refresh ? "?refresh=1" : opts.maxAgeS ? `?maxAge=${opts.maxAgeS}` : "";
+      const data = await apiFetch<FeedResponse>(`/api/ebay/sales/analytics${qs}`);
       if (data.error) {
+        if (silent) return;
         setNeedsConnect(!!data.connect);
         setNeedsReconnect(!!data.reconnect);
         throw new Error(data.error);
       }
-      const next = data as Feed;
+      const { stale, ...rest } = data;
+      const next = rest as Feed;
       setFeed(next);
       setPageCache(FEED_CACHE_KEY, next);
+      // The server sent its older copy and is rebuilding: ask once more,
+      // waiting for a copy no older than a few minutes.
+      followUp = !!stale && !opts.maxAgeS && !refresh;
     } catch (err) {
-      setError((err as Error).message);
+      if (!silent) setError((err as Error).message);
     } finally {
+      if (silent) silentInFlight.current = false;
       setLoading(false);
       setRefreshing(false);
     }
+    if (followUp) void loadRef.current?.(false, { silent: true, maxAgeS: SALES_FOLLOWUP_MAX_AGE_S, followUp: true });
   }, []);
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
 
   // One load per visit (instant if this tab already has a fresh copy).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch-on-mount; state is set after the await
     if (!getPageCache<Feed>(FEED_CACHE_KEY, FEED_CACHE_MS)) void load(false);
   }, [load]);
+
+  // Auto-refresh stale data: while the page is open, and whenever it comes
+  // back to the foreground, re-check once the copy on screen is older than
+  // SALES_MAX_AGE_MS (~12 min). Quiet: the old numbers stay up meanwhile.
+  const generatedAt = feed?.generatedAt ?? null;
+  useEffect(() => {
+    if (!generatedAt) return;
+    const check = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      if (salesNeedsRefresh(generatedAt, Date.now())) void load(false, { silent: true, maxAgeS: SALES_FOLLOWUP_MAX_AGE_S });
+    };
+    check();
+    const id = window.setInterval(check, 60_000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [generatedAt, load]);
 
   // "Now" is pinned to when the data was fetched, so every tab is computed
   // against the same moment the eBay data describes.

@@ -102,7 +102,7 @@ export default function BulkEditSheet({
         {error && <p className="text-xs mb-2" style={{ color: "var(--danger)" }}>{error}</p>}
         <button type="button" className="btn btn-primary w-full min-h-[48px]" disabled={!hasEdit || changing === 0 || saving} onClick={apply}>
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-          {saving ? "Saving…" : `Apply to ${changing} item${changing !== 1 ? "s" : ""}`}
+          {saving ? "Saving…" : !hasEdit ? "Pick a change above" : changing === 0 ? "No items would change" : `Apply to ${changing} item${changing !== 1 ? "s" : ""}`}
         </button>
         </>
       }

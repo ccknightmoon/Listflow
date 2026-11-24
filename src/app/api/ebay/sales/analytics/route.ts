@@ -4,17 +4,17 @@ import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { EBAY_STANDARD_FEE_PERCENT, isValidFeePercent } from "@/lib/ebay-fees";
 import { buildSalesFeed } from "@/lib/sales-feed";
-import { getCachedSalesFeed, setCachedSalesFeed } from "@/lib/sales-feed-cache";
+import { getSalesFeed } from "@/lib/sales-feed-cache";
 
 export const runtime = "nodejs";
 // One heavier load (~6 months of eBay data), then every tab switch is local.
 export const maxDuration = 60;
 
-// Short per-user server cache so reopening the page (or another device)
-// doesn't re-pull six months from eBay. ?refresh=1 (the page's refresh
-// button) bypasses it. In-flight requests are shared.
-const inflight = new Map<string, Promise<unknown>>();
-
+// Per-user stale-while-revalidate cache (src/lib/sales-feed-cache.ts):
+// reopening the page is instant; data older than 3 minutes comes back with
+// `stale: true` while one rebuild runs, and the page then asks again with
+// ?maxAge=… to wait for the fresh copy. ?refresh=1 (refresh button) forces
+// a rebuild.
 export async function GET(req: Request) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
@@ -24,12 +24,13 @@ export async function GET(req: Request) {
   if (!connection) {
     return NextResponse.json({ error: "eBay not connected.", connect: true, reconnect: false }, { status: 200 });
   }
-  const refresh = new URL(req.url).searchParams.get("refresh") === "1";
-  const hit = refresh ? null : getCachedSalesFeed(user.id);
-  if (hit) return NextResponse.json({ ...hit, cached: true });
+  const sp = new URL(req.url).searchParams;
+  const force = sp.get("refresh") === "1";
+  const maxAgeRaw = Number(sp.get("maxAge"));
+  const maxAgeMs = Number.isFinite(maxAgeRaw) && maxAgeRaw > 0 ? maxAgeRaw * 1000 : undefined;
 
-  return ebayContext.run(connection, async () => {
-    try {
+  const build = () =>
+    ebayContext.run(connection, async () => {
       const { data: settingsRow } = await supabase
         .from("app_settings")
         .select("ebay_fee_percent_override")
@@ -38,25 +39,21 @@ export async function GET(req: Request) {
       const feePercent = isValidFeePercent(settingsRow?.ebay_fee_percent_override)
         ? settingsRow.ebay_fee_percent_override
         : EBAY_STANDARD_FEE_PERCENT;
+      return buildSalesFeed(supabase, feePercent);
+    });
 
-      let pending = inflight.get(user.id) as ReturnType<typeof buildSalesFeed> | undefined;
-      if (!pending) {
-        pending = buildSalesFeed(supabase, feePercent);
-        inflight.set(user.id, pending);
-        pending.finally(() => inflight.delete(user.id)).catch(() => {});
-      }
-      const feed = await pending;
-      if ("error" in feed) {
-        return NextResponse.json({ error: feed.error, connect: false, reconnect: feed.reconnect }, { status: 200 });
-      }
-      setCachedSalesFeed(user.id, feed);
-      return NextResponse.json(feed);
-    } catch (err) {
-      console.error("GET /api/ebay/sales/analytics failed:", err);
-      return NextResponse.json(
-        { error: "Couldn't load sales right now. Try refreshing -- if it keeps happening, reconnect eBay in Settings." },
-        { status: 500 },
-      );
+  try {
+    const r = await getSalesFeed(user.id, build, { force, maxAgeMs });
+    const feed = r.value;
+    if ("error" in feed) {
+      return NextResponse.json({ error: feed.error, connect: false, reconnect: feed.reconnect }, { status: 200 });
     }
-  });
+    return NextResponse.json({ ...feed, stale: r.stale }, { headers: { "Cache-Control": "no-store" } });
+  } catch (err) {
+    console.error("GET /api/ebay/sales/analytics failed:", err);
+    return NextResponse.json(
+      { error: "Couldn't load sales right now. Try refreshing -- if it keeps happening, reconnect eBay in Settings." },
+      { status: 500 },
+    );
+  }
 }

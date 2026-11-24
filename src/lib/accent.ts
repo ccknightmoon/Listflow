@@ -36,3 +36,14 @@ export function setStoredAccent(accent: AccentColor) {
   document.cookie = `${COOKIE_NAME}=${accent}; path=/; max-age=31536000; SameSite=Lax`;
   document.documentElement.setAttribute("data-accent", accent);
 }
+
+/** True once this device has an accent cookie (set by Settings or AccentSync). */
+export function hasStoredAccent(): boolean {
+  if (typeof document === "undefined") return true;
+  return new RegExp(`(?:^|; )${COOKIE_NAME}=`).test(document.cookie);
+}
+
+/** Server value -> a valid accent (unknown/missing = the default). */
+export function toAccentColor(value: unknown): AccentColor {
+  return typeof value === "string" && isAccentColor(value) ? value : "indigo";
+}

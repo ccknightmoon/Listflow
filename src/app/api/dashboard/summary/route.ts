@@ -3,6 +3,8 @@ import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { getDashboardSummary } from "@/lib/dashboard-summary";
+import { peekSalesFeed } from "@/lib/sales-feed-cache";
+import { homeSalesFromFeed } from "@/lib/home-week";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,7 +31,12 @@ export async function GET(req: NextRequest) {
   const fresh = req.nextUrl.searchParams.get("fresh") === "1";
   try {
     const summary = await ebayContext.run(connection, () => getDashboardSummary(auth.user.id, fresh));
-    return NextResponse.json({ connected: true, drafts, ...summary }, { headers: { "Cache-Control": "no-store" } });
+    // If this server already holds the Sales page's feed, send its last few
+    // days too: Home then computes "Last 7 days" from exactly the data and
+    // dates the Sales page uses (never calls eBay for it).
+    const feed = peekSalesFeed(auth.user.id);
+    const weekSales = feed ? homeSalesFromFeed(feed.sales, Date.now()) : null;
+    return NextResponse.json({ connected: true, drafts, ...summary, weekSales }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
