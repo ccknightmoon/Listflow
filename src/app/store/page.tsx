@@ -398,7 +398,7 @@ export default function StorePage() {
     }
     return [
       { label: "Change price…", tone: "accent", icon: <TrendingDown className="w-3.5 h-3.5" />, onAction: () => setPriceFor([l]) },
-      ...(l.draftId ? [{ label: "Edit in Listflow", icon: <ChevronRight className="w-3.5 h-3.5" />, href: `/drafts/${l.draftId}` } as RowAction] : []),
+      { label: "Edit in Listflow", icon: <ChevronRight className="w-3.5 h-3.5" />, href: l.draftId ? `/drafts/${l.draftId}` : `/store/edit/${l.listingId}` } as RowAction,
       { label: "Edit on eBay", icon: <Pencil className="w-3.5 h-3.5" />, href: `https://www.ebay.com/sh/edit-item/${l.listingId}`, external: true },
       view,
       { label: "End listing", tone: "danger", icon: <Trash2 className="w-3.5 h-3.5" />, disabled: deleting.has(l.listingId), onAction: () => void handleDelist(l) },
@@ -839,11 +839,11 @@ export default function StorePage() {
                       <ExternalLink className="w-3.5 h-3.5" />
                       View
                     </a>
-                    {l.draftId && (
+                    {(
                       <>
                         <div className="w-px h-4 bg-[var(--border)]" />
                         <Link
-                          href={`/drafts/${l.draftId}`}
+                          href={l.draftId ? `/drafts/${l.draftId}` : `/store/edit/${l.listingId}`}
                           className="tap flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex-1 justify-center py-1"
                         >
                           <ChevronRight className="w-3.5 h-3.5" />

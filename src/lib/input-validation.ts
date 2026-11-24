@@ -42,7 +42,7 @@ export function isPhotoUrl(v: unknown): v is string {
 const TEXT_LIMITS: Record<string, number> = {
   title: 500, brand: 200, color: 200, size: 100, condition: 100, flaws: 2000, itemType: 200,
   style: 200, material: 300, theme: 200, sleeveLength: 100, neckline: 100, fit: 100, pattern: 200,
-  description: 50_000, vintage: 50, character: 200, characterFamily: 200, yearManufactured: 50,
+  description: 500_000, vintage: 50, character: 200, characterFamily: 200, yearManufactured: 50,
   season: 100, storeCategoryName: 300, sellOdds: 50, customSku: 100,
 };
 const MONEY_FIELDS = ["suggestedPrice", "avgSold", "activeRangeLow", "activeRangeHigh"];

@@ -9,7 +9,7 @@ describe("draftFieldsError", () => {
   });
   it("rejects wrong types and absurd sizes", () => {
     expect(draftFieldsError({ title: { evil: 1 } })).toMatch(/title/);
-    expect(draftFieldsError({ description: "x".repeat(50_001) })).toMatch(/description/);
+    expect(draftFieldsError({ description: "x".repeat(500_001) })).toMatch(/description/); // eBay allows up to 500k
     expect(draftFieldsError({ suggestedPrice: -1 })).toMatch(/suggestedPrice/);
     expect(draftFieldsError({ suggestedPrice: "12" })).toMatch(/suggestedPrice/);
     expect(draftFieldsError({ ebayListingId: "abc" })).toMatch(/ebayListingId/);

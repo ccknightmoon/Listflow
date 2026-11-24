@@ -17,3 +17,8 @@ Why: listings made with eBay's Inventory API "cannot be edited through Seller Hu
 - "Update on eBay" in the draft editor revises the live listing with **ReviseFixedPriceItem**: title, item specifics, photos, price, quantity, description, condition and condition note, package, store category. Same item number, watchers and history kept.
 - Before revising, Listflow reads the live listing (**GetItem**). If it has ended, you're told to relist instead. Custom item specifics that exist on the listing (common on eBay-made listings) are kept as long as they're still in the draft. A listing made in the eBay app keeps its own category unless you picked one, and its own description HTML is sent back as-is.
 - If eBay refuses a category/condition change (e.g. the listing already has a sale), the revise is retried without them. If the listing turns out to be an Inventory-API listing, the old end-and-recreate path is used for that one listing.
+
+## Step 3: open any eBay listing in Listflow
+
+- Listings → **Edit in Listflow** now works for every active listing, including ones made in the eBay app. It reads the listing from eBay (GetItem) and opens the linked Listflow draft, creating it the first time: title, price, condition, condition note, photos (eBay's own picture links), item specifics with the listing's category, store category, SKU (if it isn't already used by another draft) and eBay's description HTML. Then "Update on eBay" revises it in place.
+- Nothing on eBay changes until you tap Update. Descriptions up to eBay's 500,000-character limit are accepted.
