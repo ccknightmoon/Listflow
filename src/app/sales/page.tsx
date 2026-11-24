@@ -7,7 +7,7 @@
 // waits on eBay.
 
 import CurrencyInput from "@/components/CurrencyInput";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft, Download, ExternalLink, Lightbulb, Loader2, RefreshCw, Shirt,
@@ -16,6 +16,7 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import { loadSnapshot, saveSnapshot } from "@/lib/persisted-snapshot";
 import { salesNeedsRefresh, SALES_FOLLOWUP_MAX_AGE_S } from "@/lib/sales-freshness";
 import { buildLedger, compareWithSummary, payoutBridge, salesBreakdown, displayLines, LINE_LABELS, type EbaySummaryByStatus, type LedgerTx, type Payout, type PeriodRange } from "@/lib/ledger";
 import { saleEconomics, shippingSplit, categoryProfit, collapseCategories, bestAndWorst, staleListings, storeTips, activeCountAt, exactSellThroughTrend, type Snapshot } from "@/lib/store-insights";
@@ -200,6 +201,20 @@ export default function SalesPage() {
   useEffect(() => {
     loadRef.current = load;
   }, [load]);
+
+  // Instant open: the last feed saved on this device (up to 3 days old)
+  // shows while the live load below runs; the auto-refresh then replaces it.
+  useLayoutEffect(() => {
+    if (getPageCache<Feed>(FEED_CACHE_KEY, FEED_CACHE_MS)) return;
+    const snap = loadSnapshot<Feed>("sales", 3 * 86_400_000);
+    if (!snap?.value?.generatedAt || !Array.isArray(snap.value.sales)) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restores the device's saved copy before first paint (localStorage can't be read during server rendering)
+    setFeed(snap.value);
+    setLoading(false);
+  }, []);
+  useEffect(() => {
+    if (feed) saveSnapshot("sales", feed, null);
+  }, [feed]);
 
   // One load per visit (instant if this tab already has a fresh copy).
   useEffect(() => {

@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import NeedsAttention from "@/components/NeedsAttention";
 import { getPublishQueue, type PublishItem } from "@/lib/publish-queue";
 import Link from "next/link";
 import { Plus, ImagePlus, FileText, BarChart2, TrendingUp } from "lucide-react";
 import MorphLink from "@/components/MorphLink";
-import { createBrowserClient } from "@supabase/ssr";
+import { loadSnapshot, saveSnapshot, clearSnapshots } from "@/lib/persisted-snapshot";
 import { apiFetch } from "@/lib/api";
 import { bucketRevenue, type BucketableSale } from "@/lib/sales-buckets";
 import { formatMoney, formatMoneyShort } from "@/lib/format";
@@ -40,6 +40,8 @@ interface DashboardSummaryResponse {
   trendSales?: BucketableSale[] | null;
   /** Sales-feed lines (Sales page dates) for the last ~9 days, when the server has the feed. */
   weekSales?: HomeSale[] | null;
+  userId?: string | null;
+  displayName?: string | null;
   shipCount?: number | null;
   pendingOffers?: number | null;
   buyerQuestions?: number | null;
@@ -62,6 +64,38 @@ const TREND_DAYS = 28;
 // as "no data").
 function NumberSkeleton({ w, h }: { w: number; h: number }) {
   return <span aria-label="Loading" className="inline-block align-middle rounded-md animate-pulse" style={{ width: w, height: h, background: "var(--glass-line)" }} />;
+}
+
+// What Home saves on the device for an instant next open.
+interface HomeSnapshot {
+  stats?: Stats;
+  shipCount?: number;
+  displayName?: string;
+  trendSales?: BucketableSale[];
+  weekSales?: HomeSale[];
+  pendingOffers?: number;
+  buyerQuestions?: number;
+  staleListings?: number;
+  draftGaps?: { photo: number; price: number };
+}
+const HOME_SNAPSHOT = "home";
+
+/** Merge into the saved copy (userId null = keep the saved owner). */
+function persist(patch: HomeSnapshot, userId: string | null) {
+  const prev = loadSnapshot<HomeSnapshot>(HOME_SNAPSHOT);
+  saveSnapshot<HomeSnapshot>(HOME_SNAPSHOT, { ...(prev?.value ?? {}), ...patch }, userId ?? prev?.userId ?? null);
+}
+
+// Time-to-content on open, for before/after checks: ms since the page
+// started loading until numbers were on screen, from the saved copy and
+// from the live fetch. Read it with window.__listflowHome (or the console).
+function markHomeContent(source: "saved" | "live") {
+  if (typeof window === "undefined" || typeof performance === "undefined") return;
+  const w = window as unknown as { __listflowHome?: Record<string, number> };
+  w.__listflowHome = w.__listflowHome ?? {};
+  if (w.__listflowHome[source] !== undefined) return;
+  w.__listflowHome[source] = Math.round(performance.now());
+  console.info(`[listflow] Home numbers from ${source} copy at ${w.__listflowHome[source]} ms`);
 }
 
 function greeting(hour: number) {
@@ -108,14 +142,34 @@ export default function DashboardPage() {
   const failedListings = queueItems.filter((i) => i.status === "failed").length;
   const [staleListingsCount, setStaleListingsCount] = useState<number | null>(() => getPageCache<number>(STALE_LISTINGS_CACHE_KEY) ?? null);
 
-  const supabase = useMemo(
-    () =>
-      createBrowserClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
-      ),
-    []
-  );
+  // Instant paint on open: before the first paint, fill every number from
+  // the last copy saved on this device (src/lib/persisted-snapshot.ts) when
+  // this tab has nothing newer. The live fetch below then replaces it.
+  // True until this visit's fetch finishes (shown only over saved numbers).
+  const [updating, setUpdating] = useState(true);
+  const snapshotUser = useRef<string | null>(null);
+  function applySnapshot(v: HomeSnapshot) {
+    if (v.stats) setStats(v.stats);
+    setStatsLoaded(true);
+    if (v.shipCount != null) setShipCount(v.shipCount);
+    if (v.displayName) setDisplayName(v.displayName);
+    if (v.trendSales) setTrendSales(v.trendSales);
+    if (v.weekSales) setWeekSales(v.weekSales);
+    if (v.pendingOffers != null) setPendingOffersCount(v.pendingOffers);
+    if (v.buyerQuestions != null) setBuyerQuestionsCount(v.buyerQuestions);
+    if (v.staleListings != null) setStaleListingsCount(v.staleListings);
+    if (v.draftGaps) setDraftGaps(v.draftGaps);
+  }
+
+  useLayoutEffect(() => {
+    if (getPageCache<Stats>(STATS_CACHE_KEY) !== undefined) return;
+    const snap = loadSnapshot<HomeSnapshot>(HOME_SNAPSHOT);
+    if (!snap) return;
+    snapshotUser.current = snap.userId;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restores the device's saved copy before first paint (localStorage can't be read during server rendering)
+    applySnapshot(snap.value);
+    markHomeContent("saved");
+  }, []);
 
   useEffect(() => {
     setEyebrow(greeting(new Date().getHours()));
@@ -127,6 +181,13 @@ export default function DashboardPage() {
     void (async () => {
       try {
         const s = await apiFetch<DashboardSummaryResponse>("/api/dashboard/summary");
+        // The saved copy belonged to someone else (shared device): drop it.
+        if (s.userId && snapshotUser.current && snapshotUser.current !== s.userId) {
+          clearSnapshots();
+          snapshotUser.current = null;
+          setStats(null); setShipCount(null); setDisplayName(null); setTrendSales(null); setWeekSales(null);
+          setPendingOffersCount(null); setBuyerQuestionsCount(null); setStaleListingsCount(null); setDraftGaps(null);
+        }
         const prev = getPageCache<Stats>(STATS_CACHE_KEY);
         const keep = (v: number | null | undefined, old: number | null | undefined) =>
           s.connected === false ? (v ?? null) : (v ?? old ?? null);
@@ -149,24 +210,26 @@ export default function DashboardPage() {
         apply(s.pendingOffers, setPendingOffersCount, PENDING_OFFERS_CACHE_KEY);
         apply(s.buyerQuestions, setBuyerQuestionsCount, BUYER_QUESTIONS_CACHE_KEY);
         apply(s.staleListings, setStaleListingsCount, STALE_LISTINGS_CACHE_KEY);
+        apply(s.displayName, setDisplayName, DISPLAY_NAME_CACHE_KEY);
+        markHomeContent("live");
+        persist({
+          stats: nextStats,
+          shipCount: s.shipCount ?? undefined,
+          displayName: s.displayName ?? undefined,
+          trendSales: s.trendSales ?? undefined,
+          weekSales: s.weekSales ?? undefined,
+          pendingOffers: s.pendingOffers ?? undefined,
+          buyerQuestions: s.buyerQuestions ?? undefined,
+          staleListings: s.staleListings ?? undefined,
+        }, s.userId ?? null);
       } catch {
         // Transient failure: keep whatever (cached) numbers are showing.
       } finally {
         setStatsLoaded(true);
+        setUpdating(false);
       }
     })();
 
-    void (async () => {
-      const { data } = await supabase.auth.getUser();
-      const user = data.user;
-      const name =
-        user?.user_metadata?.full_name ||
-        user?.user_metadata?.name ||
-        user?.email?.split("@")[0] ||
-        null;
-      setDisplayName(name);
-      if (name) setPageCache(DISPLAY_NAME_CACHE_KEY, name);
-    })();
 
     // Drafts that can't be listed yet (Needs attention).
     void (async () => {
@@ -178,12 +241,13 @@ export default function DashboardPage() {
         const gaps = { photo: photo.total ?? 0, price: price.total ?? 0 };
         setDraftGaps(gaps);
         setPageCache(DRAFT_GAPS_CACHE_KEY, gaps);
+        persist({ draftGaps: gaps }, null);
       } catch {
         // leave as-is
       }
     })();
 
-  }, [supabase]);
+  }, []);
 
   const trend = trendSales ? bucketRevenue(trendSales, TREND_DAYS) : null;
   const trendMax = trend ? Math.max(1, ...trend.totals) : 1;
@@ -222,7 +286,10 @@ export default function DashboardPage() {
         style={{ background: "var(--glass)", border: "1px solid var(--glass-line)", backdropFilter: "blur(18px)", WebkitBackdropFilter: "blur(18px)" }}
       >
         <div>
-          <p className="text-[11px] font-semibold" style={{ color: "var(--text-tertiary)" }}>{eyebrow}</p>
+          <p className="text-[11px] font-semibold" style={{ color: "var(--text-tertiary)" }}>
+            {eyebrow}
+            {updating && statsLoaded && <span className="ml-2 font-normal opacity-80 animate-pulse" role="status">· updating…</span>}
+          </p>
           <h1 className="font-display font-bold text-lg mt-0.5">{displayName ?? "My store"}</h1>
         </div>
         <div

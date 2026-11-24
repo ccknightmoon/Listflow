@@ -51,11 +51,16 @@ export function useAiUsageWarning() {
 
   useEffect(() => {
     let alive = true;
-    void loadAiUsageShared().then((u) => {
-      if (alive && u) setUsage(u);
-    });
+    // A heads-up banner, not first-paint content: fetched a few seconds
+    // after open so it doesn't compete with the screen's own data.
+    const t = window.setTimeout(() => {
+      void loadAiUsageShared().then((u) => {
+        if (alive && u) setUsage(u);
+      });
+    }, 3000);
     return () => {
       alive = false;
+      window.clearTimeout(t);
     };
   }, []);
 

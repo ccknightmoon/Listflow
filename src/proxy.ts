@@ -1,3 +1,4 @@
+import { verifiedUser } from "@/lib/verified-user";
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { Ratelimit } from "@upstash/ratelimit";
@@ -43,7 +44,7 @@ import { Redis } from "@upstash/redis";
 // — that would have made every API route reachable with zero
 // authentication, reopening exactly the bypass this middleware was
 // rewritten to close. Do not reintroduce a blanket "/api" public rule.
-const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms", "/forgot-password", "/reset-password", "/manifest.webmanifest"];
+const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms", "/forgot-password", "/reset-password", "/manifest.webmanifest", "/sw.js"];
 // "/api/ebay/account-deletion": eBay's Marketplace Account Deletion
 // notifications (signed by eBay, verified in the route itself).
 const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout", "/api/cron", "/api/jobs/worker", "/api/ebay/account-deletion"];
@@ -102,6 +103,8 @@ const generalRatelimit = redis
   ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(60, "1 m"), analytics: true, prefix: "listflow:rl:general" })
   : null;
 
+const notPendingUntil = new Map<string, number>();
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -157,7 +160,9 @@ export async function proxy(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // Verified locally from the JWT (see verifiedUser in src/lib/auth.ts):
+  // no Supabase Auth round trip per request.
+  const user = await verifiedUser(supabase as never);
 
   if (pathname === "/login") {
     // Already signed in: no reason to see the login page again.
@@ -183,13 +188,27 @@ export async function proxy(request: NextRequest) {
   }
 
   if (!PENDING_DELETION_ALLOWED_PATHS.includes(pathname)) {
-    const { data: settings } = await supabase
-      .from("app_settings")
-      .select("deletion_requested_at")
-      .eq("user_id", user.id)
-      .maybeSingle();
+    // "Not pending" is remembered for a minute per server instance (one
+    // database trip fewer on almost every request). "Pending" is never
+    // remembered, so Reactivate takes effect at once; a fresh deletion
+    // request can take up to a minute to start redirecting (the purge is
+    // 30 days later anyway).
+    let pending = false;
+    const okUntil = notPendingUntil.get(user.id) ?? 0;
+    if (okUntil < Date.now()) {
+      const { data: settings } = await supabase
+        .from("app_settings")
+        .select("deletion_requested_at")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      pending = !!settings?.deletion_requested_at;
+      if (!pending) {
+        if (notPendingUntil.size > 5000) notPendingUntil.clear();
+        notPendingUntil.set(user.id, Date.now() + 60_000);
+      }
+    }
 
-    if (settings?.deletion_requested_at) {
+    if (pending) {
       if (pathname.startsWith("/api")) {
         return NextResponse.json(
           { error: "Account pending deletion", pendingDeletion: true },

@@ -4,6 +4,7 @@
 // (real fees, refunds, labels) and current active listings. The page
 // derives every 7/30/90-day view from this one payload.
 
+import { verifiedUser } from "@/lib/verified-user";
 import { tradingRequest } from "./ebay-inventory";
 import { fetchFinanceTransactions, fetchPayouts } from "./ebay-finances";
 import type { LedgerTx, Payout } from "./ledger";
@@ -142,10 +143,10 @@ export interface ListingSnapshot {
 async function loadAndRecordSnapshots(supabase: Supabase, activeCount: number | null, now: number): Promise<ListingSnapshot[] | null> {
   if (activeCount != null) {
     // Best-effort; fails quietly until migration 026 is applied.
-    const { data: auth } = await supabase.auth.getUser();
-    if (auth?.user) {
+    const user = await verifiedUser(supabase as never);
+    if (user) {
       await supabase.from("active_listing_snapshots").upsert({
-        user_id: auth.user.id,
+        user_id: user.id,
         snapshot_date: new Date(now).toISOString().slice(0, 10),
         active_count: activeCount,
         captured_at: new Date(now).toISOString(),

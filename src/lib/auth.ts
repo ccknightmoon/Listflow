@@ -48,9 +48,12 @@ export async function getServerSupabase() {
  *   if (!auth.user) return auth.unauthorized;
  *   const { supabase, user } = auth;
  */
+export { verifiedUser, type AuthedUser } from "@/lib/verified-user";
+import { verifiedUser } from "@/lib/verified-user";
+
 export async function requireUser() {
   const supabase = await getServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
+  const user = await verifiedUser(supabase as never);
   if (!user) {
     return {
       user: null as null,

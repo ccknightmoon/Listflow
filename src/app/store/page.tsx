@@ -13,7 +13,8 @@ import type { CutRow } from "@/lib/price-cut";
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
 import { formatMoney } from "@/lib/format";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { loadSnapshot, saveSnapshot } from "@/lib/persisted-snapshot";
 import Link from "next/link";
 import { ArrowLeft, Loader2, ExternalLink, Shirt, Trash2, Pencil, Search, X, ChevronRight, Check, Tag, RotateCcw, MessageCircle, RefreshCw, TrendingDown } from "lucide-react";
 import Toast from "@/components/Toast";
@@ -172,6 +173,19 @@ export default function StorePage() {
   // phases below, plus delist/price-update mutations further down — without
   // needing a separate cache write at each individual call site.
   useEffect(() => { setPageCache(STORE_CACHE_KEY, listings); }, [listings]);
+  // Instant open: show the last list saved on this device (up to 3 days
+  // old) while the live load runs; save the list after each real load.
+  useLayoutEffect(() => {
+    if (getPageCache<StoreListing[]>(STORE_CACHE_KEY) !== undefined) return;
+    const snap = loadSnapshot<StoreListing[]>("store", 3 * 86_400_000);
+    if (!snap || !Array.isArray(snap.value) || snap.value.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restores the device's saved copy before first paint (localStorage can't be read during server rendering)
+    setListings(snap.value);
+    setLoading(false);
+  }, []);
+  useEffect(() => {
+    if (!loading && listings.length > 0) saveSnapshot("store", listings, null);
+  }, [listings, loading]);
 
   async function handleDelist(listing: StoreListing) {
     if (!(await confirmAction({ title: "End this listing?", message: `"${listing.title}" will be removed from eBay.`, confirmLabel: "End listing", destructive: true }))) return;

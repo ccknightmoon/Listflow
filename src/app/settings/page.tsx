@@ -1,5 +1,7 @@
 "use client";
 
+import { clearSnapshots } from "@/lib/persisted-snapshot";
+import { clearOfflineCaches } from "@/lib/sw-register";
 import { confirmAction } from "@/lib/confirm";
 import { useEffect, useState } from "react";
 import Link from "next/link";
@@ -439,6 +441,8 @@ export default function SettingsPage() {
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
     );
+    clearSnapshots();
+    await clearOfflineCaches();
     await supabase.auth.signOut();
     window.location.href = "/login";
   }
@@ -466,7 +470,9 @@ export default function SettingsPage() {
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!
       );
-      await supabase.auth.signOut();
+      clearSnapshots();
+    await clearOfflineCaches();
+    await supabase.auth.signOut();
       window.location.href = "/login";
     } catch {
       setDeleteError("Couldn't start account deletion -- please try again.");

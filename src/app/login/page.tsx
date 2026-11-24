@@ -1,5 +1,6 @@
 "use client";
 
+import { clearSnapshots } from "@/lib/persisted-snapshot";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
@@ -97,6 +98,8 @@ export default function LoginPage() {
       setError(error.message);
       setLoading(false);
     } else {
+      // A new sign-in never shows the previous account's saved screens.
+      clearSnapshots();
       await callLockout("clear", email);
       router.push("/dashboard");
       router.refresh();

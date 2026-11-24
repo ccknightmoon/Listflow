@@ -3,7 +3,8 @@
 import { Z } from "@/lib/z-layers";
 import { ListSkeleton } from "@/components/ui";
 import { confirmAction } from "@/lib/confirm";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { loadSnapshot, saveSnapshot } from "@/lib/persisted-snapshot";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, Shirt, Loader2, Trash2, Upload, Search, X, Copy, Pencil } from "lucide-react";
@@ -153,6 +154,22 @@ export default function DraftsPage() {
   // load below, and the later mutations (delete, the post-bulk-list
   // refresh) — without needing a cache write at each individual call site.
   useEffect(() => { setPageCache(DRAFTS_CACHE_KEY, drafts); }, [drafts]);
+  // Instant open for the default view (all drafts, first page, newest
+  // first): the last copy saved on this device shows while the live list
+  // loads. Other filters/pages/searches always load live.
+  const isDefaultView = filter === "all" && page === 1 && !search && sort === "newest";
+  useLayoutEffect(() => {
+    if (getPageCache<Draft[]>(DRAFTS_CACHE_KEY) !== undefined) return;
+    const snap = loadSnapshot<{ drafts: Draft[]; total: number }>("drafts", 3 * 86_400_000);
+    if (!snap || !Array.isArray(snap.value?.drafts) || snap.value.drafts.length === 0) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- restores the device's saved copy before first paint (localStorage can't be read during server rendering)
+    setDrafts(snap.value.drafts);
+    setTotal(snap.value.total ?? snap.value.drafts.length);
+    setLoading(false);
+  }, []);
+  useEffect(() => {
+    if (!loading && isDefaultView) saveSnapshot("drafts", { drafts, total }, null);
+  }, [drafts, total, loading, isDefaultView]);
 
   async function loadNoPriceTotal() {
     try {

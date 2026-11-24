@@ -11,6 +11,7 @@ import type { BatchProgress } from "@/lib/jobs/types";
 
 const PUBLIC = ["/", "/login", "/privacy", "/terms", "/forgot-password", "/reset-password"];
 const ACTIVE_POLL_MS = 6000;
+const DEFER_MS = 2500;
 
 /**
  * Background batches (server queue): a small pill at the top while a batch
@@ -22,6 +23,7 @@ export default function JobsIndicator() {
   const isPublic = PUBLIC.includes(pathname) || pathname.startsWith("/account/pending");
   const [active, setActive] = useState<BatchProgress | null>(null);
   const wasActive = useRef(false);
+  const openedOn = useRef(pathname);
 
   useEffect(() => {
     if (isPublic) return;
@@ -39,7 +41,9 @@ export default function JobsIndicator() {
         timer = window.setTimeout(tick, ACTIVE_POLL_MS);
       }
     };
-    void kickJobs().then(tick);
+    // Not needed for the first paint: start the sweep a moment after open so
+    // it doesn't compete with the screen's own data (on /batches, at once).
+    const startTimer = window.setTimeout(() => void kickJobs().then(tick), openedOn.current === "/batches" ? 0 : DEFER_MS);
     const onStart = () => {
       window.clearTimeout(timer);
       void tick();
@@ -49,6 +53,7 @@ export default function JobsIndicator() {
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       stopped = true;
+      window.clearTimeout(startTimer);
       window.clearTimeout(timer);
       window.removeEventListener("listflow:jobs-started", onStart);
       document.removeEventListener("visibilitychange", onVisible);

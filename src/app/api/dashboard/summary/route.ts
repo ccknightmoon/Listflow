@@ -22,10 +22,12 @@ export async function GET(req: NextRequest) {
     .select("id", { count: "exact", head: true })
     .is("ebay_listing_id", null);
   const drafts = count ?? null;
+  // Who this is (for Home's greeting and to tie the device's saved copy to the right account).
+  const who = { userId: auth.user.id, displayName: auth.user.name ?? auth.user.email?.split("@")[0] ?? null };
 
   const connection = await requireEbayConnection(auth);
   if (!connection) {
-    return NextResponse.json({ connected: false, drafts }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ connected: false, drafts, ...who }, { headers: { "Cache-Control": "no-store" } });
   }
 
   const fresh = req.nextUrl.searchParams.get("fresh") === "1";
@@ -36,7 +38,7 @@ export async function GET(req: NextRequest) {
     // dates the Sales page uses (never calls eBay for it).
     const feed = peekSalesFeed(auth.user.id);
     const weekSales = feed ? homeSalesFromFeed(feed.sales, Date.now()) : null;
-    return NextResponse.json({ connected: true, drafts, ...summary, weekSales }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ connected: true, drafts, ...summary, weekSales, ...who }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
