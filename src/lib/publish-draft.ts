@@ -23,7 +23,8 @@ import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
 import { classifyGarment, categoryFits } from "@/lib/garment";
 import { publishApi } from "@/lib/trading-listing";
 import { publishDraftTrading, reviseDraftListing, type DraftRow } from "@/lib/trading-publish";
-import { getLiveItem } from "@/lib/ebay-item";
+import { getLiveItem, liveItemHash } from "@/lib/ebay-item";
+import { markSynced } from "@/lib/ebay-item-import";
 import { chooseCategory } from "@/lib/ebay-category";
 
 
@@ -84,6 +85,10 @@ export interface PublishBody {
   verifyOnly?: unknown;
   /** "Finish on eBay": list as a scheduled listing this many days ahead (1–21). */
   scheduleDays?: unknown;
+  /** Live listing fingerprint when the editor opened (two-way sync). */
+  baseHash?: unknown;
+  /** Replace eBay-side changes anyway (after the seller confirmed). */
+  force?: unknown;
 }
 
 export interface PublishContext {
@@ -308,8 +313,21 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
         if (live && live.status && live.status !== "Active") {
           return NextResponse.json({ error: `This listing is no longer active on eBay (${live.status}). Use Relist on the Listings page.`, listingEnded: true }, { status: 400 });
         }
+        // Never overwrite edits made on eBay (e.g. in the eBay app) since
+        // this draft was last synced or opened, unless the seller confirmed.
+        if (live && body.force !== true) {
+          const base = typeof body.baseHash === "string" && /^[0-9a-f]{32}$/.test(body.baseHash)
+            ? body.baseHash
+            : ((draft as { ebay_revision_hash?: string | null }).ebay_revision_hash ?? null);
+          if (base && base !== liveItemHash(live)) {
+            return NextResponse.json({ conflict: true, error: "This listing was changed on eBay after you opened it here." }, { status: 200 });
+          }
+        }
         const r = await reviseDraftListing(draft as DraftRow, { categoryId, sku, storeFooter, live });
         if (r.ok) {
+          // New fingerprint = in sync again (migration 034; no-op before).
+          const after = await getLiveItem(String(draft.ebay_listing_id)).catch(() => null);
+          if (after && !("error" in after)) await markSynced(supabase, userId, draftId, liveItemHash(after));
           return NextResponse.json({
             success: true,
             revised: true,

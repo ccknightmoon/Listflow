@@ -6,6 +6,7 @@ import { fetchListPage } from "@/lib/ebay-listings";
 import { xmlFind } from "@/lib/sales-parse";
 import { fetchEbayIdentity, storeEbayIdentity } from "@/lib/ebay-identity";
 import { maybeRunWeeklyBackup } from "@/lib/backup";
+import { sweepEbayChanges } from "@/lib/ebay-sync";
 import { sendBackupEmail } from "@/lib/email";
 
 export const runtime = "nodejs";
@@ -41,6 +42,8 @@ async function snapshotOne(
     if (!body.includes("<Ack>Success</Ack>") && !body.includes("<Ack>Warning</Ack>")) {
       return { userId: row.user_id, error: "eBay error" };
     }
+    // Daily: pull eBay-app edits into linked drafts (migration 034).
+    await ebayContext.run(connection, () => sweepEbayChanges(supabase, row.user_id, { limit: 25 })).catch(() => null);
     const activeCount = parseInt(xmlFind(xmlFind(body, "ActiveList"), "TotalNumberOfEntries") || xmlFind(body, "TotalNumberOfEntries") || "0", 10) || 0;
     const { error: upErr } = await supabase
       .from("active_listing_snapshots")

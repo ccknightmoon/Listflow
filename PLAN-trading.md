@@ -22,3 +22,11 @@ Why: listings made with eBay's Inventory API "cannot be edited through Seller Hu
 
 - Listings → **Edit in Listflow** now works for every active listing, including ones made in the eBay app. It reads the listing from eBay (GetItem) and opens the linked Listflow draft, creating it the first time: title, price, condition, condition note, photos (eBay's own picture links), item specifics with the listing's category, store category, SKU (if it isn't already used by another draft) and eBay's description HTML. Then "Update on eBay" revises it in place.
 - Nothing on eBay changes until you tap Update. Descriptions up to eBay's 500,000-character limit are accepted.
+
+## Step 4: two-way sync
+
+- **Opening a listed draft** re-reads the listing from eBay in the background. If only eBay changed since the last sync (e.g. you edited it in the eBay app), the draft takes eBay's version and reloads. If both changed, a banner asks: *Use eBay's version* or *Keep mine*.
+- **Update on eBay** sends the fingerprint taken when the editor opened. If the listing changed on eBay in the meantime, you're asked before eBay's version is replaced; nothing is overwritten silently.
+- **Background:** on app open (at most every 10 minutes) and in the daily job, `GetSellerEvents` lists what changed on eBay (last 48 h max), and linked drafts without local changes are refreshed (up to 15 per app open, 25 per day).
+- Only eBay-owned fields are copied from eBay (title, price, condition, note, photos, description, specifics, store category, brand/size/colour); SKU, cost and Listflow notes are never touched.
+- **Needs migration 034** for the saved fingerprints and the background sweep. Without it, the conflict check still works within an editing session, and nothing else changes.

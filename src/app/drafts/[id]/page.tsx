@@ -93,6 +93,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   // "Check with eBay": VerifyAddFixedPriceItem only -- validates the listing
   // and shows the fees without listing anything.
   const [checking, setChecking] = useState(false);
+  // Two-way sync (src/lib/ebay-sync.ts): the live listing's fingerprint when
+  // this editor opened, sent back with "Update on eBay" so changes made in
+  // the eBay app meanwhile are never overwritten silently.
+  const ebayBaseHash = useRef<string | null>(null);
+  const [ebaySync, setEbaySync] = useState<null | "updated" | "conflict" | "ended">(null);
   const [checkResult, setCheckResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [showPublishReview, setShowPublishReview] = useState(false);
   const [listingUrl, setListingUrl] = useState<string | null>(null);
@@ -257,7 +262,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         setSpecifics(sanitizeStoredSpecifics(d.item_specifics));
         setStoreCategoryId(d.store_category_id ?? null);
         setStoreCategoryName(d.store_category_name ?? null);
-        if (d.ebay_listing_id) setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
+        if (d.ebay_listing_id) {
+          setListingUrl(`https://www.ebay.com/itm/${d.ebay_listing_id}`);
+          // Re-read the live listing in the background (eBay-app edits).
+          void syncWithEbay(false);
+        }
         draftLoadedRef.current = true;
       } catch (err) {
 
@@ -267,6 +276,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       }
     }
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once per draft; syncWithEbay only reads stable refs/setters
   }, [id]);
 
   useEffect(() => {
@@ -471,6 +481,25 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     setShowPublishReview(true);
   }
 
+  async function syncWithEbay(useEbay: boolean) {
+    try {
+      const r = await apiFetch<{ status?: string; hash?: string }>("/api/ebay/item/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: id, useEbay }),
+      });
+      if (r.hash) ebayBaseHash.current = r.hash;
+      if (r.status === "updated") {
+        // eBay had newer details and nothing was changed here: reload them.
+        window.location.reload();
+        return;
+      }
+      setEbaySync(r.status === "conflict" ? "conflict" : r.status === "ended" ? "ended" : null);
+    } catch {
+      // Offline / eBay hiccup: editing still works; the update re-checks.
+    }
+  }
+
   async function handleCheckWithEbay() {
     setChecking(true);
     setCheckResult(null);
@@ -501,7 +530,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  async function handlePublish() {
+  async function handlePublish(forceOverwrite = false) {
     setListing(true);
     setShowPublishReview(false);
     setError(null);
@@ -512,7 +541,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       // stale data was already there with no warning at all.
       await saveDraft();
 
-      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; missingRequiredAspects?: string[]; url?: string; listingId?: string; storeCategoryWarning?: string }>("/api/ebay/list", {
+      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; conflict?: boolean; error?: string; missingRequiredAspects?: string[]; url?: string; listingId?: string; storeCategoryWarning?: string }>("/api/ebay/list", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -528,8 +557,21 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           // makes that same true/false explicit to the server's idempotent-
           // publish guard instead of leaving it to infer intent.
           allowRelist: Boolean(listingUrl),
+          baseHash: ebayBaseHash.current ?? undefined,
+          force: forceOverwrite || undefined,
         }),
       });
+      if (data.conflict) {
+        setListing(false);
+        if (await confirmAction({
+          title: "This listing was changed on eBay",
+          message: "Someone (maybe you, in the eBay app) edited it after you opened it here. Update anyway and replace eBay's version with this one?",
+          confirmLabel: "Replace eBay's version",
+          destructive: true,
+        })) return handlePublish(true);
+        setEbaySync("conflict");
+        return;
+      }
       if (data.connect) { setNeedsConnect(true); throw new Error(data.error ?? "Failed to list"); }
       if (data.reconnect) { setNeedsReconnect(true); throw new Error(data.error ?? "Failed to list"); }
       // Save all form values + ebay_listing_id together so nothing gets wiped
@@ -983,6 +1025,19 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             "Consider editing the listing on eBay to fill them in for better search placement."
           )}
         </div>
+      )}
+
+      {ebaySync === "conflict" && (
+        <div className="card p-3 mb-4 text-sm" role="alert" style={{ borderColor: "var(--warning-border)", background: "var(--warning-bg)", color: "var(--warning-border)" }}>
+          This listing was changed on eBay, and this draft also has changes that aren&apos;t on eBay yet.
+          <div className="flex gap-2 mt-2">
+            <button type="button" className="btn text-xs py-1.5 px-2.5" onClick={() => void syncWithEbay(true)}>Use eBay&apos;s version</button>
+            <button type="button" className="btn text-xs py-1.5 px-2.5" onClick={() => setEbaySync(null)}>Keep mine (Update on eBay to send it)</button>
+          </div>
+        </div>
+      )}
+      {ebaySync === "ended" && (
+        <div className="card p-3 mb-4 text-sm" role="status">This listing has ended on eBay. Relist it from the Listings page.</div>
       )}
 
       {checkResult && (
