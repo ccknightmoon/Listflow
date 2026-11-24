@@ -542,6 +542,9 @@ export async function relistItemByListingId(listingId: string): Promise<{ succes
       "RelistFixedPriceItem",
       `<?xml version="1.0" encoding="utf-8"?><RelistFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><Item><ItemID>${listingId}</ItemID></Item></RelistFixedPriceItemRequest>`
     );
+    if (/<ErrorCode>21919474<\/ErrorCode>|Inventory-based listing management/i.test(body)) {
+      return { success: false, error: "This listing was made with eBay's Inventory API, which can't be relisted this way. Open its draft in Listflow and tap List on eBay (or relist it in the eBay app)." };
+    }
     if (body.includes("<Ack>Success</Ack>") || body.includes("<Ack>Warning</Ack>")) {
       const newItemId = body.match(/<ItemID>(.*?)<\/ItemID>/)?.[1];
       return { success: true, newItemId };

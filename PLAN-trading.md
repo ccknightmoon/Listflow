@@ -37,3 +37,12 @@ Why: listings made with eBay's Inventory API "cannot be edited through Seller Hu
 - **Fee (checked Nov 24, 2026):** eBay's US "Selling fees" help page lists *Scheduled Listing* as free (eBay.ca and eBay.co.uk say the same). The usual insertion-fee rules apply as for any listing (free within the monthly free-listing allowance). The confirm dialog says this before anything is sent.
 - **Listings → Scheduled** (`/store/scheduled`): every scheduled listing on eBay (`GetMyeBaySelling` ScheduledList), including ones scheduled in the eBay app, with **Finish** (opens it in Listflow's editor) and View on eBay.
 - The schedule date is saved on the draft with migration 034 (`ebay_scheduled_for`); not needed for any of this to work.
+
+## Step 6: price drops, bulk price, relist, store category
+
+- **Price drop / bulk price cuts** (Listings, background tray): `ReviseFixedPriceItem` with the new price. This works on Trading listings (everything Listflow lists from now on, and everything made on eBay.com). For a legacy Inventory-API listing (eBay error 21919474) it now changes the price through the listing's Inventory offer instead (found by SKU), so it works for both.
+- **Relist** (Listings → Ended): `RelistFixedPriceItem` works for Trading listings. The linked Listflow draft now follows the new item number eBay gives a relisted listing (it used to keep pointing at the ended one). A legacy Inventory-API listing gets a clear message (list it again from its draft, or relist in the eBay app).
+- **Store category**: sent inside AddFixedPriceItem / ReviseFixedPriceItem (`Storefront.StoreCategoryID`), so there's no separate call that can fail after listing. The old separate call is only used by the Inventory path.
+- **End listing** already uses Trading `EndItem`, which works for both kinds.
+
+**Legacy listings found:** 4 drafts already have eBay item numbers (created Jun 20 – Sep 11, 2026, no publish date recorded): items 168476823728, 168477212439, 168526572701, 168679902532. If they were listed through Listflow back then, they're Inventory-API listings. Everything above falls back correctly for them.

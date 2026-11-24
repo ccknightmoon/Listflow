@@ -5,6 +5,7 @@ import { invalidateListingsAround } from "@/lib/ebay-listings";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { MIN_PRICE, priceFloor } from "@/lib/price-floor";
+import { isInventoryModelResponse, updateInventoryListingPrice } from "@/lib/legacy-inventory";
 
 export const runtime = "nodejs";
 
@@ -59,7 +60,17 @@ export async function POST(req: NextRequest) {
       `<?xml version="1.0" encoding="utf-8"?><ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents"><Item><ItemID>${listingId}</ItemID><StartPrice>${numPrice.toFixed(2)}</StartPrice></Item></ReviseFixedPriceItemRequest>`
     );
 
-    if (!result.body.includes("<Ack>Success</Ack>") && !result.body.includes("<Ack>Warning</Ack>")) {
+    // Listings made earlier with the Inventory API can't be revised through
+    // Trading (error 21919474): change the price through their offer.
+    if (isInventoryModelResponse(result.body)) {
+      let sku: string | null = null;
+      if (draftId) {
+        const { data: d } = await supabase.from("drafts").select("custom_sku").eq("id", draftId).eq("user_id", auth.user.id).maybeSingle();
+        sku = (d?.custom_sku as string | null) ?? null;
+      }
+      const inv = await updateInventoryListingPrice(String(listingId), numPrice, sku);
+      if (!inv.success) return NextResponse.json({ error: inv.error }, { status: 400 });
+    } else if (!result.body.includes("<Ack>Success</Ack>") && !result.body.includes("<Ack>Warning</Ack>")) {
       const errMsg = result.body.match(/<LongMessage>([\s\S]*?)<\/LongMessage>/)?.[1]?.trim()
         || result.body.match(/<ShortMessage>([\s\S]*?)<\/ShortMessage>/)?.[1]?.trim()
         || "eBay update failed";

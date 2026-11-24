@@ -38,6 +38,11 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: `eBay relist failed: ${result.error || "(empty response)"}` }, { status: 400 });
       }
 
+      // Keep the linked Listflow draft pointing at the live listing (eBay
+      // gives a relisted item a new item number).
+      if (result.newItemId && /^\d{9,15}$/.test(result.newItemId)) {
+        await auth.supabase.from("drafts").update({ ebay_listing_id: result.newItemId }).eq("user_id", auth.user.id).eq("ebay_listing_id", listingId);
+      }
       return NextResponse.json({ success: true, newListingId: result.newItemId });
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 500 });
