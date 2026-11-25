@@ -6,6 +6,7 @@ import Sheet from "@/components/Sheet";
 import { apiFetch } from "@/lib/api";
 import { offerCustom, rankOptions, toggleValue, windowRange } from "@/lib/combobox";
 import { optionsFor } from "@/lib/aspect-fallbacks";
+import { effectiveMode } from "@/lib/size-mapping";
 import type { AspectDef } from "@/lib/item-specifics";
 
 const ROW = 44;
@@ -43,7 +44,7 @@ export default function AspectPicker({
   const [loading, setLoading] = useState(false);
   const [draft, setDraft] = useState<string[]>(values);
   const listRef = useRef<HTMLDivElement | null>(null);
-  const freeText = def.mode !== "SELECTION_ONLY";
+  const freeText = effectiveMode(def) !== "SELECTION_ONLY";
 
   // Full-list search on the server when the browser copy is partial.
   useEffect(() => {
@@ -67,8 +68,8 @@ export default function AspectPicker({
   const base = useMemo(() => {
     const list = optionsFor(def).values;
     const extra = values.filter((v) => !list.some((x) => x.toLowerCase() === v.toLowerCase()));
-    return [...(def.mode === "SELECTION_ONLY" ? [] : extra), ...list];
-  }, [def, values]);
+    return [...(freeText ? extra : []), ...list];
+  }, [def, values, freeText]);
   const options = useMemo(() => (useRemote && remote) ? remote : rankOptions(base, query, 5000), [useRemote, remote, base, query]);
   const custom = offerCustom(query, options, freeText);
   const rows: Array<{ kind: "custom"; value: string } | { kind: "opt"; value: string }> = useMemo(

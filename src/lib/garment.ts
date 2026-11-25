@@ -62,7 +62,26 @@ export function categoryFits(kind: GarmentKind, path: string): { ok: boolean; re
   if (isTopLike(kind) && has(/\b(shoes|footwear|hats|caps|jewelry|handbags)\b/)) return { ok: false, reason: "clothing in an accessories category" };
   if (kind === "bottom" && has(/\b(shoes|footwear|hats|caps|jewelry)\b/)) return { ok: false, reason: "clothing in an accessories category" };
   if (kind === "sports-jersey" && !has(/\b(jerseys?|fan apparel|shirts?|tops|activewear)\b/)) return { ok: false, reason: "a jersey outside a jerseys/fan apparel/tops category" };
+  // Nov 25, 2026: a short-sleeve polo was filed as outerwear. Tops and
+  // outerwear are both "top-like" (same measurements/aspects) but never the
+  // same eBay leaf: a shirt/polo/tee never goes in Coats & Jackets, and a
+  // jacket/coat never goes in T-Shirts/Polos/Dress Shirts.
+  const coatsLeaf = /\b(coats?|jackets?|vests?|outerwear|blazers?|suits? & suit separates)\b/;
+  const shirtLeaf = /\b(t-shirts|polos|dress shirts|casual button-down shirts|tank tops|tops & blouses|blouses)\b/;
+  if (kind === "top" && has(coatsLeaf) && !has(/\b(shirts?|tops|tees|polos|blouses)\b/)) return { ok: false, reason: "a shirt/top in a coats & jackets category" };
+  if (kind === "outerwear" && has(shirtLeaf) && !has(coatsLeaf)) return { ok: false, reason: "a jacket/coat/sweater in a shirts category" };
   return { ok: true };
+}
+
+/**
+ * Kind implied by an item-specific "Type"/"Style" value ("Polo" → top,
+ * "Jacket" → outerwear), or null when the value says nothing about it.
+ */
+export function kindFromTypeValue(value: string | null | undefined): GarmentKind | null {
+  const v = (value ?? "").trim();
+  if (!v) return null;
+  const k = classifyGarment(v, null);
+  return k === "unknown" ? null : k;
 }
 
 /** eBay category-suggestion queries to try, most precise first. */
@@ -194,6 +213,15 @@ export function consistencyIssues(f: { title?: string | null; kind: GarmentKind;
   }
   for (const t of [...get(f.aspects, "Type"), ...get(f.aspects, "Style")]) {
     if (valueContradictsKind("Type", t, f.kind)) issues.push(`Type/Style "${t}" doesn't match this item.`);
+  }
+  // The item's own Type vs the eBay category ("Polo" in Coats & Jackets).
+  if (f.categoryPath) {
+    for (const t of get(f.aspects, "Type")) {
+      const tk = kindFromTypeValue(t);
+      if (!tk) continue;
+      const fit = categoryFits(tk, f.categoryPath);
+      if (!fit.ok) issues.push(`Category looks wrong: Type is "${t}" but the category is ${f.categoryPath.split(">").pop()?.trim()}. Change the category.`);
+    }
   }
   const allowed = measurementKeysFor(f.kind);
   for (const k of f.measurementKeys ?? []) {

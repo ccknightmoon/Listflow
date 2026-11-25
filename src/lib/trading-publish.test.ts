@@ -2,8 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fakeSupabase } from "@/test/fake-supabase";
 import type { TradingItemInput, TradingResult } from "@/lib/trading-listing";
 
+const { aspectDefsMock } = vi.hoisted(() => ({ aspectDefsMock: { defs: [] as unknown[] } }));
 vi.mock("@/lib/ebay-aspects", () => ({
-  fetchAspectDefs: async () => [],
+  fetchAspectDefs: async () => aspectDefsMock.defs,
   fetchAllowedConditions: async () => ["USED_EXCELLENT", "PRE_OWNED_EXCELLENT"],
 }));
 vi.mock("@/lib/ebay-inventory", async (orig) => {
@@ -145,5 +146,52 @@ describe("Best Offer floor on publish", () => {
     call.mockClear();
     await reviseDraftListing({ ...draft, ebay_listing_id: "256000000013" } as never, { categoryId: "155183", sku: "1001", storeFooter: null }, call as never);
     expect((call.mock.calls[0] as unknown as [string, TradingItemInput])[1].bestOffer).toBeUndefined();
+  });
+});
+
+describe("Size pre-flight + tag size in the title (Nov 25, 2026 Lacoste bug)", () => {
+  it("titleWithMappedSize keeps the tag size and adds eBay's", async () => {
+    const { titleWithMappedSize } = await import("@/lib/trading-publish");
+    expect(titleWithMappedSize("Vtg Lacoste Men's stripe Polo Shirt Size 9 Beige", "9", "4XL", "Lacoste size 9 = 4XL"))
+      .toBe("Vtg Lacoste Men's stripe Polo Shirt Size 9 (4XL) Beige");
+    expect(titleWithMappedSize("Polo Size XXL", "XXL", "2XL", "Tag size XXL = 2XL")).toBe("Polo Size XXL"); // spelling fix only
+    expect(titleWithMappedSize("A".repeat(75) + " Size 9", "9", "4XL", "Lacoste size 9 = 4XL")).toBe("A".repeat(75) + " Size 9"); // > 80
+    expect(titleWithMappedSize("Lacoste Polo", "9", "4XL", "Lacoste size 9 = 4XL")).toBe("Lacoste Polo");
+  });
+  it("rejectedValuesError names the field and valid choices", async () => {
+    const { rejectedValuesError } = await import("@/lib/trading-publish");
+    expect(rejectedValuesError([])).toBeNull();
+    expect(rejectedValuesError([{ name: "Size", value: "9", options: ["XS", "S", "M"] }])).toBe('"9" is not a valid value for Size. Pick one of eBay\'s values (e.g. XS, S, M).');
+  });
+});
+
+describe("never sends an off-list Size to eBay", () => {
+  const SIZES = ["2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL", "4XL", "5XL", "6XL", "S/M"];
+  const sizeDef = { name: "Size", required: true, recommended: false, mode: "FREE_TEXT", multi: false, values: SIZES };
+  const brandDef = { name: "Brand", required: true, recommended: false, mode: "FREE_TEXT", multi: false, values: [] };
+  it("an unmappable '9' stops before eBay with the field named (no Verify call)", async () => {
+    aspectDefsMock.defs = [sizeDef, brandDef];
+    try {
+      const call = vi.fn(async () => ok());
+      const d = { ...draft, title: "Nike Polo Size 9", brand: "Nike", size: "9", item_type: "Polo" };
+      const res = await publishDraftTrading(args({ draft: d }), call as never);
+      const body = await res.json();
+      expect(res.status).toBe(400);
+      expect(body.error).toMatch(/"9" is not a valid value for Size/);
+      expect(call).not.toHaveBeenCalled();
+    } finally { aspectDefsMock.defs = []; }
+  });
+  it("Lacoste '9' is sent as 4XL, title keeps the tag size", async () => {
+    aspectDefsMock.defs = [sizeDef, brandDef];
+    try {
+      const calls: Array<[string, TradingItemInput]> = [];
+      const call = vi.fn(async (c: string, item: TradingItemInput) => { calls.push([c, item]); return ok(); });
+      const d = { ...draft, title: "Vtg Lacoste Men's stripe Polo Shirt Size 9 Beige", brand: "Lacoste", size: "9", item_type: "Polo" };
+      const res = await publishDraftTrading(args({ draft: d, verifyOnly: true }), call as never);
+      expect((await res.json()).verified).toBe(true);
+      expect(calls[0][1].aspects?.Size).toEqual(["4XL"]);
+      expect(calls[0][1].title).toBe("Vtg Lacoste Men's stripe Polo Shirt Size 9 (4XL) Beige");
+      expect(calls.map((c) => c[0])).toEqual(["VerifyAddFixedPriceItem"]);
+    } finally { aspectDefsMock.defs = []; }
   });
 });

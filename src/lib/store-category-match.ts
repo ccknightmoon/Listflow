@@ -13,6 +13,8 @@
 // or fuzzy match risks silently mis-filing an item into the wrong shelf of
 // someone's storefront, which is worse than suggesting nothing and letting
 // the seller (or the AI pass) pick.
+import { classifyGarment, type GarmentKind } from "@/lib/garment";
+
 export interface StoreCategoryLite {
   id: string;
   name: string;
@@ -103,5 +105,92 @@ export function matchStoreCategoryByKeyword(
     }
   }
 
-  return best;
+  if (best) return best;
+  // Nothing matched word-for-word (a "Polo" never contains the words
+  // "Tops, Tees & Sweaters"): fall back to the kind of garment, so a polo
+  // lands on the tops shelf and a jacket on the outerwear shelf.
+  return matchStoreCategoryByKind(item, categories);
+}
+
+// Shelf words per kind of item. Used both to suggest a store category and
+// to flag one that clearly belongs to another kind (Nov 25, 2026: a polo
+// ended up in "Outerwear & Coats").
+const KIND_WORDS: Record<GarmentKind, string[]> = {
+  top: ["top", "tee", "tshirt", "t", "shirt", "polo", "blouse", "tank", "henley", "button"],
+  "sports-jersey": ["jersey", "sport", "fan", "team", "top", "shirt", "athletic"],
+  outerwear: ["outerwear", "coat", "jacket", "vest", "parka", "blazer", "hoodie", "sweatshirt", "sweater", "cardigan", "fleece", "pullover", "knit", "knitwear", "sweat"],
+  bottom: ["bottom", "pant", "jean", "short", "trouser", "jogger", "legging", "skirt", "denim", "chino"],
+  dress: ["dress", "gown", "jumpsuit", "romper"],
+  shoes: ["shoe", "sneaker", "boot", "footwear", "sandal", "heel", "kick"],
+  hat: ["hat", "cap", "headwear", "beanie", "snapback"],
+  bag: ["bag", "handbag", "purse", "backpack", "tote", "wallet"],
+  jewelry: ["jewelry", "jewellery", "necklace", "ring", "bracelet", "earring", "watch"],
+  accessory: ["accessory", "accessorie", "accessories", "belt", "scarf", "sunglass", "glove", "tie", "sock"],
+  unknown: [],
+};
+
+function categoryWordSet(name: string): Set<string> {
+  const set = new Set<string>();
+  for (const raw of splitWords(name.replace(/t-shirts?/gi, "tshirt"))) for (const v of wordVariants(raw)) set.add(v);
+  return set;
+}
+
+/** Which kinds of item a store category name is clearly for ("Outerwear & Coats" → outerwear). */
+export function storeCategoryKinds(name: string): GarmentKind[] {
+  const words = categoryWordSet(name);
+  return (Object.keys(KIND_WORDS) as GarmentKind[]).filter((k) => KIND_WORDS[k].some((w) => w.length > 1 && words.has(w)));
+}
+
+function kindOf(item: { title?: string | null; itemType?: string | null }): GarmentKind {
+  return classifyGarment(item.itemType ?? null, item.title ?? null);
+}
+
+/** Store category for the item's kind of garment (best word overlap), or null. */
+export function matchStoreCategoryByKind(
+  item: { title?: string | null; itemType?: string | null; brand?: string | null },
+  categories: StoreCategoryLite[],
+): StoreCategoryLite | null {
+  const kind = kindOf(item);
+  if (kind === "unknown") return null;
+  const itemWords = significantWordVariantSet([item.title, item.itemType].filter(Boolean).join(" "));
+  const kindWords = new Set(KIND_WORDS[kind]);
+  let best: StoreCategoryLite | null = null;
+  let bestScore = 0;
+  const allKindWords = new Set(Object.values(KIND_WORDS).flat());
+  for (const c of categories) {
+    if (storeCategoryConflict(item, c)) continue;
+    // Only plain "shelf" names ("Tops, Tees & Sweaters", "Outerwear &
+    // Coats"). A name with its own descriptors ("Vintage Band Tees") still
+    // needs the strict every-word match above.
+    const entries = significantWordEntries(c.name.replace(/t-shirts?/gi, "tshirt"));
+    if (!entries.length || !entries.every((variants) => variants.some((v) => allKindWords.has(v)))) continue;
+    const words = categoryWordSet(c.name);
+    let score = 0;
+    for (const w of words) {
+      if (itemWords.has(w)) score += 3;
+      if (kindWords.has(w) && w.length > 1) score += 1;
+    }
+    if (score > bestScore) { bestScore = score; best = c; }
+  }
+  return bestScore >= 1 ? best : null;
+}
+
+/**
+ * The store category clearly belongs to a different kind of item (a polo
+ * in "Outerwear & Coats"). Names that don't say what they hold ("Vintage",
+ * "New Arrivals") never conflict.
+ */
+export function storeCategoryConflict(
+  item: { title?: string | null; itemType?: string | null },
+  category: Pick<StoreCategoryLite, "name"> | null | undefined,
+): string | null {
+  if (!category) return null;
+  const kind = kindOf(item);
+  if (kind === "unknown") return null;
+  const kinds = storeCategoryKinds(category.name);
+  if (kinds.length === 0 || kinds.includes(kind)) return null;
+  // A jersey is a top too.
+  if (kind === "sports-jersey" && kinds.includes("top")) return null;
+  const what = (item.itemType ?? "").trim() || kind;
+  return `Store category "${category.name}" doesn't fit a ${what.toLowerCase()} — pick the right shelf`;
 }

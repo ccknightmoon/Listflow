@@ -5,6 +5,8 @@ import { AlertTriangle, ChevronDown, ChevronUp, ListChecks, FolderTree, Loader2,
 import { apiFetch } from "@/lib/api";
 import AspectPicker from "@/components/AspectPicker";
 import { normalizeSpecifics } from "@/lib/normalize-specifics";
+import { strictDefs } from "@/lib/size-mapping";
+import { aspectProblems } from "@/lib/listing-problems";
 import { isRejectedValue, matchAllowedValue, missingRequiredAspects, suggestAllowedValues, type AspectDef, type Aspects } from "@/lib/item-specifics";
 
 /**
@@ -26,6 +28,7 @@ export default function SpecificsEditor({
   disabled,
   onMeta,
   onCategoryChange,
+  highlight,
 }: {
   aspects: Aspects;
   onChange: (next: Aspects, meta: { categoryId: string | null; missingRequired: string[] }) => void;
@@ -40,8 +43,10 @@ export default function SpecificsEditor({
   title?: string | null;
   itemType?: string | null;
   disabled?: boolean;
-  /** Fires whenever the category or the list of missing required aspects changes. */
-  onMeta?: (meta: { categoryId: string | null; missingRequired: string[] }) => void;
+  /** Fires whenever the category, the missing required aspects or the off-list values change. */
+  onMeta?: (meta: { categoryId: string | null; missingRequired: string[]; invalid: Array<{ name: string; value: string }> }) => void;
+  /** Aspects eBay just complained about (from its error): outlined in red and scrolled to. */
+  highlight?: string[];
 }) {
   const [fetched, setFetched] = useState<{ categoryId: string | null; categoryPath?: string | null; categoryNeedsReview?: boolean; defs: AspectDef[] } | null>(null);
   const [picking, setPicking] = useState(false);
@@ -55,8 +60,10 @@ export default function SpecificsEditor({
   // passes it back in — never a stale list from the previous category.
   const [changed, setChanged] = useState<{ categoryId: string; defs: AspectDef[] } | null>(null);
   const catId = changed?.categoryId ?? categoryId ?? fetched?.categoryId ?? null;
+  // strictDefs: older saved analyses carry eBay's raw "FREE_TEXT" Size;
+  // eBay rejects off-list sizes, so the picker/validation treat it as a list.
   const defs = useMemo(
-    () => (changed && changed.categoryId === catId ? changed.defs : givenDefs ?? (fetched && (!categoryId || fetched.categoryId === categoryId) ? fetched.defs : [])),
+    () => strictDefs(changed && changed.categoryId === catId ? changed.defs : givenDefs ?? (fetched && (!categoryId || fetched.categoryId === categoryId) ? fetched.defs : [])),
     [changed, catId, givenDefs, fetched, categoryId],
   );
 
@@ -99,11 +106,33 @@ export default function SpecificsEditor({
 
   const missing = missingRequiredAspects(aspects, defs);
   const missingKey = missing.join("|");
+  // Off-list values for list-only aspects (Size "9"): eBay rejects them, so
+  // they block listing just like a missing required aspect.
+  const invalid = aspectProblems(aspects, defs).filter((p) => p.kind === "invalid").map((p) => ({ name: p.aspect, value: p.value ?? "" }));
+  const invalidKey = invalid.map((x) => `${x.name}=${x.value}`).join("|");
   const metaRef = useRef(onMeta);
   useEffect(() => { metaRef.current = onMeta; }, [onMeta]);
   useEffect(() => {
-    metaRef.current?.({ categoryId: catId, missingRequired: missingKey ? missingKey.split("|") : [] });
-  }, [catId, missingKey]);
+    metaRef.current?.({
+      categoryId: catId,
+      missingRequired: missingKey ? missingKey.split("|") : [],
+      invalid: invalidKey ? invalidKey.split("|").map((kv) => { const i = kv.indexOf("="); return { name: kv.slice(0, i), value: kv.slice(i + 1) }; }) : [],
+    });
+  }, [catId, missingKey, invalidKey]);
+  const hl = new Set((highlight ?? []).map((h) => h.toLowerCase()));
+  const hlKey = [...hl].join("|");
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  // Jump to the field eBay complained about (opening the panel if closed).
+  useEffect(() => {
+    if (!hlKey) return;
+    const t0 = window.setTimeout(() => setOpen(true), 0);
+    const t = window.setTimeout(() => {
+      const el = rootRef.current?.querySelector<HTMLElement>("[data-aspect-highlight='true'] button");
+      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+      el?.focus({ preventScroll: true });
+    }, 60);
+    return () => { window.clearTimeout(t0); window.clearTimeout(t); };
+  }, [hlKey]);
   const filled = Object.values(aspects).filter((v) => v?.length).length;
   const valueOf = (name: string) => {
     const key = Object.keys(aspects).find((k) => k.toLowerCase() === name.toLowerCase());
@@ -111,6 +140,8 @@ export default function SpecificsEditor({
   };
 
   const required = defs.filter((d) => d.required);
+  // An aspect eBay flagged but this list wouldn't otherwise show (empty, not required).
+  const flaggedExtra = defs.filter((d) => hl.has(d.name.toLowerCase()) && !d.required && !valueOf(d.name).length);
   // Only this category's aspects are shown (and sent to eBay). Older saved
   // extras without eBay metadata appear only while the list isn't loaded.
   const filledOther = [
@@ -139,14 +170,32 @@ export default function SpecificsEditor({
     // allowed value matches (casing/synonyms like "USA" are fine).
     const rejected = vals.filter((v) => isRejectedValue(v, d));
     const offList = rejected.length > 0;
+    const flagged = hl.has(d.name.toLowerCase());
     const labelId = `asp-label-${d.name.replace(/[^a-z0-9]/gi, "-").toLowerCase()}`;
     return (
-      <div key={d.name} className="flex flex-col gap-1 min-w-0" role="group" aria-labelledby={labelId}>
-        <span id={labelId} className="text-[11px] font-semibold flex items-center gap-1" style={{ color: isMissing ? "var(--danger)" : "var(--text-secondary)" }}>
+      <div key={d.name} className="flex flex-col gap-1 min-w-0" role="group" aria-labelledby={labelId}
+        data-aspect-highlight={flagged || offList ? "true" : undefined}
+        style={flagged ? { outline: "2px solid var(--danger)", outlineOffset: 3, borderRadius: 10 } : undefined}>
+        <span id={labelId} className="text-[11px] font-semibold flex items-center gap-1" style={{ color: isMissing || flagged || offList ? "var(--danger)" : "var(--text-secondary)" }}>
           {d.name}
           {d.required && <span className="text-[9px] px-1 rounded" style={{ background: isMissing ? "var(--warning-bg)" : "var(--glass)", border: `1px solid ${isMissing ? "var(--warning-border)" : "var(--glass-line)"}` }}>Required</span>}
         </span>
-        <AspectPicker def={d} values={vals} categoryId={catId} missing={isMissing} disabled={disabled} onChange={(next) => set(d, next)} />
+        <AspectPicker def={d} values={vals} categoryId={catId} missing={isMissing || flagged || offList} disabled={disabled} onChange={(next) => set(d, next)} />
+        {flagged && !offList && !isMissing && (
+          <span className="text-[10px]" style={{ color: "var(--danger)" }} role="alert">eBay flagged this field — check the value.</span>
+        )}
+        {flagged && isMissing && d.values.length > 0 && (
+          <span className="text-[10px] flex flex-wrap items-center gap-1" style={{ color: "var(--danger)" }} role="alert">
+            Needs your pick:
+            {d.values.slice(0, 6).map((sug) => (
+              <button key={sug} type="button" disabled={disabled} onClick={(e) => { e.preventDefault(); set(d, [sug]); }}
+                className="px-1.5 py-0.5 rounded-md font-semibold" style={{ background: "var(--accent-tint)", color: "var(--accent)" }}>
+                {sug}
+              </button>
+            ))}
+            <span>or open the list.</span>
+          </span>
+        )}
         {offList && (
           <span className="text-[10px] flex flex-wrap items-center gap-1" style={{ color: "var(--danger)" }} role="alert">
             eBay doesn&apos;t accept &ldquo;{rejected[0]}&rdquo; here.
@@ -252,7 +301,7 @@ export default function SpecificsEditor({
   if (!defs.length && filled === 0 && !shownPath && !catId) return null;
 
   return (
-    <div className="card p-3 mb-4">
+    <div className="card p-3 mb-4" ref={rootRef}>
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 text-left" aria-expanded={open}>
         <ListChecks className="w-4 h-4" style={{ color: "var(--accent)" }} />
         <span className="text-sm font-semibold flex-1">Item specifics</span>
@@ -269,6 +318,7 @@ export default function SpecificsEditor({
           {categoryBlock}
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-2.5">
             {required.map(row)}
+            {flaggedExtra.map(row)}
             {filledOther.map(row)}
             {showMore && emptyRecommended.map(row)}
           </div>

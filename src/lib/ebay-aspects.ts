@@ -8,6 +8,7 @@ import { inventoryRequest } from "@/lib/ebay-inventory";
 import { parseAspectDefs, CONDITION_ID_TO_ENUM, type AspectDef } from "@/lib/item-specifics";
 import { optionsFor } from "@/lib/aspect-fallbacks";
 import { dbCacheGet, dbCacheSet } from "@/lib/metadata-cache";
+import { strictDefs } from "@/lib/size-mapping";
 
 const TTL_MS = 12 * 60 * 60 * 1000;
 const aspectCache = new Map<string, { at: number; defs: AspectDef[] }>();
@@ -22,8 +23,16 @@ function once<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return q;
 }
 
-/** Required + recommended + optional aspects for a leaf category ([] if eBay can't be reached). */
+/**
+ * Required + recommended + optional aspects for a leaf category ([] if eBay
+ * can't be reached). Lists eBay enforces despite FREE_TEXT metadata (Size)
+ * come back selection-only — see src/lib/size-mapping.ts.
+ */
 export async function fetchAspectDefs(categoryId: string): Promise<AspectDef[]> {
+  return strictDefs(await fetchAspectDefsRaw(categoryId));
+}
+
+async function fetchAspectDefsRaw(categoryId: string): Promise<AspectDef[]> {
   if (!/^\d+$/.test(categoryId)) return [];
   const hit = aspectCache.get(categoryId);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.defs;

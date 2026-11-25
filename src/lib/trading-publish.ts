@@ -114,11 +114,40 @@ export interface BuiltItem {
   item: TradingItemInput;
   conditionIds: number[];
   missingRequired: string[];
+  /** List-only values eBay would reject (see buildPublishAspects). */
+  rejected: Array<{ name: string; value: string; options: string[] }>;
+}
+
+/**
+ * "… Size 9 Beige" → "… Size 9 (4XL) Beige" when the tag size was converted
+ * to eBay's size (brand sizing), so buyers see both. Only if it still fits
+ * in eBay's 80 characters; otherwise the title is unchanged.
+ */
+export function titleWithMappedSize(title: string, tagSize: string | null | undefined, ebaySize: string | null, note: string | null): string {
+  const tag = (tagSize ?? "").trim();
+  if (!note || !tag || !ebaySize || tag.toLowerCase() === ebaySize.toLowerCase()) return title;
+  // Only brand sizing ("Lacoste size 9 = 4XL"), not spelling fixes (XXL → 2XL).
+  if (!/\bsize \d+ = /i.test(note) || /^tag size/i.test(note)) return title;
+  if (new RegExp(`\\(${ebaySize.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\)`, "i").test(title)) return title;
+  const esc = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`\\b(size|sz)\\s+${esc}\\b`, "i");
+  const m = title.match(re);
+  if (!m) return title;
+  const next = title.replace(re, `${m[0]} (${ebaySize})`);
+  return next.length <= 80 ? next : title;
+}
+
+/** Plain-English pre-flight error for values eBay would reject, or null. */
+export function rejectedValuesError(rejected: BuiltItem["rejected"]): string | null {
+  if (!rejected.length) return null;
+  return rejected
+    .map((r) => `"${r.value}" is not a valid value for ${r.name}. Pick one of eBay's values${r.options.length ? ` (e.g. ${r.options.slice(0, 6).join(", ")})` : ""}.`)
+    .join(" · ");
 }
 
 export async function buildItemForDraft(draft: DraftRow, opts: { categoryId: string; sku: string; storeFooter: string | null; packageTyped?: boolean }): Promise<BuiltItem> {
   const defs = await fetchAspectDefs(opts.categoryId);
-  const { aspects, missingRequired, measurements } = buildPublishAspects(draft as never, defs);
+  const { aspects, missingRequired, measurements, rejected, sizeNote } = buildPublishAspects(draft as never, defs);
   const allowed = await fetchAllowedConditions(opts.categoryId);
   const preferred = pickCondition(draft.condition, allowed);
   const enums = [...new Set([preferred, ...getConditionCandidates(draft.condition, draft.title || "")].filter((x): x is string => !!x))];
@@ -128,11 +157,12 @@ export async function buildItemForDraft(draft: DraftRow, opts: { categoryId: str
   return {
     conditionIds,
     missingRequired,
+    rejected,
     item: {
-      title: fitTitle(draft.title) || "Item",
+      title: titleWithMappedSize(fitTitle(draft.title) || "Item", draft.size, aspects["Size"]?.[0] ?? null, sizeNote),
       // A description brought in from an eBay-made listing (its own HTML) is
       // sent back as-is; Listflow drafts get the usual generated layout.
-      descriptionHtml: isForeignHtml(draft.description) ? String(draft.description) : listingDescriptionHtml(draft as never, aspects, measurements, opts.storeFooter),
+      descriptionHtml: isForeignHtml(draft.description) ? String(draft.description) : listingDescriptionHtml(draft as never, aspects, measurements, opts.storeFooter, sizeNote),
       categoryId: opts.categoryId,
       conditionId: conditionIds[0],
       conditionDescription: conditionNote(draft.condition, draft.flaws),
@@ -167,6 +197,13 @@ export async function verifyWithFixes(
   let triedFallbackCategory = false;
   let built = await buildItemForDraft(draft, { ...base, categoryId, packageTyped: typed });
   let item: TradingItemInput = { ...built.item, ...addFields, forAdd: true };
+  // Pre-flight: a value eBay is known to reject (Size "9") is never sent —
+  // the seller gets the field name and valid choices instead.
+  const preflight = rejectedValuesError(built.rejected);
+  if (preflight) {
+    const failed: TradingResult = { ack: "Failure", ok: false, itemId: null, errors: [{ short: preflight, long: preflight, code: "", severity: "Error", params: [] }], warnings: [], feesTotal: null, startTime: null };
+    return { result: failed, item, missingRequired: built.missingRequired, attempts: 0 };
+  }
   let result = await call("VerifyAddFixedPriceItem", item);
   let attempts = 1;
   while (!result.ok && attempts < 5) {

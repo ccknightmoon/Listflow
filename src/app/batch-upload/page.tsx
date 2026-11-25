@@ -54,11 +54,13 @@ import { apiFetch } from "@/lib/api";
 import { AiResult as BaseAiResult, formatMeasurements, storedSpecificsFrom, currentConfidence } from "@/lib/ai-result";
 import SpecificsEditor from "@/components/SpecificsEditor";
 import ConfidenceBadge from "@/components/ConfidenceBadge";
-import { matchStoreCategoryByKeyword, StoreCategoryLite } from "@/lib/store-category-match";
+import { matchStoreCategoryByKeyword, storeCategoryConflict, StoreCategoryLite } from "@/lib/store-category-match";
 import { estimateIsHeavy, estimateShipping, type ShippingMode } from "@/lib/shipping";
 import AIDisclaimer from "@/components/AIDisclaimer";
 import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
 import { getListingReadiness } from "@/lib/listing-readiness";
+import { parseEbayFieldErrors, problemAspectNames } from "@/lib/listing-problems";
+import { isCardLocked, sameGroups, statusAfterEdit, statusAfterListFailure } from "@/lib/batch-card-state";
 import { clearBatchRecovery, loadBatchRecovery, saveBatchRecovery } from "@/lib/batch-recovery";
 
 interface SlotImage {
@@ -97,6 +99,8 @@ interface AiResult extends BaseAiResult {
   rateLimited?: boolean;
   /** analyze-batch: server-side timing breakdown for this item. */
   timings?: ItemServerTiming;
+  /** Values eBay won't take for list-only specifics (Size "9"), from SpecificsEditor. */
+  invalidSpecifics?: Array<{ name: string; value: string }>;
 }
 
 interface Thumbnail {
@@ -293,6 +297,11 @@ export default function BatchUploadPage() {
   const [listErrors, setListErrors] = useState<Record<number, string>>({});
   const [listMissingAspects, setListMissingAspects] = useState<Record<number, string[]>>({});
   const [listStoreCategoryWarnings, setListStoreCategoryWarnings] = useState<Record<number, string>>({});
+  // Aspect names eBay complained about on the last List/Check attempt
+  // (parsed from its error), so the card outlines that exact field.
+  const [listFieldErrors, setListFieldErrors] = useState<Record<number, string[]>>({});
+  // "Check with eBay" (VerifyAddFixedPriceItem, nothing is listed).
+  const [checkStatus, setCheckStatus] = useState<Record<number, { state: "checking" | "ok" | "error"; message?: string }>>({});
   // Public eBay item URL per listed item, straight from /api/ebay/list's
   // existing `url` field — lets the "eBay wants these fields" warning below
   // link directly to that specific listing instead of leaving the seller to
@@ -531,6 +540,41 @@ export default function BatchUploadPage() {
     return checkPriceAndFloor(priceTextFor(i, sug), floorTextFor(i, sug));
   }
 
+  // Everything keyed by item POSITION (item #1, #2…). Nov 25, 2026 bug:
+  // none of this was cleared between batches, so the first item of a new
+  // batch inherited the first item of an earlier/recovered batch's store
+  // category ("Outerwear & Coats" on a polo) — and could have inherited its
+  // price, SKU or "Saved" lock too. Cleared on every new batch.
+  const analyzedGroups = useRef<number[][] | null>(null);
+  function resetPerItemState() {
+    setSaveStatus({});
+    setSaveErrors({});
+    setPhotoUploadWarnings({});
+    setDraftIds({});
+    setListStatus({});
+    setListErrors({});
+    setListMissingAspects({});
+    setListStoreCategoryWarnings({});
+    setListFieldErrors({});
+    setCheckStatus({});
+    setListedUrls({});
+    setCustomPrices({});
+    setCustomFloors({});
+    setCosts({});
+    setCustomSkus({});
+    setHeavyItems({});
+    setShippingCosts({});
+    setStoreCategoryChoice({});
+    setStoreCategoryPickerOpen(null);
+    setSelected({});
+    setRetrying({});
+    setRetryingPricing({});
+    autoSavedForIndex.current = new Set();
+    autoSavingForIndex.current = new Set();
+    draftUpdatedAt.current = {};
+    analyzedGroups.current = null;
+  }
+
   function discardRecoveredBatch() {
     void clearBatchRecovery().catch(() => {});
       setRecoveredBatch(false);
@@ -539,7 +583,14 @@ export default function BatchUploadPage() {
       setPhotos([]);
       setGroups([]);
       setResults([]);
-      setDraftIds({});
+      resetPerItemState();
+  }
+
+  // Any edit to an item: a confirmed "Saved" becomes "Backed up" again (the
+  // edit isn't in the draft yet), and old eBay field errors are cleared.
+  function markEdited(i: number) {
+    setSaveStatus((prev) => (prev[i] === "saved" ? { ...prev, [i]: statusAfterEdit(prev[i])! } : prev));
+    setCheckStatus((prev) => (prev[i] ? (() => { const n = { ...prev }; delete n[i]; return n; })() : prev));
   }
 
   useEffect(() => {
@@ -1339,7 +1390,10 @@ export default function BatchUploadPage() {
       const next = { ...prev };
       allResults.forEach((r, i) => {
         if (r.error || r.pending) return;
-        if (next[i] !== undefined) return;
+        const item = { title: r.suggestedTitle, itemType: r.itemType };
+        // Keep an existing pick unless it clearly belongs to another kind
+        // of item (a polo on the "Outerwear & Coats" shelf).
+        if (next[i] !== undefined && !storeCategoryConflict(item, next[i])) return;
         next[i] = matchStoreCategoryByKeyword(
           { title: r.suggestedTitle, itemType: r.itemType, brand: r.brand },
           storeCategories
@@ -1512,6 +1566,19 @@ export default function BatchUploadPage() {
 
   async function handleAnalyzeBatch() {
     setError(null);
+    // A different set of items than the last analysis (or the first run on
+    // this page): start every per-item field from scratch. Re-analyzing the
+    // very same items keeps their draft rows so nothing is duplicated.
+    if (!sameGroups(analyzedGroups.current, groups)) resetPerItemState();
+    else {
+      setStoreCategoryChoice({});
+      setListStatus({});
+      setListErrors({});
+      setListFieldErrors({});
+      setCheckStatus({});
+      setSaveStatus({});
+    }
+    analyzedGroups.current = groups.map((g) => [...g]);
     setBatchCancelled(false);
     setBatchPaused(false);
     cancelRef.current = false;
@@ -2043,17 +2110,22 @@ export default function BatchUploadPage() {
       missingRequiredSpecifics: result.missingRequired,
       categoryNeedsReview: result.categoryNeedsReview,
       categoryIssues: result.issues,
+      invalidSpecifics: result.invalidSpecifics,
+      storeCategoryIssue: storeCategoryConflict({ title: result.suggestedTitle, itemType: result.itemType }, storeCategoryChoice[index]),
     });
     if (!readiness.ready) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
       setListErrors((prev) => ({ ...prev, [index]: `Before listing: ${readiness.blockers.join(" • ")}` }));
+      setListFieldErrors((prev) => ({ ...prev, [index]: [...(result.invalidSpecifics ?? []).map((x) => x.name.toLowerCase()), ...(result.missingRequired ?? []).map((x) => x.toLowerCase())] }));
       return false;
     }
+    setListFieldErrors((prev) => ({ ...prev, [index]: [] }));
     setListStatus((prev) => ({ ...prev, [index]: "saving" }));
     const id = await handleSaveDraft(index);
     if (!id) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
       setListErrors((prev) => ({ ...prev, [index]: "Failed to save draft" }));
+      setSaveStatus((prev) => ({ ...prev, [index]: statusAfterListFailure(prev[index]) ?? "error" }));
       return false;
     }
     if (prepareOnly) return id;
@@ -2115,6 +2187,10 @@ export default function BatchUploadPage() {
     } catch (err) {
       setListStatus((prev) => ({ ...prev, [index]: "error" }));
       setListErrors((prev) => ({ ...prev, [index]: (err as Error).message }));
+      // Keep the card editable so the field eBay named can be fixed and
+      // retried (it used to stay locked as "Saved"), and outline that field.
+      setSaveStatus((prev) => ({ ...prev, [index]: statusAfterListFailure(prev[index]) ?? "auto" }));
+      setListFieldErrors((prev) => ({ ...prev, [index]: problemAspectNames(parseEbayFieldErrors((err as Error).message)) }));
       if (batchJobId && batchJobItemId) {
         void apiFetch(`/api/batch-jobs/${batchJobId}/items/${batchJobItemId}`, {
           method: "PATCH",
@@ -2123,6 +2199,54 @@ export default function BatchUploadPage() {
         }).catch(() => {});
       }
       return false;
+    }
+  }
+
+  // "Check with eBay": the same readiness checks + save as List, then eBay's
+  // own VerifyAddFixedPriceItem (nothing is listed, no fees). Problems come
+  // back per field (outlined in red on the card); the card stays editable.
+  async function handleCheckWithEbay(index: number) {
+    const result = results[index];
+    const readiness = getListingReadiness({
+      photoCount: (groups[index] ?? []).length,
+      title: result.suggestedTitle,
+      price: priceCheckFor(index).price,
+      bestOfferFloor: floorTextFor(index),
+      condition: result.condition,
+      shippingMode: shippingModes[index] ?? defaultShippingMode,
+      missingRequiredSpecifics: result.missingRequired,
+      categoryNeedsReview: result.categoryNeedsReview,
+      categoryIssues: result.issues,
+      invalidSpecifics: result.invalidSpecifics,
+      storeCategoryIssue: storeCategoryConflict({ title: result.suggestedTitle, itemType: result.itemType }, storeCategoryChoice[index]),
+    });
+    if (!readiness.ready) {
+      setCheckStatus((prev) => ({ ...prev, [index]: { state: "error", message: `Fix first: ${readiness.blockers.join(" • ")}` } }));
+      setListFieldErrors((prev) => ({ ...prev, [index]: [...(result.invalidSpecifics ?? []).map((x) => x.name.toLowerCase()), ...(result.missingRequired ?? []).map((x) => x.toLowerCase())] }));
+      return;
+    }
+    setCheckStatus((prev) => ({ ...prev, [index]: { state: "checking" } }));
+    const id = await handleSaveDraft(index, { silent: true });
+    if (!id) {
+      setCheckStatus((prev) => ({ ...prev, [index]: { state: "error", message: "Couldn't save the draft first — try again." } }));
+      return;
+    }
+    try {
+      const data = await apiFetch<{ connect?: boolean; reconnect?: boolean; error?: string; verified?: boolean; feesTotal?: number | null; warnings?: string[] }>("/api/ebay/list", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId: id, verifyOnly: true }),
+      });
+      if (data.connect) { setNeedsEbayConnect(true); throw new Error(data.error ?? "Connect eBay first"); }
+      if (data.reconnect) { setNeedsEbayReconnect(true); throw new Error(data.error ?? "Reconnect eBay first"); }
+      setListFieldErrors((prev) => ({ ...prev, [index]: [] }));
+      const fees = typeof data.feesTotal === "number" && data.feesTotal > 0 ? ` Listing fees: $${data.feesTotal.toFixed(2)}.` : "";
+      const warn = data.warnings?.length ? ` Note: ${data.warnings[0]}` : "";
+      setCheckStatus((prev) => ({ ...prev, [index]: { state: "ok", message: `eBay accepts this listing as it is.${fees}${warn}` } }));
+    } catch (err) {
+      const message = (err as Error).message;
+      setCheckStatus((prev) => ({ ...prev, [index]: { state: "error", message: `eBay says: ${message}` } }));
+      setListFieldErrors((prev) => ({ ...prev, [index]: problemAspectNames(parseEbayFieldErrors(message)) }));
     }
   }
 
@@ -3207,7 +3331,11 @@ export default function BatchUploadPage() {
               missingRequiredSpecifics: result.missingRequired,
               categoryNeedsReview: result.categoryNeedsReview,
               categoryIssues: result.issues,
+              invalidSpecifics: result.invalidSpecifics,
+              storeCategoryIssue: storeCategoryConflict({ title: result.suggestedTitle, itemType: result.itemType }, storeCategoryChoice[i]),
             });
+            const locked = isCardLocked(saveStatus[i], listStatus[i]);
+            const storeIssue = storeCategoryConflict({ title: result.suggestedTitle, itemType: result.itemType }, storeCategoryChoice[i]);
 
             return (
               <div key={i} id={`result-item-${i}`} className="card overflow-hidden">
@@ -3315,10 +3443,10 @@ export default function BatchUploadPage() {
                     <input
                       className="input w-full text-sm font-medium mb-1"
                       value={result.suggestedTitle}
-                      disabled={saveStatus[i] === "saved"}
+                      disabled={locked}
                       onChange={(e) => {
                         const val = e.target.value;
-                        setResults((prev) => prev.map((r, j) => j === i ? { ...r, suggestedTitle: val } : r));
+                        markEdited(i); setResults((prev) => prev.map((r, j) => j === i ? { ...r, suggestedTitle: val } : r));
                       }}
                     />
                     <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -3326,10 +3454,10 @@ export default function BatchUploadPage() {
                         className="tap text-xs font-semibold rounded-full px-3 py-1.5 border appearance-none"
                         style={{ background: "var(--glass)", borderColor: "var(--glass-line)", color: "var(--text-primary)" }}
                         value={result.condition}
-                        disabled={saveStatus[i] === "saved"}
+                        disabled={locked}
                         onChange={(e) => {
                           const val = e.target.value as Condition;
-                          setResults((prev) => prev.map((r, j) => j === i ? { ...r, condition: val } : r));
+                          markEdited(i); setResults((prev) => prev.map((r, j) => j === i ? { ...r, condition: val } : r));
                         }}
                       >
                         {CONDITIONS.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -3348,10 +3476,10 @@ export default function BatchUploadPage() {
                           className="input text-xs w-full"
                           placeholder="Brand"
                           value={result.brand}
-                          disabled={saveStatus[i] === "saved"}
+                          disabled={locked}
                           onChange={(e) => {
                             const val = e.target.value;
-                            setResults((prev) => prev.map((r, j) => j === i ? { ...r, brand: val } : r));
+                            markEdited(i); setResults((prev) => prev.map((r, j) => j === i ? { ...r, brand: val } : r));
                           }}
                         />
                       </div>
@@ -3361,10 +3489,10 @@ export default function BatchUploadPage() {
                           className="input text-xs w-full"
                           placeholder="Color"
                           value={result.color}
-                          disabled={saveStatus[i] === "saved"}
+                          disabled={locked}
                           onChange={(e) => {
                             const val = e.target.value;
-                            setResults((prev) => prev.map((r, j) => j === i ? { ...r, color: val } : r));
+                            markEdited(i); setResults((prev) => prev.map((r, j) => j === i ? { ...r, color: val } : r));
                           }}
                         />
                       </div>
@@ -3374,10 +3502,10 @@ export default function BatchUploadPage() {
                           className="input text-xs w-full"
                           placeholder="Size"
                           value={result.size}
-                          disabled={saveStatus[i] === "saved"}
+                          disabled={locked}
                           onChange={(e) => {
                             const val = e.target.value;
-                            setResults((prev) => prev.map((r, j) => j === i ? { ...r, size: val } : r));
+                            markEdited(i); setResults((prev) => prev.map((r, j) => j === i ? { ...r, size: val } : r));
                           }}
                         />
                       </div>
@@ -3388,10 +3516,10 @@ export default function BatchUploadPage() {
                         className="input text-xs w-full"
                         placeholder="e.g. HDSHIRT001"
                         value={customSkus[i] ?? ""}
-                        disabled={saveStatus[i] === "saved"}
+                        disabled={locked}
                         onChange={(e) => {
                           const val = e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 50);
-                          setCustomSkus((prev) => ({ ...prev, [i]: val }));
+                          markEdited(i); setCustomSkus((prev) => ({ ...prev, [i]: val }));
                         }}
                       />
                     </div>
@@ -3400,7 +3528,7 @@ export default function BatchUploadPage() {
                         <p className="text-[10px] text-[var(--text-tertiary)] mb-0.5">Store category</p>
                         <button
                           type="button"
-                          disabled={saveStatus[i] === "saved"}
+                          disabled={locked}
                           onClick={() => setStoreCategoryPickerOpen((prev) => (prev === i ? null : i))}
                           className="tap text-xs font-semibold rounded-lg px-3 py-1.5 border w-full text-left truncate"
                           style={
@@ -3411,6 +3539,9 @@ export default function BatchUploadPage() {
                         >
                           {storeCategoryChoice[i]?.path ?? "No store category — tap to pick"}
                         </button>
+                        {storeIssue && (
+                          <p className="text-[10px] mt-0.5" style={{ color: "var(--danger)" }} role="alert">{storeIssue}</p>
+                        )}
                         {storeCategoryPickerOpen === i && (
                           <>
                             <div className="fixed inset-0 z-10" onClick={() => setStoreCategoryPickerOpen(null)} />
@@ -3421,7 +3552,7 @@ export default function BatchUploadPage() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setStoreCategoryChoice((prev) => ({ ...prev, [i]: null }));
+                                  markEdited(i); setStoreCategoryChoice((prev) => ({ ...prev, [i]: null }));
                                   setStoreCategoryPickerOpen(null);
                                 }}
                                 className="tap w-full text-left text-xs px-2 py-1.5 rounded"
@@ -3433,7 +3564,7 @@ export default function BatchUploadPage() {
                                   key={c.id}
                                   type="button"
                                   onClick={() => {
-                                    setStoreCategoryChoice((prev) => ({ ...prev, [i]: c }));
+                                    markEdited(i); setStoreCategoryChoice((prev) => ({ ...prev, [i]: c }));
                                     setStoreCategoryPickerOpen(null);
                                   }}
                                   className="tap w-full text-left text-xs px-2 py-1.5 rounded truncate"
@@ -3456,10 +3587,10 @@ export default function BatchUploadPage() {
                       rows={2}
                       placeholder="Flaws (e.g. small stain on sleeve)"
                       value={result.flaws}
-                      disabled={saveStatus[i] === "saved"}
+                      disabled={locked}
                       onChange={(e) => {
                         const val = e.target.value;
-                        setResults((prev) => prev.map((r, j) => j === i ? { ...r, flaws: val } : r));
+                        markEdited(i); setResults((prev) => prev.map((r, j) => j === i ? { ...r, flaws: val } : r));
                       }}
                     />
                   </div>
@@ -3472,16 +3603,26 @@ export default function BatchUploadPage() {
                       categoryPath={result.categoryPath ?? null}
                       categoryNeedsReview={result.categoryNeedsReview}
                       issues={result.issues}
-                      onCategoryChange={(r) =>
-                        setResults((prev) => prev.map((x, j) => (j === i ? { ...x, categoryId: r.categoryId, categoryPath: r.categoryPath, categoryNeedsReview: false, itemSpecifics: r.aspects, missingRequired: r.missingRequired, aspectDefs: r.defs, issues: r.issues } : x)))
-                      }
+                      onCategoryChange={(r) => {
+                        markEdited(i);
+                        setListFieldErrors((prev) => ({ ...prev, [i]: [] }));
+                        setResults((prev) => prev.map((x, j) => (j === i ? { ...x, categoryId: r.categoryId, categoryPath: r.categoryPath, categoryNeedsReview: false, itemSpecifics: r.aspects, missingRequired: r.missingRequired, aspectDefs: r.defs, issues: r.issues } : x)));
+                      }}
                       title={result.suggestedTitle}
                       itemType={result.itemType}
-                      disabled={saveStatus[i] === "saved"}
-                      onMeta={(m) => setResults((prev) => prev.map((r, j) => (j === i && (r.missingRequired ?? []).join("|") !== m.missingRequired.join("|") ? { ...r, missingRequired: m.missingRequired } : r)))}
-                      onChange={(aspects, meta) =>
-                        setResults((prev) => prev.map((r, j) => (j === i ? { ...r, itemSpecifics: aspects, missingRequired: meta.missingRequired, categoryId: meta.categoryId ?? r.categoryId } : r)))
-                      }
+                      disabled={locked}
+                      highlight={listFieldErrors[i]}
+                      onMeta={(m) => setResults((prev) => prev.map((r, j) => {
+                        if (j !== i) return r;
+                        const inv = (m.invalid ?? []).map((x) => `${x.name}=${x.value}`).join("|");
+                        const had = (r.invalidSpecifics ?? []).map((x) => `${x.name}=${x.value}`).join("|");
+                        if ((r.missingRequired ?? []).join("|") === m.missingRequired.join("|") && inv === had) return r;
+                        return { ...r, missingRequired: m.missingRequired, invalidSpecifics: m.invalid };
+                      }))}
+                      onChange={(aspects, meta) => {
+                        markEdited(i);
+                        setResults((prev) => prev.map((r, j) => (j === i ? { ...r, itemSpecifics: aspects, missingRequired: meta.missingRequired, categoryId: meta.categoryId ?? r.categoryId } : r)));
+                      }}
                     />
                   ) : null}
 
@@ -3490,11 +3631,11 @@ export default function BatchUploadPage() {
                     className="mb-1"
                     price={priceTextFor(i, suggestion)}
                     floor={floorTextFor(i, suggestion)}
-                    onPriceChange={(v) => setCustomPrices((prev) => ({ ...prev, [i]: v }))}
-                    onFloorChange={(v) => setCustomFloors((prev) => ({ ...prev, [i]: v }))}
+                    onPriceChange={(v) => { markEdited(i); setCustomPrices((prev) => ({ ...prev, [i]: v })); }}
+                    onFloorChange={(v) => { markEdited(i); setCustomFloors((prev) => ({ ...prev, [i]: v })); }}
                     suggestedPrice={suggestion.suggestedPrice > 0 ? suggestion.suggestedPrice : null}
                     suggestedFloor={defaultFloorFor(suggestion.suggestedPrice, suggestion.floorPrice)}
-                    disabled={saveStatus[i] === "saved"}
+                    disabled={locked}
                   />
                   <div className="flex items-baseline gap-2 mb-2 flex-wrap">
                     {!pricingAttempted && (
@@ -3594,10 +3735,26 @@ export default function BatchUploadPage() {
                     <p className="text-xs mb-2" style={{ color: "var(--warning-border)" }}>{listStoreCategoryWarnings[i]}</p>
                   )}
 
+                  {checkStatus[i] && (
+                    <p className="text-xs mb-2" role="status" style={{ color: checkStatus[i].state === "error" ? "var(--danger)" : checkStatus[i].state === "ok" ? "var(--success)" : "var(--text-secondary)" }}>
+                      {checkStatus[i].state === "checking" ? "Checking with eBay (nothing is listed)…" : checkStatus[i].message}
+                    </p>
+                  )}
+                  {listStatus[i] !== "listed" && (
+                    <button
+                      type="button"
+                      onClick={() => void handleCheckWithEbay(i)}
+                      disabled={locked || listingAll || checkStatus[i]?.state === "checking"}
+                      className="btn w-full mb-2 text-xs"
+                    >
+                      {checkStatus[i]?.state === "checking" ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                      Check with eBay
+                    </button>
+                  )}
                   <div className="flex gap-2">
                     <button
                       onClick={() => handleSaveDraft(i)}
-                      disabled={status === "saving" || status === "saved" || listingAll}
+                      disabled={status === "saving" || status === "saved" || listingAll || locked}
                       className="btn flex-1"
                     >
                       {status === "saving" ? (

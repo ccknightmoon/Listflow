@@ -3,6 +3,7 @@
 //
 // Everything here is pure (no network) so it is unit-tested and shared by
 // the analyze routes, the review screens and publishing.
+import { mapSizeForDef, strictDefs, effectiveMode } from "@/lib/size-mapping";
 
 // ------------------------------------------------------------- aspects --
 
@@ -267,7 +268,11 @@ function matchWithSplit(v: string, def: AspectDef): string[] {
   return whole ? [whole] : [];
 }
 
-export function mergeAspects(sources: Aspects[], defs: AspectDef[], opts: { onlyKnown?: boolean } = {}): { aspects: Aspects; missingRequired: string[]; dropped: Array<{ name: string; value: string }> } {
+export function mergeAspects(sources: Aspects[], defsIn: AspectDef[], opts: { onlyKnown?: boolean } = {}): { aspects: Aspects; missingRequired: string[]; dropped: Array<{ name: string; value: string }>; sizeNote?: string } {
+  // eBay enforces some "FREE_TEXT" lists (clothing Size) — treat them as
+  // selection-only so a raw tag value ("9") is mapped or left blank, never
+  // sent (src/lib/size-mapping.ts).
+  const defs = strictDefs(defsIn);
   const byLower = new Map(defs.map((d) => [d.name.toLowerCase(), d]));
   const merged = new Map<string, { name: string; values: string[] }>();
   for (const src of sources) {
@@ -282,6 +287,8 @@ export function mergeAspects(sources: Aspects[], defs: AspectDef[], opts: { only
   }
   const aspects: Aspects = {};
   const dropped: Array<{ name: string; value: string }> = [];
+  const brand = merged.get("brand")?.values[0] ?? null;
+  let sizeNote: string | undefined;
   for (const [key, { name, values }] of merged) {
     const def = byLower.get(key);
     if (!def) {
@@ -293,13 +300,16 @@ export function mergeAspects(sources: Aspects[], defs: AspectDef[], opts: { only
     }
     const out: string[] = [];
     for (const v of values) {
+      // Tag sizes in brand/international notation (Lacoste "9" = 4XL).
+      const sized = mapSizeForDef(v, def, { brand });
+      if (sized) { if (!out.includes(sized.value)) out.push(sized.value); if (sized.note) sizeNote = sized.note; continue; }
       const m = matchWithSplit(v, def);
       if (m.length) { for (const x of m) if (!out.includes(x)) out.push(x); } else dropped.push({ name, value: v });
     }
     const final = def.multi ? out.slice(0, 30) : out.slice(0, 1);
     if (final.length) aspects[def.name] = final;
   }
-  return { aspects, missingRequired: missingRequiredAspects(aspects, defs), dropped };
+  return { aspects, missingRequired: missingRequiredAspects(aspects, defs), dropped, ...(sizeNote ? { sizeNote } : {}) };
 }
 
 export function missingRequiredAspects(aspects: Aspects, defs: AspectDef[]): string[] {
@@ -708,12 +718,15 @@ export function listingDescriptionHtml(
   aspects: Aspects,
   measurements: Measurement[],
   notes: string | null | undefined,
+  /** "Lacoste size 9 = 4XL": keeps the tag's own size next to eBay's. */
+  sizeNote?: string | null,
 ): string {
   if (isTemplateHtml(draft.description)) return draft.description!.trim();
   const first = (...names: string[]) => names.map((n) => aspects[n]?.join(", ")).find(Boolean) ?? null;
+  const sizeText = [first("Size"), first("Size Type") && first("Size Type") !== "Regular" ? first("Size Type") : null].filter(Boolean).join(" ") || null;
   const details: Array<[string, string | null]> = [
     ["Brand", first("Brand")],
-    ["Size", [first("Size"), first("Size Type") && first("Size Type") !== "Regular" ? first("Size Type") : null].filter(Boolean).join(" ") || null],
+    ["Size", sizeText && sizeNote ? `${sizeText} (tag: ${sizeNote})` : sizeText],
     ["Department", first("Department")],
     ["Type", first("Type")],
     ["Model / line", [first("Product Line"), first("Model")].filter(Boolean).join(" ") || null],
@@ -759,7 +772,8 @@ export function suggestAllowedValues(value: string, def: Pick<AspectDef, "values
  * whose FULL allowed list we have, and only if no allowed value matches.
  * Free-text aspects accept any value, so they're never flagged.
  */
-export function isRejectedValue(value: string, def: Pick<AspectDef, "mode" | "values" | "valuesTruncated">): boolean {
-  if (def.mode !== "SELECTION_ONLY" || def.valuesTruncated || def.values.length === 0) return false;
-  return matchAllowedValue(value, def) === null;
+export function isRejectedValue(value: string, def: Pick<AspectDef, "mode" | "values" | "valuesTruncated"> & { name?: string }): boolean {
+  const mode = effectiveMode({ name: "", ...def });
+  if (mode !== "SELECTION_ONLY" || def.valuesTruncated || def.values.length === 0) return false;
+  return matchAllowedValue(value, { ...def, mode }) === null;
 }

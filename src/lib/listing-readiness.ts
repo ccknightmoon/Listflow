@@ -15,6 +15,10 @@ export type ListingReadinessInput = {
   categoryIssues?: string[];
   /** Best Offer floor as typed/saved (blank/null = no offers). */
   bestOfferFloor?: string | number | null;
+  /** Values eBay won't accept for list-only specifics (e.g. Size "9"). */
+  invalidSpecifics?: Array<{ name: string; value: string }>;
+  /** The store category clearly belongs to another kind of item. */
+  storeCategoryIssue?: string | null;
 };
 
 export type ListingReadiness = {
@@ -44,6 +48,10 @@ export function getListingReadiness(input: ListingReadinessInput): ListingReadin
   if (input.missingRequiredSpecifics && input.missingRequiredSpecifics.length > 0) {
     blockers.push(`Fill eBay's required specifics: ${input.missingRequiredSpecifics.join(", ")}`);
   }
+  for (const x of input.invalidSpecifics ?? []) {
+    blockers.push(`Pick eBay's ${x.name} ("${x.value}" isn't on eBay's list)`);
+  }
+  if (input.storeCategoryIssue) blockers.push(input.storeCategoryIssue);
   if (input.categoryNeedsReview || (input.categoryIssues ?? []).some((i) => /^Category looks wrong/.test(i))) {
     blockers.push("Confirm the eBay category (it doesn't look right for this item)");
   }

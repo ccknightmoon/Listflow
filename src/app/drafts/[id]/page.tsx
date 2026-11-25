@@ -1517,7 +1517,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         }}
         title={title}
         itemType={itemType}
-        onMeta={(m) => setMissingSpecifics(m.missingRequired)}
+        onMeta={(m) => setMissingSpecifics([...new Set([...m.missingRequired, ...m.invalid.map((x) => x.name)])])}
         onChange={(aspects, meta) => {
           specificsTouched.current = true;
           setSpecifics((prev) => ({ ...prev, categoryId: meta.categoryId ?? prev?.categoryId ?? null, aspects, measurements: prev?.measurements ?? [] }));
