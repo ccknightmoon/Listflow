@@ -19,6 +19,8 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
+import { readTombstones, rememberDeleted, withoutDeleted } from "@/lib/deleted-drafts";
+import DraftsOnEbayPanel from "@/components/DraftsOnEbayPanel";
 import type { ShippingMode } from "@/lib/shipping";
 
 // Drafts rarely changes shape between visits within one tab (add/remove a
@@ -60,7 +62,7 @@ function timeAgo(dateStr: string | null): string {
   if (d < 30) return `${Math.floor(d / 7)}w ago`;
   return `${Math.floor(d / 30)}mo ago`;
 }
-type SortKey = "newest" | "oldest" | "price-desc" | "price-asc";
+type SortKey = "newest" | "oldest" | "edited" | "price-desc" | "price-asc";
 type DraftFilter = "all" | "ready" | "needs-photo" | "needs-price";
 
 // Resolves whether an item is heavy / its shipping cost the same way for
@@ -90,7 +92,7 @@ function resolveShippingCost(id: string, draft: Draft | undefined): number | und
 
 export default function DraftsPage() {
   const router = useRouter();
-  const [drafts, setDrafts] = useState<Draft[]>(() => getPageCache<Draft[]>(DRAFTS_CACHE_KEY) ?? []);
+  const [drafts, setDrafts] = useState<Draft[]>(() => withoutDeleted(getPageCache<Draft[]>(DRAFTS_CACHE_KEY) ?? [], readTombstones()));
   const [loading, setLoading] = useState(() => getPageCache<Draft[]>(DRAFTS_CACHE_KEY) === undefined);
   // Set on every re-fetch after the first (search/sort/filter/page change)
   // -- unlike `loading`, this never hides the current list; it just flags
@@ -162,9 +164,12 @@ export default function DraftsPage() {
     if (getPageCache<Draft[]>(DRAFTS_CACHE_KEY) !== undefined) return;
     const snap = loadSnapshot<{ drafts: Draft[]; total: number }>("drafts", 3 * 86_400_000);
     if (!snap || !Array.isArray(snap.value?.drafts) || snap.value.drafts.length === 0) return;
+    // A saved copy never brings back a draft deleted on this device.
+    const saved = withoutDeleted(snap.value.drafts, readTombstones());
+    const hidden = snap.value.drafts.length - saved.length;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- restores the device's saved copy before first paint (localStorage can't be read during server rendering)
-    setDrafts(snap.value.drafts);
-    setTotal(snap.value.total ?? snap.value.drafts.length);
+    setDrafts(saved);
+    setTotal(Math.max(0, (snap.value.total ?? snap.value.drafts.length) - hidden));
     setLoading(false);
   }, []);
   useEffect(() => {
@@ -223,7 +228,7 @@ export default function DraftsPage() {
         return loadDrafts({ page: effectiveTotalPages, search: targetSearch, sort: targetSort, filter: targetFilter });
       }
 
-      setDrafts(loaded);
+      setDrafts(withoutDeleted(loaded, readTombstones()));
       setPage(effectivePage);
       setTotal(data.total ?? loaded.length);
       setTotalPages(effectiveTotalPages);
@@ -322,19 +327,30 @@ export default function DraftsPage() {
   }
 
 
+  // Gone on the server (deleted now, or already gone): drop it everywhere
+  // on this device right away -- list, saved copy, and future saved copies.
+  function forgetDrafts(ids: string[]) {
+    if (!ids.length) return;
+    rememberDeleted(ids);
+    for (const id of ids) delete draftsByIdRef.current[id];
+    const gone = new Set(ids);
+    setDrafts((prev) => prev.filter((x) => !gone.has(x.id)));
+    setTotal((t) => Math.max(0, t - ids.length));
+  }
+
   async function handleDeleteSelected() {
     if (selected.size === 0) return;
     const ids = Array.from(selected);
-    if (!(await confirmAction({ title: `Delete ${ids.length} draft${ids.length !== 1 ? "s" : ""}?`, message: "Their photos and details will be removed.", confirmLabel: "Delete", destructive: true }))) return;
+    if (!(await confirmAction({ title: `Delete ${ids.length} draft${ids.length !== 1 ? "s" : ""}?`, message: "Permanently deletes them and their photos from Listflow. This can't be undone. Anything already on eBay stays on eBay.", confirmLabel: "Delete", destructive: true }))) return;
     setDeleting(true);
     try {
-      const data = await apiFetch<{ error?: string }>("/api/drafts", {
+      const data = await apiFetch<{ error?: string; deleted?: string[]; notFound?: string[] }>("/api/drafts", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
       });
       if (data.error) throw new Error(data.error);
-      for (const id of ids) delete draftsByIdRef.current[id];
+      forgetDrafts([...(data.deleted ?? []), ...(data.notFound ?? [])]);
       setSelected(new Set());
       await loadDrafts();
       loadNoPriceTotal();
@@ -350,15 +366,15 @@ export default function DraftsPage() {
     getPublishQueue().enqueue({ draftId: d.id, title: d.title ?? "Untitled", thumbnail: d.thumbnail_url });
   }
   async function deleteOne(d: Draft) {
-    if (!(await confirmAction({ title: "Delete this draft?", message: d.title ?? undefined, confirmLabel: "Delete", destructive: true }))) return;
+    if (!(await confirmAction({ title: "Delete this draft?", message: `${d.title ? d.title + " — " : ""}permanently deleted with its photos. This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
     try {
-      const data = await apiFetch<{ error?: string }>("/api/drafts", {
+      const data = await apiFetch<{ error?: string; deleted?: string[]; notFound?: string[] }>("/api/drafts", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [d.id] }),
       });
       if (data.error) throw new Error(data.error);
-      delete draftsByIdRef.current[d.id];
+      forgetDrafts([...(data.deleted ?? []), ...(data.notFound ?? [])]);
       await loadDrafts();
       loadNoPriceTotal();
     } catch (err) {
@@ -529,6 +545,16 @@ export default function DraftsPage() {
         <h1 className="text-xl font-medium">Drafts ({total})</h1>
       </div>
 
+      <DraftsOnEbayPanel
+        onLinked={(ids) => {
+          // Linked = on eBay now; it shows under Listings/Scheduled instead.
+          const moved = new Set(ids);
+          setDrafts((prev) => prev.filter((x) => !moved.has(x.id)));
+          setTotal((t) => Math.max(0, t - ids.length));
+          loadDrafts();
+        }}
+      />
+
       {!loading && (drafts.length > 0 || search || filter !== "all") && (
         <div className="flex items-center gap-2 mb-4">
           <div className="relative flex-1 min-w-0">
@@ -555,6 +581,7 @@ export default function DraftsPage() {
           >
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
+            <option value="edited">Last edited</option>
             <option value="price-desc">Price: high</option>
             <option value="price-asc">Price: low</option>
           </select>

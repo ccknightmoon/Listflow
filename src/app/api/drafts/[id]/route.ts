@@ -1,6 +1,8 @@
 import { draftFieldsError, isUuid } from "@/lib/input-validation";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { deleteDraftsCompletely } from "@/lib/draft-delete";
+import { serviceDb } from "@/lib/jobs/supabase-store";
 import { sanitizeStoredSpecifics, isMissingColumnError } from "@/lib/item-specifics";
 import { isValidCostBasis } from "@/lib/profit";
 
@@ -106,7 +108,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.characterFamily !== undefined && { character_family: body.characterFamily }),
       ...(body.yearManufactured !== undefined && { year_manufactured: body.yearManufactured }),
       ...(body.season !== undefined && { season: body.season }),
-      ...(body.ebayListingId !== undefined && { ebay_listing_id: body.ebayListingId }),
+      // Only the server unlinks a listing (delist/relist). A client save can
+      // link an item number but never clear one -- a stale editor sending
+      // null used to be able to drop a live item back into Drafts.
+      ...(typeof body.ebayListingId === "string" && { ebay_listing_id: body.ebayListingId }),
       ...(body.photoUrls !== undefined && { photo_urls: body.photoUrls }),
       ...(body.thumbnailUrl !== undefined && { thumbnail_url: body.thumbnailUrl }),
       ...(body.avgSold !== undefined && { avg_sold: body.avgSold }),
@@ -154,7 +159,11 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!auth.user) return auth.unauthorized;
   const { id } = await params;
 
-  const { error } = await auth.supabase.from("drafts").delete().eq("id", id).eq("user_id", auth.user.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ deleted: true });
+  try {
+    const r = await deleteDraftsCompletely(auth.supabase, serviceDb(), auth.user.id, [id], process.env.NEXT_PUBLIC_SUPABASE_URL!);
+    // Already gone counts as success for the caller (idempotent), but says so.
+    return NextResponse.json({ deleted: true, alreadyGone: r.deleted.length === 0, photosRemoved: r.photosRemoved }, { headers: { "Cache-Control": "no-store" } });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
+  }
 }

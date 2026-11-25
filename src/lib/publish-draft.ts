@@ -26,6 +26,7 @@ import { publishDraftTrading, reviseDraftListing, type DraftRow } from "@/lib/tr
 import { getLiveItem, isEndedStatus, liveItemHash } from "@/lib/ebay-item";
 import { markSynced } from "@/lib/ebay-item-import";
 import { chooseCategory } from "@/lib/ebay-category";
+import { saveListingLink } from "@/lib/listing-link";
 
 
 interface EbayApiError {
@@ -566,15 +567,9 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
 
     const rawListingId = (publishResult.data as { listingId?: string | number }).listingId;
     const listingId = rawListingId != null ? String(rawListingId) : undefined;
-    if (listingId) {
-      // Also records that it went out with calculated shipping (old drafts
-      // were saved as "free"/"buyer_pays").
-      await supabase.from("drafts").update({ ebay_listing_id: listingId, shipping_mode: LISTING_SHIPPING_MODE }).eq("id", draftId).eq("user_id", userId);
-      // Real listing start for days-to-sell (migration 026). Separate,
-      // best-effort write: if the column doesn't exist yet this fails on
-      // its own and never affects the listing ID saved above.
-      await supabase.from("drafts").update({ ebay_listed_at: new Date().toISOString() }).eq("id", draftId).eq("user_id", userId);
-    }
+    // Also records that it went out with calculated shipping (old drafts
+    // were saved as "free"/"buyer_pays"). Checked + retried: see listing-link.ts.
+    const link = listingId ? await saveListingLink(supabase, userId, draftId, listingId, { shipping_mode: LISTING_SHIPPING_MODE }) : null;
 
     // Store category isn't settable through the REST Inventory API's
     // create/publish flow — it's applied as a separate Trading API call once
@@ -595,6 +590,7 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
       url: listingId ? `https://www.ebay.com/itm/${listingId}` : null,
       missingRequiredAspects: missingRequiredAspects.length > 0 ? missingRequiredAspects : undefined,
       storeCategoryWarning,
+      linkWarning: link && !link.ok ? "It's live on eBay, but Listflow couldn't record that yet. Open Drafts and tap \"Move to Listings\" if it still shows there." : undefined,
     });
   } catch (err) {
     const msg = (err as Error).message ?? "";

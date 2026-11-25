@@ -39,10 +39,13 @@ beforeEach(() => { fake = fakeSupabase({ drafts: { data: null } }); });
 
 describe("publishDraftTrading", () => {
   it("verifies first, then lists once, and saves the item number", async () => {
+    fake = fakeSupabase({ drafts: { data: { id: draft.id, ebay_listing_id: "256000000001" } } }); // the saved row echoes back
     const calls: Array<[string, TradingItemInput]> = [];
     const call = vi.fn(async (c: string, item: TradingItemInput) => { calls.push([c, item]); return c === "AddFixedPriceItem" ? ok("256000000001") : ok(); });
     const res = await publishDraftTrading(args(), call as never);
-    expect(await res.json()).toMatchObject({ success: true, listingId: "256000000001" });
+    const body = await res.json();
+    expect(body).toMatchObject({ success: true, listingId: "256000000001" });
+    expect(body.linkWarning).toBeUndefined();
     expect(calls.map((c) => c[0])).toEqual(["VerifyAddFixedPriceItem", "AddFixedPriceItem"]);
     const item = calls[1][1];
     expect(item.uuid).toMatch(/^[0-9A-F]{32}$/);

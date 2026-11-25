@@ -1,5 +1,6 @@
 "use client";
 
+import { rememberDeleted } from "@/lib/deleted-drafts";
 import CurrencyInput from "@/components/CurrencyInput";
 import Sheet from "@/components/Sheet";
 import PhotoDropZone from "@/components/PhotoDropZone";
@@ -945,10 +946,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   async function handleDelete() {
-    if (!(await confirmAction({ title: "Delete this draft?", message: "Its photos and details will be removed.", confirmLabel: "Delete", destructive: true }))) return;
+    if (!(await confirmAction({ title: "Delete this draft?", message: "Permanently deletes it and its photos from Listflow. This can't be undone.", confirmLabel: "Delete", destructive: true }))) return;
     setDeleting(true);
     try {
       await apiFetch(`/api/drafts/${id}`, { method: "DELETE" });
+      rememberDeleted([id]); // no saved copy on this device can show it again
       router.push("/drafts");
     } catch (err) {
       setError((err as Error).message);

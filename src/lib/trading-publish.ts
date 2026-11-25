@@ -10,6 +10,7 @@ import { conditionNote, fitTitle, isTemplateHtml, listingDescriptionHtml, pickCo
 import type { LiveItem } from "@/lib/ebay-item";
 import { buildPackageWeightAndSize } from "@/lib/shipping";
 import { createTtlDedupeCache } from "@/lib/ttl-cache";
+import { saveListingLink } from "@/lib/listing-link";
 import {
   buildTradingItemXml, tradingRequestXml, parseTradingResponse, duplicateUuidItemId, isPackageError, isConditionError,
   isCategoryError, isInventoryModelError, describeTradingErrors, listingUuid, listingPostalCode, scheduleTimeFromNow,
@@ -217,8 +218,7 @@ export async function publishDraftTrading(a: TradingPublishArgs, call: (c: Tradi
   }
   if (!itemId) return NextResponse.json({ error: describeTradingErrors(add, "eBay didn't confirm the listing"), missingRequiredAspects }, { status: 400 });
 
-  await a.supabase.from("drafts").update({ ebay_listing_id: itemId, shipping_mode: "calculated" }).eq("id", a.draft.id).eq("user_id", a.userId);
-  await a.supabase.from("drafts").update({ ebay_listed_at: new Date().toISOString() }).eq("id", a.draft.id).eq("user_id", a.userId);
+  const link = await saveListingLink(a.supabase, a.userId, a.draft.id, itemId, { shipping_mode: "calculated" });
   if (a.scheduleDays) {
     await a.supabase.from("drafts").update({ ebay_scheduled_for: addFields.scheduleTime }).eq("id", a.draft.id).eq("user_id", a.userId); // migration 034; ignored before
   }
@@ -230,6 +230,7 @@ export async function publishDraftTrading(a: TradingPublishArgs, call: (c: Tradi
     missingRequiredAspects,
     warnings: warnings.length ? warnings : undefined,
     duplicateRecovered: !add.ok || undefined,
+    linkWarning: link.ok ? undefined : "It's live on eBay, but Listflow couldn't record that yet. Open Drafts and tap \"Move to Listings\" if it still shows there.",
   });
 }
 

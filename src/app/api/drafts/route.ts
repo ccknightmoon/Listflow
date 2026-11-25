@@ -4,6 +4,8 @@ import { requireUser } from "@/lib/auth";
 import { isMissingColumnError } from "@/lib/item-specifics";
 import { draftBodyError, draftRowFromBody } from "@/lib/draft-row";
 import { getListingReadiness } from "@/lib/listing-readiness";
+import { deleteDraftsCompletely } from "@/lib/draft-delete";
+import { serviceDb } from "@/lib/jobs/supabase-store";
 
 // isHeavy/shippingCost mirror the same fields POST /api/ebay/list already
 // accepts at listing time -- persisting them here too means a heavy item
@@ -12,9 +14,9 @@ import { getListingReadiness } from "@/lib/listing-readiness";
 // drafts/[id]'s own localStorage cache, which a draft saved from
 // new-listing/batch-upload never touched at all).
 const DRAFTS_SELECT_COLUMNS =
-  "id, title, suggested_price, sell_odds, condition, thumbnail_url, photo_urls, created_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode, custom_sku";
+  "id, title, suggested_price, sell_odds, condition, thumbnail_url, photo_urls, created_at, updated_at, ebay_listing_id, is_heavy, shipping_cost, shipping_mode, custom_sku";
 
-const SORT_KEYS = new Set(["newest", "oldest", "price-desc", "price-asc"]);
+const SORT_KEYS = new Set(["newest", "oldest", "edited", "price-desc", "price-asc"]);
 const FILTER_KEYS = new Set(["all", "ready", "needs-photo", "needs-price"]);
 const DEFAULT_PAGE_SIZE = 30;
 const MAX_PAGE_SIZE = 100;
@@ -85,11 +87,16 @@ export async function GET(req: NextRequest) {
       .neq("condition", "");
   }
 
-  const sortColumn = sort === "price-desc" || sort === "price-asc" ? "suggested_price" : "created_at";
-  query = query.order(sortColumn, {
-    ascending: sort === "oldest" || sort === "price-asc",
-    nullsFirst: false,
-  });
+  // Order is always total: drafts saved in the same batch share a
+  // created_at to the millisecond, and without a tiebreaker Postgres may
+  // return them in a different order per page/refresh (items "jumping").
+  // Default "newest": most recently saved first. "edited": last changed first.
+  const sortColumn =
+    sort === "price-desc" || sort === "price-asc" ? "suggested_price" : sort === "edited" ? "updated_at" : "created_at";
+  const ascending = sort === "oldest" || sort === "price-asc";
+  query = query.order(sortColumn, { ascending, nullsFirst: false });
+  if (sortColumn !== "created_at") query = query.order("created_at", { ascending: false });
+  query = query.order("id", { ascending });
 
   // "needs-photo" and "ready" each combine several columns (photo count,
   // title, price, condition, shipping mode) in ways a single Postgrest
@@ -165,13 +172,14 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "ids must be a list of 1–500 draft IDs." }, { status: 400 });
   }
 
-  const { error } = await auth.supabase.from("drafts").delete().in("id", ids).eq("user_id", auth.user.id);
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+  // Permanent: row + its photos in storage. Answers with the ids that were
+  // really removed (an id that wasn't there is reported, not "deleted").
+  try {
+    const r = await deleteDraftsCompletely(auth.supabase, serviceDb(), auth.user.id, ids, process.env.NEXT_PUBLIC_SUPABASE_URL!);
+    return NextResponse.json({ ...r, deletedCount: r.deleted.length }, { headers: { "Cache-Control": "no-store" } });
+  } catch (err) {
+    return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }
-
-  return NextResponse.json({ deleted: ids.length });
 }
 
 export async function POST(req: NextRequest) {
