@@ -2,6 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import NeedsAttention from "@/components/NeedsAttention";
+import { SyncIndicator, UnlinkedAlert } from "@/components/SyncStatus";
 import { getPublishQueue, type PublishItem } from "@/lib/publish-queue";
 import Link from "next/link";
 import { Plus, ImagePlus, FileText, BarChart2, TrendingUp } from "lucide-react";
@@ -291,6 +292,7 @@ export default function DashboardPage() {
             {updating && statsLoaded && <span className="ml-2 font-normal opacity-80 animate-pulse" role="status">· updating…</span>}
           </p>
           <h1 className="font-display font-bold text-lg mt-0.5">{displayName ?? "My store"}</h1>
+          <SyncIndicator className="mt-0.5" />
         </div>
         <div
           className="w-9 h-9 rounded-xl flex items-center justify-center font-display font-bold text-sm text-white"
@@ -408,6 +410,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="col-span-2 lg:col-start-9 lg:col-span-4 lg:row-start-1 lg:row-span-3 lg:self-start">
+        <UnlinkedAlert />
         <NeedsAttention
           counts={{
             toShip: shipCount,

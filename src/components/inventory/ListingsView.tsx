@@ -23,6 +23,7 @@ import { useCountUp } from "@/lib/use-count-up";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
 import { STALE_DAYS_THRESHOLD, isStale } from "@/lib/stale-listings";
 import { useInventoryEmbed } from "@/components/inventory/InventoryEmbed";
+import { onEbayChanged } from "@/lib/ebay-sync-client";
 
 // See src/lib/page-cache.ts — shows the last merged Supabase+eBay listing
 // set instantly on revisit while both phases below quietly refresh it.
@@ -79,7 +80,7 @@ export default function ListingsView() {
   const isDesktop = useIsDesktop();
   const [viewerSrc, setViewerSrc] = useState<string | null>(null);
 
-  async function loadAll() {
+  async function loadAll(fresh = false) {
     // No setLoading(true) here: the initial state above already reflects
     // whether we had a cached, previously-merged list to show. loadAll()
     // only ever runs once (on mount, via the useEffect below) — so
@@ -96,7 +97,7 @@ export default function ListingsView() {
     // returning ended/unsold listings too) -- the old `data.total` read
     // below was always undefined, which silently defeated the
     // "only trust this as complete" safety check it was guarding.
-    const ebayPromise = apiFetch<{ listings?: StoreListing[]; activeTotal?: number; unsoldTotal?: number; error?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/store");
+    const ebayPromise = apiFetch<{ listings?: StoreListing[]; activeTotal?: number; unsoldTotal?: number; error?: string; connect?: boolean; reconnect?: boolean }>(fresh ? "/api/ebay/store?fresh=1" : "/api/ebay/store");
 
     let supabaseItems: StoreListing[] = [];
     let supabaseListingIds = new Set<string>();
@@ -166,6 +167,8 @@ export default function ListingsView() {
   }
 
   useEffect(() => { loadAll(); }, []);
+  // Background eBay sync saw sold / ended / edited items: refresh quietly.
+  useEffect(() => onEbayChanged(() => { void loadAll(true); }), []);
   // Deep link from the Dashboard's "Needs attention": /store?filter=stale
   useEffect(() => {
     if (new URLSearchParams(window.location.search).get("filter") !== "stale") return;

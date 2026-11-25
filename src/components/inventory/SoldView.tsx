@@ -8,6 +8,7 @@ import { formatMoney } from "@/lib/format";
 import { ListSkeleton } from "@/components/ui";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
 import { useInventoryEmbed } from "@/components/inventory/InventoryEmbed";
+import { onEbayChanged } from "@/lib/ebay-sync-client";
 
 // Inventory → Sold: what sold on eBay in the last 90 days, newest first.
 // Money detail (fees, profit, payouts) stays on the Sales page; this is
@@ -21,6 +22,9 @@ export default function SoldView() {
   const [items, setItems] = useState<SoldItem[] | null>(() => getPageCache<SoldItem[]>(CACHE_KEY) ?? null);
   const [error, setError] = useState<{ message: string; connect?: boolean; reconnect?: boolean } | null>(null);
 
+  const [rev, setRev] = useState(0);
+  // Background eBay sync saw something sell: refresh.
+  useEffect(() => onEbayChanged((s) => { if (s.sold.length) setRev((r) => r + 1); }), []);
   useEffect(() => {
     let cancelled = false;
     apiFetch<{ sales?: SoldItem[]; error?: string; connect?: boolean; reconnect?: boolean }>(`/api/ebay/sales?days=${DAYS}`)
@@ -33,7 +37,7 @@ export default function SoldView() {
       })
       .catch((e) => { if (!cancelled) setError({ message: (e as Error).message }); });
     return () => { cancelled = true; };
-  }, []);
+  }, [rev]);
 
   return (
     <main className="relative min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-8">

@@ -6,7 +6,9 @@ import { fetchAllOfListType, isListTypeError, toListing } from "@/lib/ebay-listi
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(req: Request) {
+  // ?fresh=1: the background sync saw eBay changes -- skip the server cache.
+  const fresh = new URL(req.url).searchParams.get("fresh") === "1";
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
 
@@ -24,8 +26,8 @@ export async function GET() {
   return ebayContext.run(connection, async () => {
   try {
     const [activeResult, unsoldResult] = await Promise.all([
-      fetchAllOfListType("ActiveList"),
-      fetchAllOfListType("UnsoldList"),
+      fetchAllOfListType("ActiveList", { force: fresh }),
+      fetchAllOfListType("UnsoldList", { force: fresh }),
     ]);
 
     // Active listings are the ones people depend on day to day — surface a

@@ -6,6 +6,7 @@ import { ArrowLeft, CalendarClock, ChevronRight, ExternalLink, Loader2 } from "l
 import { apiFetch } from "@/lib/api";
 import { formatMoney } from "@/lib/format";
 import { useInventoryEmbed } from "@/components/inventory/InventoryEmbed";
+import { onEbayChanged } from "@/lib/ebay-sync-client";
 
 interface Scheduled { listingId: string; title: string; price: number | null; thumbnail: string | null; startTime: string | null; draftId: string | null }
 
@@ -16,11 +17,14 @@ export default function ScheduledView() {
   const [items, setItems] = useState<Scheduled[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const [rev, setRev] = useState(0);
   useEffect(() => {
     apiFetch<{ items?: Scheduled[]; error?: string }>("/api/ebay/scheduled")
       .then((r) => (r.error ? setError(r.error) : setItems(r.items ?? [])))
       .catch((e) => setError((e as Error).message));
-  }, []);
+  }, [rev]);
+  // Background eBay sync saw changes (a scheduled listing went live): refresh.
+  useEffect(() => onEbayChanged(() => setRev((r) => r + 1)), []);
 
   return (
     <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8 pb-28">

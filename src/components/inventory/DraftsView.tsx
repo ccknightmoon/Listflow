@@ -24,6 +24,7 @@ import UndoBar from "@/components/UndoBar";
 import RecycleBinPanel from "@/components/RecycleBinPanel";
 import DraftsOnEbayPanel from "@/components/DraftsOnEbayPanel";
 import { useInventoryEmbed } from "@/components/inventory/InventoryEmbed";
+import { onEbayChanged } from "@/lib/ebay-sync-client";
 import type { ShippingMode } from "@/lib/shipping";
 
 // Drafts rarely changes shape between visits within one tab (add/remove a
@@ -165,6 +166,9 @@ export default function DraftsView() {
   // load below, and the later mutations (delete, the post-bulk-list
   // refresh) — without needing a cache write at each individual call site.
   useEffect(() => { setPageCache(DRAFTS_CACHE_KEY, drafts); }, [drafts]);
+  // Background eBay sync changed something (e.g. a draft got linked): refresh quietly.
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- subscribe once; loadDrafts reads current filters
+  useEffect(() => onEbayChanged(() => { void loadDrafts(); }), []);
   // Instant open for the default view (all drafts, first page, newest
   // first): the last copy saved on this device shows while the live list
   // loads. Other filters/pages/searches always load live.

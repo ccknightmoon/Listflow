@@ -1,0 +1,24 @@
+# Background eBay sync every ~10 minutes (Vercel Hobby crons run only daily).
+# OFF until Sel sets, in GitHub → Settings → Secrets and variables → Actions:
+#   Variables: EBAY_SYNC_ENABLED = true
+#   Secrets:   CRON_SECRET = (same value as in Vercel)
+# It only calls Listflow's own read-only sync endpoint; nothing is posted to eBay.
+name: eBay sync
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+jobs:
+  sync:
+    if: ${{ vars.EBAY_SYNC_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call /api/cron/ebay-sync
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: ${{ vars.LISTFLOW_URL || 'https://listflow-two.vercel.app' }}
+        run: |
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/ebay-sync")
+          head -c 600 /tmp/out.json; echo
+          test "$code" = "200"

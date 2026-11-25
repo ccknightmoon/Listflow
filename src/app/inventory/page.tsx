@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { parseStatusParam, type InventoryStatus } from "@/lib/inventory-status";
 import { InventoryEmbedContext } from "@/components/inventory/InventoryEmbed";
 import InventoryHeader from "@/components/inventory/InventoryHeader";
+import { SyncIndicator, UnlinkedAlert } from "@/components/SyncStatus";
 import DraftsView from "@/components/inventory/DraftsView";
 import ListingsView from "@/components/inventory/ListingsView";
 import ScheduledView from "@/components/inventory/ScheduledView";
@@ -16,7 +17,12 @@ import SoldView from "@/components/inventory/SoldView";
 // actions; only the title row is shared.
 function InventoryInner() {
   const status: InventoryStatus = parseStatusParam(useSearchParams().get("status"));
-  const header = <InventoryHeader status={status} />;
+  const header = (
+    <InventoryHeader
+      status={status}
+      extra={<><SyncIndicator className="mb-2" /><UnlinkedAlert /></>}
+    />
+  );
   const view =
     status === "draft" ? <DraftsView /> :
     status === "scheduled" ? <ScheduledView /> :

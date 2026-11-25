@@ -2,9 +2,6 @@ import { NextRequest, NextResponse, after } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { kickWorkerAfterResponse, queueAvailable, QUEUE_UNAVAILABLE } from "@/lib/jobs/server";
 import { runPhotoCleanupForUser } from "@/lib/photo-cleanup-server";
-import { requireEbayConnection } from "@/lib/ebay-connection";
-import { ebayContext } from "@/lib/ebay-request-context";
-import { sweepEbayChanges } from "@/lib/ebay-sync";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -19,19 +16,9 @@ export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
   const userId = auth.user.id;
-  // Pull edits made in the eBay app into linked drafts (GetSellerEvents;
-  // at most every 10 minutes; needs migration 034, else skipped).
-  const connection = await requireEbayConnection(auth).catch(() => null);
-  if (connection) {
-    after(async () => {
-      try {
-        const r = await ebayContext.run(connection, () => sweepEbayChanges(auth.supabase, userId));
-        if (r.updated || r.conflicts) console.log(JSON.stringify({ event: "ebay_sync", userId, ...r }));
-      } catch (err) {
-        console.error("ebay sync:", (err as Error).message);
-      }
-    });
-  }
+  // eBay sync used to run here; it's now the app-wide EbaySyncAgent
+  // (POST /api/ebay/sync every ~5 min while the app is open), so the two
+  // never race over the same window.
   after(async () => {
     try {
       const r = await runPhotoCleanupForUser(userId);
