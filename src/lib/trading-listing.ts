@@ -249,7 +249,7 @@ export function listingPostalCode(env: Record<string, string | undefined> = proc
     const zip = v?.match(/\b(\d{5})\b/)?.[1];
     if (zip) return zip;
   }
-  return "10001";
+  return "33125";
 }
 
 export type PublishApi = "trading" | "inventory";

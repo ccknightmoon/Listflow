@@ -352,7 +352,7 @@ export async function ensureMerchantLocation() {
   if (merchantLocationEnsured.has(ctx.userId)) return;
 
   const result = await inventoryRequest("POST", `/sell/inventory/v1/location/${MERCHANT_LOCATION_KEY}`, {
-    location: { address: { country: "US", postalCode: "10001" } },
+    location: { address: { country: "US", postalCode: "33125" } },
     locationTypes: ["WAREHOUSE"],
     merchantLocationStatus: "ENABLED",
     name: "Listflow Default",

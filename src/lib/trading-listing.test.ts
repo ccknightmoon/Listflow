@@ -86,7 +86,7 @@ describe("helpers", () => {
   it("schedule time, postal code, publish API flag", () => {
     expect(scheduleTimeFromNow(21, Date.parse("2026-11-24T10:37:12Z"))).toBe("2026-12-15T10:00:00.000Z");
     expect(listingPostalCode({ EBAY_ITEM_LOCATION: "Brooklyn, NY 11201" })).toBe("11201");
-    expect(listingPostalCode({})).toBe("10001");
+    expect(listingPostalCode({})).toBe("33125");
     expect(publishApi({})).toBe("trading");
     expect(publishApi({ PUBLISH_API: "Inventory" })).toBe("inventory");
   });
