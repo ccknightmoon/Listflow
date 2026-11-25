@@ -19,7 +19,9 @@ import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { morphNavigate } from "@/lib/view-transition";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
-import { readTombstones, rememberDeleted, withoutDeleted } from "@/lib/deleted-drafts";
+import { forgetDeleted, readTombstones, rememberDeleted, withoutDeleted } from "@/lib/deleted-drafts";
+import UndoBar from "@/components/UndoBar";
+import RecycleBinPanel from "@/components/RecycleBinPanel";
 import DraftsOnEbayPanel from "@/components/DraftsOnEbayPanel";
 import { useInventoryEmbed } from "@/components/inventory/InventoryEmbed";
 import type { ShippingMode } from "@/lib/shipping";
@@ -93,6 +95,11 @@ function resolveShippingCost(id: string, draft: Draft | undefined): number | und
 
 export default function DraftsView() {
   const embed = useInventoryEmbed();
+  // Recycle bin (migration 035): deletes can be undone for 7 days.
+  const [binAvailable, setBinAvailable] = useState(false);
+  const [binKey, setBinKey] = useState(0);
+  const [undo, setUndo] = useState<{ ids: string[]; message: string } | null>(null);
+  const [undoing, setUndoing] = useState(false);
   const router = useRouter();
   const [drafts, setDrafts] = useState<Draft[]>(() => withoutDeleted(getPageCache<Draft[]>(DRAFTS_CACHE_KEY) ?? [], readTombstones()));
   const [loading, setLoading] = useState(() => getPageCache<Draft[]>(DRAFTS_CACHE_KEY) === undefined);
@@ -340,19 +347,54 @@ export default function DraftsView() {
     setTotal((t) => Math.max(0, t - ids.length));
   }
 
+  // After a delete: offer Undo when it went to the bin.
+  function afterDelete(data: { deleted?: string[]; mode?: "trash" | "permanent" }) {
+    const ids = data.deleted ?? [];
+    if (data.mode === "trash" && ids.length) {
+      setUndo({ ids, message: ids.length === 1 ? "Moved to Recently deleted" : `Moved ${ids.length} drafts to Recently deleted` });
+      setBinKey((k) => k + 1);
+    }
+  }
+
+  async function undoDelete() {
+    if (!undo) return;
+    setUndoing(true);
+    try {
+      const r = await apiFetch<{ restored?: string[]; error?: string }>("/api/drafts/trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ids: undo.ids }) });
+      if (r.error) throw new Error(r.error);
+      forgetDeleted(r.restored ?? []);
+      setUndo(null);
+      setBinKey((k) => k + 1);
+      await loadDrafts();
+      loadNoPriceTotal();
+    } catch (err) {
+      setError(`Couldn't undo: ${(err as Error).message}. It's still in Recently deleted below.`);
+      setUndo(null);
+    } finally {
+      setUndoing(false);
+    }
+  }
+
+  function deleteMessage(n: number): string {
+    return binAvailable
+      ? `${n === 1 ? "It moves" : "They move"} to Recently deleted for 7 days (you can undo), then ${n === 1 ? "it's" : "they're"} removed with ${n === 1 ? "its" : "their"} photos for good. Anything already on eBay stays on eBay.`
+      : "Permanently deletes them and their photos from Listflow. This can't be undone. Anything already on eBay stays on eBay.";
+  }
+
   async function handleDeleteSelected() {
     if (selected.size === 0) return;
     const ids = Array.from(selected);
-    if (!(await confirmAction({ title: `Delete ${ids.length} draft${ids.length !== 1 ? "s" : ""}?`, message: "Permanently deletes them and their photos from Listflow. This can't be undone. Anything already on eBay stays on eBay.", confirmLabel: "Delete", destructive: true }))) return;
+    if (!(await confirmAction({ title: `Delete ${ids.length} draft${ids.length !== 1 ? "s" : ""}?`, message: deleteMessage(ids.length), confirmLabel: "Delete", destructive: true }))) return;
     setDeleting(true);
     try {
-      const data = await apiFetch<{ error?: string; deleted?: string[]; notFound?: string[] }>("/api/drafts", {
+      const data = await apiFetch<{ error?: string; deleted?: string[]; notFound?: string[]; mode?: "trash" | "permanent" }>("/api/drafts", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids }),
       });
       if (data.error) throw new Error(data.error);
       forgetDrafts([...(data.deleted ?? []), ...(data.notFound ?? [])]);
+      afterDelete(data);
       setSelected(new Set());
       await loadDrafts();
       loadNoPriceTotal();
@@ -368,15 +410,16 @@ export default function DraftsView() {
     getPublishQueue().enqueue({ draftId: d.id, title: d.title ?? "Untitled", thumbnail: d.thumbnail_url });
   }
   async function deleteOne(d: Draft) {
-    if (!(await confirmAction({ title: "Delete this draft?", message: `${d.title ? d.title + " — " : ""}permanently deleted with its photos. This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
+    if (!binAvailable && !(await confirmAction({ title: "Delete this draft?", message: `${d.title ? d.title + " — " : ""}permanently deleted with its photos. This can't be undone.`, confirmLabel: "Delete", destructive: true }))) return;
     try {
-      const data = await apiFetch<{ error?: string; deleted?: string[]; notFound?: string[] }>("/api/drafts", {
+      const data = await apiFetch<{ error?: string; deleted?: string[]; notFound?: string[]; mode?: "trash" | "permanent" }>("/api/drafts", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ids: [d.id] }),
       });
       if (data.error) throw new Error(data.error);
       forgetDrafts([...(data.deleted ?? []), ...(data.notFound ?? [])]);
+      afterDelete(data);
       await loadDrafts();
       loadNoPriceTotal();
     } catch (err) {
@@ -876,6 +919,12 @@ export default function DraftsView() {
         onClose={() => setBulkEditOpen(false)}
         onApply={applyBulkEdit}
       />
+      <RecycleBinPanel
+        refreshKey={binKey}
+        onAvailability={setBinAvailable}
+        onRestored={() => { loadDrafts(); loadNoPriceTotal(); }}
+      />
+      <UndoBar message={undo?.message ?? null} busy={undoing} onUndo={undoDelete} onClose={() => setUndo(null)} />
     </main>
   );
 }

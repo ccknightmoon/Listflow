@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { draftBodyError, draftRowFromBody, withoutMissingColumn } from "@/lib/draft-row";
 import { getListingReadiness } from "@/lib/listing-readiness";
-import { deleteDraftsCompletely } from "@/lib/draft-delete";
+import { trashDrafts } from "@/lib/draft-trash";
 import { serviceDb } from "@/lib/jobs/supabase-store";
 
 // isHeavy/shippingCost mirror the same fields POST /api/ebay/list already
@@ -171,11 +171,12 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "ids must be a list of 1–500 draft IDs." }, { status: 400 });
   }
 
-  // Permanent: row + its photos in storage. Answers with the ids that were
-  // really removed (an id that wasn't there is reported, not "deleted").
+  // Recycle bin: the drafts leave every list now and are purged for good
+  // (row + photos) after 7 days unless restored. Without migration 035 this
+  // is the old permanent delete. Answers with the ids really removed.
   try {
-    const r = await deleteDraftsCompletely(auth.supabase, process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceDb() : auth.supabase, auth.user.id, ids, process.env.NEXT_PUBLIC_SUPABASE_URL!);
-    return NextResponse.json({ ...r, deletedCount: r.deleted.length }, { headers: { "Cache-Control": "no-store" } });
+    const r = await trashDrafts(auth.supabase, process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceDb() : auth.supabase, auth.user.id, ids, process.env.NEXT_PUBLIC_SUPABASE_URL!);
+    return NextResponse.json({ deleted: r.trashed, notFound: r.notFound, deletedCount: r.trashed.length, mode: r.mode, purgeAfter: r.purgeAfter }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

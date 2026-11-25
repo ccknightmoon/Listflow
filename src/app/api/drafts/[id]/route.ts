@@ -1,7 +1,7 @@
 import { draftFieldsError, isUuid } from "@/lib/input-validation";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
-import { deleteDraftsCompletely } from "@/lib/draft-delete";
+import { trashDrafts } from "@/lib/draft-trash";
 import { serviceDb } from "@/lib/jobs/supabase-store";
 import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
 import { isValidCostBasis } from "@/lib/profit";
@@ -177,9 +177,10 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
 
   try {
-    const r = await deleteDraftsCompletely(auth.supabase, process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceDb() : auth.supabase, auth.user.id, [id], process.env.NEXT_PUBLIC_SUPABASE_URL!);
+    // To the recycle bin (7 days, undo), or permanent without migration 035.
+    const r = await trashDrafts(auth.supabase, process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceDb() : auth.supabase, auth.user.id, [id], process.env.NEXT_PUBLIC_SUPABASE_URL!);
     // Already gone counts as success for the caller (idempotent), but says so.
-    return NextResponse.json({ deleted: true, alreadyGone: r.deleted.length === 0, photosRemoved: r.photosRemoved }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ deleted: true, alreadyGone: r.trashed.length === 0, mode: r.mode, purgeAfter: r.purgeAfter }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
   }

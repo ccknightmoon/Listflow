@@ -203,6 +203,15 @@ async function removeOrphans(deps: CleanupDeps, userId: string, drafts: CleanupD
       if (p) used.add(p);
     }
   }
+  // Drafts in the recycle bin (migration 035) still own their photos.
+  const { data: trash, error: tErr } = await deps.db.from("draft_trash").select("photo_urls").eq("user_id", userId);
+  if (tErr && !/draft_trash|does not exist|could not find/i.test(tErr.message)) return 0; // unsure -> delete nothing
+  for (const t of (trash ?? []) as Array<{ photo_urls?: unknown }>) {
+    for (const u of Array.isArray(t.photo_urls) ? (t.photo_urls as string[]) : []) {
+      const p = storagePath(u, deps.supabaseUrl);
+      if (p) used.add(p);
+    }
+  }
   const cutoff = now - ORPHAN_MIN_AGE_DAYS * 86400_000;
   const orphans: string[] = [];
   for (let offset = 0; offset < 20_000; offset += 1000) {

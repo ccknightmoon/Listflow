@@ -2,6 +2,7 @@ import { PRIVATE_BUCKET } from "@/lib/private-photos";
 import { NextRequest, NextResponse } from "next/server";
 import { purgeDateFrom } from "@/lib/account-deletion";
 import { getServiceClient } from "@/lib/supabase-service";
+import { purgeExpiredTrash } from "@/lib/draft-trash";
 
 export const runtime = "nodejs";
 
@@ -74,7 +75,16 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({ checked: pending?.length ?? 0, purged: results.filter((r) => r.success).length, results });
+    // Recycle bin: drafts deleted 7+ days ago are purged for good (row +
+    // photos nothing else uses). Same daily job, so no extra cron slot.
+    let trash: Awaited<ReturnType<typeof purgeExpiredTrash>> | { error: string };
+    try {
+      trash = await purgeExpiredTrash(supabase, process.env.NEXT_PUBLIC_SUPABASE_URL!);
+    } catch (err) {
+      trash = { error: (err as Error).message };
+    }
+
+    return NextResponse.json({ checked: pending?.length ?? 0, purged: results.filter((r) => r.success).length, results, trash });
   } catch (err) {
     // Wraps the whole handler now (added alongside the daily-digest cron,
     // Sept 9, 2026) -- previously an early failure here (e.g. a missing

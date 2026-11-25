@@ -41,3 +41,18 @@ export function rememberDeleted(ids: string[]): void {
     // storage blocked: the server list is still authoritative
   }
 }
+
+/** Undo / Restore from the recycle bin: these may be shown again. */
+export function removeTombstones(t: Tombstones, ids: string[]): Tombstones {
+  const out = { ...t };
+  for (const id of ids) delete out[id];
+  return out;
+}
+
+export function forgetDeleted(ids: string[]): void {
+  try {
+    localStorage.setItem(KEY, JSON.stringify(removeTombstones(readTombstones(), ids)));
+  } catch {
+    // storage blocked: nothing to undo locally
+  }
+}

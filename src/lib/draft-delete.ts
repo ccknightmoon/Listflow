@@ -91,9 +91,12 @@ export async function deleteDraftsCompletely(db: SupabaseClient, storageDb: Supa
     const { data: others } = await db.from("drafts").select("photo_urls, thumbnail_url").eq("user_id", userId);
     // listing_jobs is optional (migration 029); a read error just means no jobs.
     const { data: jobs } = await db.from("listing_jobs").select("input").eq("user_id", userId).in("status", ["queued", "running"]);
+    // Recycle bin (migration 035): photos of drafts waiting there stay until it's purged.
+    const { data: trash } = await db.from("draft_trash").select("photo_urls").eq("user_id", userId);
     const keepUrls = [
       ...((others ?? []) as Array<Pick<DeletableDraft, "photo_urls" | "thumbnail_url">>).flatMap((d) => draftUrls(d)),
       ...(jobs ?? []).flatMap((j) => urlsInJson((j as { input?: unknown }).input)),
+      ...((trash ?? []) as Array<{ photo_urls?: unknown }>).flatMap((t) => (Array.isArray(t.photo_urls) ? (t.photo_urls as string[]) : [])),
     ];
     const { purge, kept } = photoPathsToPurge(gone, keepUrls, supabaseUrl, userId);
     photosKept = kept;

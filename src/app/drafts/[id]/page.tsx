@@ -966,7 +966,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   async function handleDelete() {
-    if (!(await confirmAction({ title: "Delete this draft?", message: "Permanently deletes it and its photos from Listflow. This can't be undone.", confirmLabel: "Delete", destructive: true }))) return;
+    if (!(await confirmAction({ title: "Delete this draft?", message: "It moves to Inventory → Draft → Recently deleted for 7 days (you can restore it there), then it's removed with its photos for good. If the recycle bin isn't switched on yet, it's deleted right away.", confirmLabel: "Delete", destructive: true }))) return;
     setDeleting(true);
     try {
       await apiFetch(`/api/drafts/${id}`, { method: "DELETE" });
