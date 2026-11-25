@@ -160,7 +160,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
 
   try {
-    const r = await deleteDraftsCompletely(auth.supabase, serviceDb(), auth.user.id, [id], process.env.NEXT_PUBLIC_SUPABASE_URL!);
+    const r = await deleteDraftsCompletely(auth.supabase, process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceDb() : auth.supabase, auth.user.id, [id], process.env.NEXT_PUBLIC_SUPABASE_URL!);
     // Already gone counts as success for the caller (idempotent), but says so.
     return NextResponse.json({ deleted: true, alreadyGone: r.deleted.length === 0, photosRemoved: r.photosRemoved }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {

@@ -175,7 +175,7 @@ export async function DELETE(req: NextRequest) {
   // Permanent: row + its photos in storage. Answers with the ids that were
   // really removed (an id that wasn't there is reported, not "deleted").
   try {
-    const r = await deleteDraftsCompletely(auth.supabase, serviceDb(), auth.user.id, ids, process.env.NEXT_PUBLIC_SUPABASE_URL!);
+    const r = await deleteDraftsCompletely(auth.supabase, process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceDb() : auth.supabase, auth.user.id, ids, process.env.NEXT_PUBLIC_SUPABASE_URL!);
     return NextResponse.json({ ...r, deletedCount: r.deleted.length }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 });
