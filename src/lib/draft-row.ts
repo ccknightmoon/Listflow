@@ -1,8 +1,9 @@
 // Draft row building/validation shared by POST /api/drafts and the
 // background queue worker (Volume Phase 3).
 import { draftFieldsError } from "@/lib/input-validation";
-import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
+import { sanitizeStoredSpecifics, isMissingColumnError } from "@/lib/item-specifics";
 import { isValidCostBasis } from "@/lib/profit";
+import { storedFloorError } from "@/lib/offer-floor";
 
 function isValidShippingCost(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
@@ -40,6 +41,10 @@ export function draftBodyError(body: Body): string | null {
   }
   if (body.shippingMode !== undefined && !isValidShippingMode(body.shippingMode)) {
     return "shippingMode must be 'free', 'calculated', or 'buyer_pays'.";
+  }
+  if (body.bestOfferFloor !== undefined && body.bestOfferFloor !== null) {
+    const floorErr = storedFloorError(body.suggestedPrice, body.bestOfferFloor);
+    if (floorErr) return floorErr;
   }
 
   return null;
@@ -86,7 +91,25 @@ export function draftRowFromBody(userId: string, body: Body) {
         is_heavy: body.isHeavy ?? false,
         shipping_cost: body.shippingCost ?? null,
         shipping_mode: "calculated", // calculated-only; older clients may still send free/buyer_pays
+        ...(body.bestOfferFloor !== undefined && { best_offer_floor: body.bestOfferFloor ?? null }),
         ...(specifics !== undefined && { item_specifics: specifics }),
       };
   return row;
+}
+
+/**
+ * Columns added by migrations that may not be applied yet (027, 035). When
+ * a write fails because one is missing, returns the values without it so
+ * the rest still saves; null when the error is something else.
+ */
+export const OPTIONAL_DRAFT_COLUMNS = ["item_specifics", "best_offer_floor"] as const;
+export function withoutMissingColumn<T extends Record<string, unknown>>(values: T, error: { code?: string; message?: string } | null | undefined): T | null {
+  for (const col of OPTIONAL_DRAFT_COLUMNS) {
+    if (col in values && isMissingColumnError(error, col)) {
+      const rest = { ...values };
+      delete rest[col];
+      return rest;
+    }
+  }
+  return null;
 }

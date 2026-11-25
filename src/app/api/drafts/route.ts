@@ -1,8 +1,7 @@
 import { uuidList } from "@/lib/input-validation";
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
-import { isMissingColumnError } from "@/lib/item-specifics";
-import { draftBodyError, draftRowFromBody } from "@/lib/draft-row";
+import { draftBodyError, draftRowFromBody, withoutMissingColumn } from "@/lib/draft-row";
 import { getListingReadiness } from "@/lib/listing-readiness";
 import { deleteDraftsCompletely } from "@/lib/draft-delete";
 import { serviceDb } from "@/lib/jobs/supabase-store";
@@ -196,14 +195,15 @@ export async function POST(req: NextRequest) {
 
   const invalid = draftBodyError(body);
   if (invalid) return NextResponse.json({ error: invalid }, { status: 400 });
-  const row = draftRowFromBody(auth.user.id, body);
+  let row: Record<string, unknown> = draftRowFromBody(auth.user.id, body);
   let { data, error } = await auth.supabase.from("drafts").insert([row]).select();
-  // Before migration 027 is applied the item_specifics column doesn't exist:
+  // Before migrations 027/035 are applied (item_specifics, best_offer_floor)
   // save everything else rather than failing the whole draft.
-  if (error && isMissingColumnError(error, "item_specifics")) {
-    const { item_specifics: _drop, ...rest } = row as typeof row & { item_specifics?: unknown };
-    void _drop;
-    ({ data, error } = await auth.supabase.from("drafts").insert([rest]).select());
+  for (let tries = 0; error && tries < 2; tries++) {
+    const rest = withoutMissingColumn(row, error);
+    if (!rest) break;
+    row = rest;
+    ({ data, error } = await auth.supabase.from("drafts").insert([row]).select());
   }
 
   if (error) {

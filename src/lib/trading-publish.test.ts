@@ -111,3 +111,39 @@ describe("reviseDraftListing", () => {
     expect(await reviseDraftListing({ ...draft, ebay_listing_id: "256000000004" } as never, { categoryId: "1", sku: "1", storeFooter: null }, call as never)).toMatchObject({ ok: false, inventoryModel: true });
   });
 });
+
+describe("Best Offer floor on publish", () => {
+  it("lists with Best Offer + auto-decline at the saved floor", async () => {
+    fake = fakeSupabase({ drafts: { data: { id: draft.id, ebay_listing_id: "256000000010" } } });
+    const calls: Array<[string, TradingItemInput]> = [];
+    const call = vi.fn(async (c: string, item: TradingItemInput) => { calls.push([c, item]); return c === "AddFixedPriceItem" ? ok("256000000010") : ok(); });
+    await publishDraftTrading(args({ draft: { ...draft, suggested_price: 28, best_offer_floor: 24 } }), call as never);
+    expect(calls.map((c) => c[0])).toEqual(["VerifyAddFixedPriceItem", "AddFixedPriceItem"]);
+    expect(calls[0][1].bestOffer).toEqual({ enabled: true, autoDecline: 24 });
+    expect(calls[1][1].price).toBe(28);
+    expect(calls[1][1].bestOffer).toEqual({ enabled: true, autoDecline: 24 });
+  });
+  it("no floor = Best Offer off on a new listing", async () => {
+    const calls: TradingItemInput[] = [];
+    const call = vi.fn(async (_c: string, item: TradingItemInput) => { calls.push(item); return ok("256000000011"); });
+    await publishDraftTrading(args({ draft: { ...draft, best_offer_floor: null } }), call as never);
+    expect(calls[0].bestOffer).toEqual({ enabled: false });
+  });
+  it("falls back to fixed price when eBay refuses Best Offer for the category", async () => {
+    const results = [fail("21916000", "Best Offer is not enabled for this category."), ok(), ok("256000000012")];
+    const seen: TradingItemInput[] = [];
+    const call = vi.fn(async (_c: string, item: TradingItemInput) => { seen.push(item); return results.shift()!; });
+    const body = await (await publishDraftTrading(args({ draft: { ...draft, suggested_price: 28, best_offer_floor: 24 } }), call as never)).json();
+    expect(seen[1].bestOffer).toEqual({ enabled: false });
+    expect(seen[2].bestOffer).toEqual({ enabled: false });
+    expect(body.warnings?.[0]).toMatch(/Best Offer/);
+  });
+  it("revise sends the floor when saved, and leaves eBay's setting alone when not", async () => {
+    const call = vi.fn(async () => ok("256000000013"));
+    await reviseDraftListing({ ...draft, suggested_price: 28, best_offer_floor: "24", ebay_listing_id: "256000000013" } as never, { categoryId: "155183", sku: "1001", storeFooter: null }, call as never);
+    expect((call.mock.calls[0] as unknown as [string, TradingItemInput])[1].bestOffer).toEqual({ enabled: true, autoDecline: 24 });
+    call.mockClear();
+    await reviseDraftListing({ ...draft, ebay_listing_id: "256000000013" } as never, { categoryId: "155183", sku: "1001", storeFooter: null }, call as never);
+    expect((call.mock.calls[0] as unknown as [string, TradingItemInput])[1].bestOffer).toBeUndefined();
+  });
+});

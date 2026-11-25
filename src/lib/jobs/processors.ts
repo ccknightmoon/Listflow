@@ -9,11 +9,10 @@ import { currentConfidence } from "@/lib/ai-result";
 import { analyzeAndEnrich, isOwnPhotoUrl } from "@/lib/analyze-core";
 import { checkAndConsumeAiUsage, type UsageCheckResult } from "@/lib/ai-usage";
 import { buildDraftPayload } from "@/lib/draft-payload";
-import { draftRowFromBody } from "@/lib/draft-row";
+import { draftRowFromBody, withoutMissingColumn } from "@/lib/draft-row";
 import { ebayConnectionForUser } from "@/lib/ebay-connection";
 import { ebayContext, type EbayConnectionContext } from "@/lib/ebay-request-context";
 import { groupPhotosCore, type GroupChunkResult, type GroupImagePart } from "@/lib/group-photos-core";
-import { isMissingColumnError } from "@/lib/item-specifics";
 import type { PriceSuggestion } from "@/lib/pricing";
 import { computePriceSuggestion, type PriceInput } from "@/lib/pricing-suggest";
 import { publishDraft, type PublishContext } from "@/lib/publish-draft";
@@ -115,6 +114,7 @@ export async function processAnalyze(job: Job, ctx: ProcessorContext, deps: Proc
       title: analysis.suggestedTitle ?? "",
       thumbnail: urls[0],
       price: payload.suggestedPrice,
+      floor: payload.bestOfferFloor,
       ready: conf.ready,
       reasons: conf.reasons.filter((x) => x.blocking).map((x) => x.message).slice(0, 5),
       timings: r.timings,
@@ -202,12 +202,14 @@ export function supabaseDraftWriter(db: SupabaseClient): DraftWriter {
       return (data?.id as string | undefined) ?? null;
     },
     async insert(jobId, row) {
-      const withJob = { ...row, source_job_id: jobId };
+      let withJob: Record<string, unknown> = { ...row, source_job_id: jobId };
       let { data, error } = await db.from("drafts").insert([withJob]).select("id");
-      if (error && isMissingColumnError(error, "item_specifics")) {
-        const { item_specifics: _drop, ...rest } = withJob as typeof withJob & { item_specifics?: unknown };
-        void _drop;
-        ({ data, error } = await db.from("drafts").insert([rest]).select("id"));
+      // Migrations 027/035 not applied yet: save the rest.
+      for (let tries = 0; error && tries < 2; tries++) {
+        const rest = withoutMissingColumn(withJob, error);
+        if (!rest) break;
+        withJob = rest;
+        ({ data, error } = await db.from("drafts").insert([withJob]).select("id"));
       }
       if (error?.code === "23505") {
         // Another run already made it (unique source_job_id): use that one.

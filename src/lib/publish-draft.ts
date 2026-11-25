@@ -2,6 +2,7 @@
 // seller) and the background queue worker (Volume Phase 3), which runs it
 // with the service-role client -- so EVERY drafts query below is scoped to
 // ctx.userId explicitly, not left to RLS.
+import { storedFloorError } from "@/lib/offer-floor";
 import { isPrivatePhotoRef } from "@/lib/private-photos";
 import { externalPhotoUrls, EBAY_URL_TTL_S } from "@/lib/private-photos-server";
 import { invalidateListingsAround } from "@/lib/ebay-listings";
@@ -220,6 +221,12 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
     if (draft.title.trim().length > 80) return NextResponse.json({ error: "Keep the title to 80 characters or fewer." }, { status: 400 });
     if (typeof draft.suggested_price !== "number" || !Number.isFinite(draft.suggested_price) || draft.suggested_price <= 0) {
       return NextResponse.json({ error: "Set a valid price before listing." }, { status: 400 });
+    }
+    {
+      const raw = (draft as { best_offer_floor?: unknown }).best_offer_floor;
+      const floor = raw === null || raw === undefined ? null : Number(raw);
+      const floorErr = floor === null ? null : storedFloorError(draft.suggested_price, floor);
+      if (floorErr) return NextResponse.json({ error: `Best Offer floor: ${floorErr}` }, { status: 400 });
     }
     if (!draft.condition || !CONDITION_MAP[draft.condition]) {
       return NextResponse.json({ error: "Choose a valid item condition before listing." }, { status: 400 });

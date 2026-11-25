@@ -4,6 +4,7 @@
 import { formatMeasurements, storedSpecificsFrom, type AiResult } from "@/lib/ai-result";
 import { getPriceSuggestion, type Condition, type PriceSuggestion } from "@/lib/pricing";
 import { estimateIsHeavy } from "@/lib/shipping";
+import { defaultFloorFor } from "@/lib/offer-floor";
 
 export function buildDraftPayload(result: AiResult, pricing: PriceSuggestion | null | undefined, photoUrls: string[]) {
   const hasRealPricing = !!pricing && !pricing.noData;
@@ -28,6 +29,9 @@ export function buildDraftPayload(result: AiResult, pricing: PriceSuggestion | n
     condition: result.condition,
     flaws: result.flaws,
     suggestedPrice: suggestion.suggestedPrice,
+    // Best Offer floor defaults to the AI's floor (offers below it are
+    // auto-declined); the seller can change or clear it before listing.
+    bestOfferFloor: defaultFloorFor(suggestion.suggestedPrice, suggestion.floorPrice),
     costBasis: null,
     avgSold: hasRealPricing ? suggestion.avgSold : null,
     activeRangeLow: hasRealPricing ? suggestion.activeRangeLow : null,

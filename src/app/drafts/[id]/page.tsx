@@ -2,6 +2,8 @@
 
 import { rememberDeleted } from "@/lib/deleted-drafts";
 import CurrencyInput from "@/components/CurrencyInput";
+import PriceFloorFields from "@/components/PriceFloorFields";
+import { checkPriceAndFloor, moneyText } from "@/lib/offer-floor";
 import Sheet from "@/components/Sheet";
 import PhotoDropZone from "@/components/PhotoDropZone";
 import CompsPanel from "@/components/CompsPanel";
@@ -42,6 +44,8 @@ interface Draft {
   condition: string | null;
   flaws: string | null;
   suggested_price: number | null;
+  /** Migration 035; absent before it is applied. */
+  best_offer_floor?: number | string | null;
   cost_basis: number | null;
   avg_sold: number | null;
   active_range_low: number | null;
@@ -172,6 +176,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [condition, setCondition] = useState("");
   const [flaws, setFlaws] = useState("");
   const [price, setPrice] = useState("");
+  // Best Offer floor ("" = no offers).
+  const [floor, setFloor] = useState("");
+  const priceCheck = checkPriceAndFloor(price, floor);
   const [cost, setCost] = useState(""); // cost_basis (migration 017, src/lib/profit.ts)
   const [customSku, setCustomSku] = useState("");
   const initialCustomSku = useRef<string | null>(null);
@@ -242,6 +249,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         setCondition(str(d.condition));
         setFlaws(str(d.flaws));
         setPrice(d.suggested_price != null ? String(d.suggested_price) : "");
+        setFloor(d.best_offer_floor != null && d.best_offer_floor !== "" ? moneyText(Number(d.best_offer_floor)) : "");
         setCost(d.cost_basis != null ? String(d.cost_basis) : "");
         const loadedSku = str(d.custom_sku).trim();
         initialCustomSku.current = loadedSku || null;
@@ -295,7 +303,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }, []);
 
   const formSignature = JSON.stringify({
-    title, brand, color, size, condition, flaws, price, cost, customSku,
+    title, brand, color, size, condition, flaws, price, floor, cost, customSku,
     itemType, style, material, theme, sleeveLength, neckline, fit, pattern,
     description, vintage, character, characterFamily, yearManufactured, season,
     storeCategoryId, storeCategoryName, shippingMode, isHeavy, shippingCost,
@@ -416,7 +424,6 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     const normalizedSku = customSku.trim() || null;
     const payload: Record<string, unknown> = {
       title, brand, color, size, condition, flaws,
-      suggestedPrice: price ? Number(price) : null,
       costBasis: cost ? Number(cost) : null,
       itemType, style, material, theme,
       sleeveLength, neckline, fit, pattern, description,
@@ -426,6 +433,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       isHeavy: shippingMode === "buyer_pays",
       shippingCost: shippingMode === "buyer_pays" && shippingCost ? Number(shippingCost) : null,
     };
+    // Invalid price/floor isn't saved -- the inline error shows instead.
+    // A blank price still saves as "no price" (same as before).
+    if (!priceCheck.priceError) payload.suggestedPrice = priceCheck.price;
+    else if (!price.trim()) payload.suggestedPrice = null;
+    if (priceCheck.ok) payload.bestOfferFloor = priceCheck.floor;
     if (normalizedSku !== initialCustomSku.current) payload.customSku = normalizedSku;
     if (specificsTouched.current && specifics) payload.itemSpecifics = specifics;
     return payload;
@@ -464,11 +476,11 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   async function handleList() {
-    const priceNum = price ? Number(price) : null;
     const readiness = getListingReadiness({
       photoCount: photoUrls.length,
       title,
-      price: priceNum,
+      price: priceCheck.price,
+      bestOfferFloor: floor,
       condition,
       shippingMode,
       missingRequiredSpecifics: missingSpecifics,
@@ -535,6 +547,10 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   async function handleCheckWithEbay() {
+    if (!priceCheck.ok) {
+      setCheckResult({ ok: false, text: priceCheck.priceError ?? `Offer floor: ${priceCheck.floorError}` });
+      return;
+    }
     setChecking(true);
     setCheckResult(null);
     try {
@@ -794,6 +810,9 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
           body: JSON.stringify({
             ...getDraftPayload(),
             suggestedPrice: data.suggestedPrice ?? (price ? Number(price) : null),
+            // A new price at/below the saved floor: keep the floor as saved
+            // (the inline error asks to fix it before listing).
+            ...(checkPriceAndFloor(data.suggestedPrice ?? price, floor).ok ? {} : { bestOfferFloor: undefined }),
             storeCategoryId, storeCategoryName,
             avgSold: data.avgSold ?? null,
             activeRangeLow: data.activeRangeLow ?? null,
@@ -1382,11 +1401,14 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">Size</label>
             <input className="input w-full" value={size} onChange={(e) => setSize(e.target.value)} />
           </div>
-          <div>
-            <label className="text-xs text-[var(--text-secondary)] mb-1 block">List price</label>
-            <CurrencyInput value={price} onChange={setPrice} placeholder="0.00" aria-label="List price" />
-          </div>
         </div>
+        <PriceFloorFields
+          idPrefix="draft"
+          price={price}
+          floor={floor}
+          onPriceChange={setPrice}
+          onFloorChange={setFloor}
+        />
         <CompsPanel draftId={id} title={title} brand={brand} size={size} condition={condition} onUsePrice={(p) => setPrice(String(p))} />
         <div>
           <label className="text-xs text-[var(--text-secondary)] mb-1 block">Cost (what you paid, optional)</label>

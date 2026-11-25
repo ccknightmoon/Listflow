@@ -15,6 +15,8 @@ export interface ReviewItem {
   title: string;
   thumbnail: string | null;
   price: number | null;
+  /** Best Offer floor saved with the draft (null = no offers). */
+  floor?: number | null;
   /** Server's verdict when the draft was made. */
   ready: boolean;
   /** The flagged fields (blocking reasons), in plain English. */
@@ -32,6 +34,7 @@ export function reviewItemsFromJobs(jobs: JobRow[]): ReviewItem[] {
       title: j.result?.title || `Item ${j.item_key}`,
       thumbnail: j.result?.thumbnail ?? null,
       price: typeof j.result?.price === "number" ? j.result.price : null,
+      floor: typeof (j.result as { floor?: unknown } | null | undefined)?.floor === "number" ? ((j.result as { floor: number }).floor) : null,
       ready: !!j.result?.ready,
       reasons: j.result?.reasons ?? [],
     }));

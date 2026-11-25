@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { deleteDraftsCompletely } from "@/lib/draft-delete";
 import { serviceDb } from "@/lib/jobs/supabase-store";
-import { sanitizeStoredSpecifics, isMissingColumnError } from "@/lib/item-specifics";
+import { sanitizeStoredSpecifics } from "@/lib/item-specifics";
 import { isValidCostBasis } from "@/lib/profit";
+import { withoutMissingColumn } from "@/lib/draft-row";
+import { storedFloorError } from "@/lib/offer-floor";
 
 // Same guard as POST /api/drafts -- see that file for why isHeavy/
 // shippingCost are persisted here now instead of living only in
@@ -79,6 +81,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (body.shippingMode !== undefined && !isValidShippingMode(body.shippingMode)) {
     return NextResponse.json({ error: "shippingMode must be 'free', 'calculated', or 'buyer_pays'." }, { status: 400 });
   }
+  if (body.bestOfferFloor !== undefined && body.bestOfferFloor !== null) {
+    // Checked against the price in this same save; a floor-only save is
+    // checked against the saved price below.
+    if (body.suggestedPrice !== undefined) {
+      const floorErr = storedFloorError(body.suggestedPrice, body.bestOfferFloor);
+      if (floorErr) return NextResponse.json({ error: floorErr }, { status: 400 });
+    } else {
+      const { data: cur } = await auth.supabase.from("drafts").select("suggested_price").eq("id", id).eq("user_id", auth.user.id).maybeSingle();
+      const floorErr = storedFloorError(cur?.suggested_price ?? null, body.bestOfferFloor);
+      if (floorErr) return NextResponse.json({ error: floorErr }, { status: 400 });
+    }
+  }
   const expectedUpdatedAt = body.expectedUpdatedAt;
   if (expectedUpdatedAt !== undefined && (typeof expectedUpdatedAt !== "string" || !expectedUpdatedAt)) {
     return NextResponse.json({ error: "Invalid draft version." }, { status: 400 });
@@ -125,18 +139,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(body.shippingCost !== undefined && { shipping_cost: body.shippingCost }),
       ...(body.shippingMode !== undefined && { shipping_mode: "calculated" }), // calculated-only
       ...(specifics !== undefined && { item_specifics: specifics }),
+      ...(body.bestOfferFloor !== undefined && { best_offer_floor: body.bestOfferFloor ?? null }),
   };
   const run = (values: Record<string, unknown>) => {
     let q = auth.supabase.from("drafts").update(values).eq("id", id).eq("user_id", auth.user!.id);
     if (expectedUpdatedAt) q = q.eq("updated_at", expectedUpdatedAt);
     return q.select().maybeSingle();
   };
-  let { data, error } = await run(patch);
-  // Migration 027 not applied yet: save the rest instead of failing.
-  if (error && isMissingColumnError(error, "item_specifics")) {
-    const { item_specifics: _drop, ...rest } = patch as typeof patch & { item_specifics?: unknown };
-    void _drop;
-    ({ data, error } = await run(rest));
+  let values: Record<string, unknown> = patch;
+  let { data, error } = await run(values);
+  // Migrations 027/035 not applied yet: save the rest instead of failing.
+  for (let tries = 0; error && tries < 2; tries++) {
+    const rest = withoutMissingColumn(values, error);
+    if (!rest) break;
+    values = rest;
+    ({ data, error } = await run(values));
   }
 
   if (error) {

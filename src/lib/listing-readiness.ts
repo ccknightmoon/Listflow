@@ -1,3 +1,5 @@
+import { checkPriceAndFloor } from "@/lib/offer-floor";
+
 export type ListingReadinessInput = {
   photoCount: number;
   title?: string | null;
@@ -11,6 +13,8 @@ export type ListingReadinessInput = {
   categoryNeedsReview?: boolean;
   /** Self-check contradictions (title vs category vs Type vs measurements). */
   categoryIssues?: string[];
+  /** Best Offer floor as typed/saved (blank/null = no offers). */
+  bestOfferFloor?: string | number | null;
 };
 
 export type ListingReadiness = {
@@ -29,6 +33,11 @@ export function getListingReadiness(input: ListingReadinessInput): ListingReadin
   if ((input.title?.trim().length ?? 0) > 80) blockers.push("Keep the title to 80 characters or fewer");
   if (input.price == null || !Number.isFinite(input.price) || input.price <= 0) {
     blockers.push("Set a price");
+  } else if (input.price < 0.99) {
+    blockers.push("Price must be at least $0.99");
+  } else if (input.bestOfferFloor !== undefined) {
+    const f = checkPriceAndFloor(input.price, input.bestOfferFloor);
+    if (f.floorError) blockers.push(`Fix the offer floor: ${f.floorError}`);
   }
   if (!input.condition?.trim()) blockers.push("Choose a condition");
   if (!input.shippingMode) blockers.push("Choose a shipping method");

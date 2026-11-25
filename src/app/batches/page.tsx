@@ -80,9 +80,9 @@ function BatchesInner() {
       return { batchId: current.batchId, d: next };
     });
   };
-  const savePrice = async (draftId: string, price: number): Promise<string | null> => {
+  const savePrice = async (draftId: string, price: number, floor: number | null): Promise<string | null> => {
     try {
-      const res = await fetch(`/api/drafts/${draftId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suggestedPrice: price }) });
+      const res = await fetch(`/api/drafts/${draftId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ suggestedPrice: price, bestOfferFloor: floor }) });
       if (!res.ok) return ((await res.json().catch(() => ({}))) as { error?: string }).error || "Couldn't save the price.";
       return null;
     } catch {

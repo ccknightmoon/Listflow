@@ -6,13 +6,15 @@
 // a missing/flagged price can be fixed right on the card.
 // Pure rules live in src/lib/review-queue.ts.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Check, ChevronLeft, Loader2, Pencil, Send, X } from "lucide-react";
 import { Z } from "@/lib/z-layers";
 import { formatMoney } from "@/lib/format";
+import PriceFloorFields from "@/components/PriceFloorFields";
+import { checkPriceAndFloor, moneyText } from "@/lib/offer-floor";
 import {
-  needsPrice, nextUndecided, parsePriceInput, swipeDecision, willList, draftIdsToList,
+  nextUndecided, swipeDecision, willList, draftIdsToList,
   type Decision, type Decisions, type ReviewItem,
 } from "@/lib/review-queue";
 
@@ -21,8 +23,8 @@ interface Props {
   items: ReviewItem[];
   decisions: Decisions;
   onDecide: (draftId: string, d: Decision | null) => void;
-  /** Saves a new price for a draft; returns an error message or null. */
-  onSavePrice: (draftId: string, price: number) => Promise<string | null>;
+  /** Saves a new price + Best Offer floor (null = no offers); returns an error message or null. */
+  onSavePrice: (draftId: string, price: number, floor: number | null) => Promise<string | null>;
   onListAll: (draftIds: string[]) => void;
   listing: boolean;
   onClose: () => void;
@@ -34,9 +36,11 @@ export default function ReviewQueue({ open, items, decisions, onDecide, onSavePr
   const start = useRef<{ x: number; y: number; id: number } | null>(null);
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [priceInput, setPriceInput] = useState("");
+  const [floorInput, setFloorInput] = useState("");
   const [priceError, setPriceError] = useState<string | null>(null);
   const [savingPrice, setSavingPrice] = useState(false);
-  const [prices, setPrices] = useState<Record<string, number>>({});
+  // What was last saved per draft this session (price + floor).
+  const [prices, setPrices] = useState<Record<string, { price: number; floor: number | null }>>({});
 
   // Start at the first undecided card each time the queue opens.
   const [openedFor, setOpenedFor] = useState(false);
@@ -49,13 +53,14 @@ export default function ReviewQueue({ open, items, decisions, onDecide, onSavePr
   }
 
   const item = index < items.length ? items[index] : null;
-  const price = item ? prices[item.draftId] ?? item.price : null;
-  const showPrice = !!item && needsPrice({ ...item, price });
+  const saved = useMemo(() => (item ? prices[item.draftId] ?? { price: item.price, floor: item.floor ?? null } : null), [item, prices]);
+  const priceCheck = checkPriceAndFloor(priceInput, floorInput);
 
   const [priceFor, setPriceFor] = useState<string | null>(null);
   if (item && priceFor !== item.draftId) {
     setPriceFor(item.draftId);
-    setPriceInput(price != null ? String(price) : "");
+    setPriceInput(moneyText(saved?.price ?? null));
+    setFloorInput(moneyText(saved?.floor ?? null));
     setPriceError(null);
   }
 
@@ -69,26 +74,27 @@ export default function ReviewQueue({ open, items, decisions, onDecide, onSavePr
 
   const decide = useCallback(async (d: Decision) => {
     if (!item) return;
-    if (d === "approve" && showPrice) {
-      const p = parsePriceInput(priceInput);
-      if (p == null) {
-        setPriceError("Enter a price to approve this one.");
+    if (d === "approve") {
+      if (!priceCheck.ok || priceCheck.price == null) {
+        setPriceError(priceCheck.priceError ? `${priceCheck.priceError} Fix it to approve this one.` : "Fix the offer floor to approve this one.");
         return;
       }
-      if (p !== item.price && p !== prices[item.draftId]) {
+      const p = priceCheck.price;
+      const f = priceCheck.floor;
+      if (p !== saved?.price || f !== (saved?.floor ?? null)) {
         setSavingPrice(true);
-        const err = await onSavePrice(item.draftId, p);
+        const err = await onSavePrice(item.draftId, p, f);
         setSavingPrice(false);
         if (err) {
           setPriceError(err);
           return;
         }
-        setPrices((prev) => ({ ...prev, [item.draftId]: p }));
+        setPrices((prev) => ({ ...prev, [item.draftId]: { price: p, floor: f } }));
       }
     }
     onDecide(item.draftId, d);
     advance();
-  }, [item, showPrice, priceInput, prices, onSavePrice, onDecide, advance]);
+  }, [item, priceCheck, saved, onSavePrice, onDecide, advance]);
 
   useEffect(() => {
     if (!open) return;
@@ -155,7 +161,8 @@ export default function ReviewQueue({ open, items, decisions, onDecide, onSavePr
             )}
             <p className="font-semibold leading-snug">{item.title}</p>
             <div className="flex items-center gap-2 mt-1 text-sm">
-              {!showPrice && <span className="font-semibold">{price != null ? formatMoney(price) : "—"}</span>}
+              <span className="font-semibold">{priceCheck.price != null ? formatMoney(priceCheck.price) : "—"}</span>
+              {priceCheck.floor != null && <span className="text-xs" style={{ color: "var(--text-secondary)" }}>offers from {formatMoney(priceCheck.floor)}</span>}
               <span className="text-xs rounded-full px-2 py-0.5" style={{ background: "var(--glass)", color: willList({ ...item }, decisions) ? "var(--success)" : "var(--text-secondary)" }}>
                 {decisions[item.draftId] === "approve" ? "Approved" : decisions[item.draftId] === "hold" ? "Held back" : item.ready ? "Ready" : "Needs a look"}
               </span>
@@ -169,21 +176,16 @@ export default function ReviewQueue({ open, items, decisions, onDecide, onSavePr
                 ))}
               </ul>
             )}
-            {showPrice && (
-              <label className="block mt-3">
-                <span className="text-xs font-semibold">Price</span>
-                <input
-                  inputMode="decimal"
-                  value={priceInput}
-                  onChange={(e) => { setPriceInput(e.target.value); setPriceError(null); }}
-                  placeholder="0.00"
-                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
-                  style={{ background: "var(--glass)", borderColor: "var(--glass-line)" }}
-                  aria-invalid={!!priceError}
-                />
-                {priceError && <span className="text-xs mt-1 block" style={{ color: "var(--danger)" }}>{priceError}</span>}
-              </label>
-            )}
+            <PriceFloorFields
+              idPrefix={`review-${item.draftId}`}
+              className="mt-3"
+              price={priceInput}
+              floor={floorInput}
+              onPriceChange={(v) => { setPriceInput(v); setPriceError(null); }}
+              onFloorChange={(v) => { setFloorInput(v); setPriceError(null); }}
+              disabled={savingPrice}
+            />
+            {priceError && <span className="text-xs mt-1 block" style={{ color: "var(--danger)" }} role="alert">{priceError}</span>}
             <Link href={`/drafts/${item.draftId}`} target="_blank" className="text-xs underline mt-3 inline-flex items-center gap-1" style={{ color: "var(--accent)" }}>
               <Pencil className="w-3 h-3" /> Fix other fields in the editor (E)
             </Link>

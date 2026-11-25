@@ -1,6 +1,8 @@
 "use client";
 
 import CurrencyInput from "@/components/CurrencyInput";
+import PriceFloorFields from "@/components/PriceFloorFields";
+import { checkPriceAndFloor, defaultFloorFor, moneyText } from "@/lib/offer-floor";
 import Sheet from "@/components/Sheet";
 import { takePendingPhotos } from "@/lib/pending-photos";
 import PhotoDropZone from "@/components/PhotoDropZone";
@@ -139,7 +141,9 @@ export default function NewListingPage() {
   // Calculated shipping only (Nov 15, 2026) -- kept as state so the existing
   // autosave/publish payloads don't change shape.
   const [shippingMode, setShippingMode] = useState<ShippingMode>("calculated");
-  const [customPrice, setCustomPrice] = useState("");
+  // Price + Best Offer floor as typed; null = the AI's suggestion.
+  const [customPrice, setCustomPrice] = useState<string | null>(null);
+  const [customFloor, setCustomFloor] = useState<string | null>(null);
   // Cost basis -- what the seller paid to acquire this item. Purely
   // manual (nothing in the app can infer it), optional, used only by the
   // Sales page's "true profit" figure once this item sells. See
@@ -177,9 +181,15 @@ export default function NewListingPage() {
       .catch(() => {});
   }, []);
 
+  const suggestedListPrice = result && !result.noData && result.suggestedPrice > 0 ? result.suggestedPrice : null;
+  const suggestedFloor = defaultFloorFor(suggestedListPrice, result?.floorPrice);
+  const priceText = customPrice ?? moneyText(suggestedListPrice);
+  const floorText = customFloor ?? moneyText(suggestedFloor);
+  const priceCheck = checkPriceAndFloor(priceText, floorText);
+
   const newListingSignature = JSON.stringify({
     photos: photos.map((photo) => ({ id: photo.id, uploadedUrl: photo.uploadedUrl, label: photo.label })),
-    title, condition, flaws, customPrice, cost, brand, size, color,
+    title, condition, flaws, customPrice, customFloor, cost, brand, size, color,
     storeCategoryId, storeCategoryName, isHeavy, shippingCost, shippingMode,
     aiResult, result,
   });
@@ -557,7 +567,9 @@ export default function NewListingPage() {
       }
 
       const { suggestedPrice, avgSold, activeRangeLow, activeRangeHigh, sellOdds } = result ?? {};
-      const finalPrice = suggestedPrice ?? (customPrice ? Number(customPrice) : null);
+      void suggestedPrice;
+      // Invalid values aren't saved (the inline error shows instead).
+      const priceOk = !priceCheck.priceError && priceCheck.price !== null;
 
       const payload = {
         title,
@@ -566,7 +578,8 @@ export default function NewListingPage() {
         size: size || aiResult?.size || null,
         condition,
         flaws,
-        suggestedPrice: finalPrice,
+        ...(priceOk ? { suggestedPrice: priceCheck.price } : {}),
+        ...(priceCheck.ok ? { bestOfferFloor: priceCheck.floor } : {}),
         avgSold: avgSold ?? null,
         activeRangeLow: activeRangeLow ?? null,
         activeRangeHigh: activeRangeHigh ?? null,
@@ -634,7 +647,8 @@ export default function NewListingPage() {
     const readiness = getListingReadiness({
       photoCount: photos.length,
       title,
-      price: result?.suggestedPrice ?? (customPrice ? Number(customPrice) : null),
+      price: priceCheck.price,
+      bestOfferFloor: floorText,
       condition,
       shippingMode,
       missingRequiredSpecifics: missingSpecifics,
@@ -741,7 +755,8 @@ export default function NewListingPage() {
     setIsHeavy(false);
     setShippingCost("");
     setShippingMode("calculated");
-    setCustomPrice("");
+    setCustomPrice(null);
+    setCustomFloor(null);
     setCost("");
     setBrand("");
     setSize("");
@@ -957,7 +972,8 @@ export default function NewListingPage() {
               <div className="min-w-0">
                 <p className="font-medium truncate">{title || "Untitled listing"}</p>
                 <p className="text-sm text-[var(--text-secondary)]">{photos.length} photo{photos.length === 1 ? "" : "s"}</p>
-                <p className="text-sm font-medium">{result?.suggestedPrice == null && !customPrice ? "No price" : formatMoney(result?.suggestedPrice ?? Number(customPrice))}</p>
+                <p className="text-sm font-medium">{priceCheck.price == null ? "No price" : formatMoney(priceCheck.price)}
+                  {priceCheck.floor != null && <span className="text-xs font-normal text-[var(--text-secondary)]"> · offers from {formatMoney(priceCheck.floor)}</span>}</p>
               </div>
             </div>
             <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: "var(--glass)" }}>
@@ -1116,21 +1132,22 @@ export default function NewListingPage() {
             </div>
           ) : result ? (
             <>
-              {result.noData ? (
-                <div className="py-2 mb-3">
-                  <p className="text-sm text-[var(--text-secondary)] mb-2">No eBay comps found. Set your own price:</p>
-                  <CurrencyInput value={customPrice} onChange={setCustomPrice} placeholder="0.00" aria-label="Your price" />
-                </div>
-              ) : (
+              {result.noData && (
+                <p className="text-sm text-[var(--text-secondary)] mb-2">No eBay comps found. Set your own price:</p>
+              )}
+              <PriceFloorFields
+                idPrefix="new-listing"
+                className="mb-3"
+                price={priceText}
+                floor={floorText}
+                onPriceChange={setCustomPrice}
+                onFloorChange={setCustomFloor}
+                suggestedPrice={suggestedListPrice}
+                suggestedFloor={suggestedFloor}
+                disabled={listStatus === "listing" || listStatus === "listed"}
+              />
+              {result.noData ? null : (
                 <>
-                  <div className="flex items-baseline gap-2 mb-1">
-                    <p className="text-2xl font-medium">${result.suggestedPrice}</p>
-                    {result.floorPrice != null && (
-                      <p className="text-xs text-[var(--text-tertiary)]">
-                        don&apos;t accept offers below <span className="font-medium">${result.floorPrice}</span>
-                      </p>
-                    )}
-                  </div>
 
                   <div className="grid grid-cols-3 gap-2 mb-3">
                     <MiniStat label="Active median" value={`$${result.avgSold}`} />

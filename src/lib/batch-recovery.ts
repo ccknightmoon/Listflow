@@ -6,6 +6,8 @@ export interface BatchRecoverySnapshot {
   groups: number[][];
   results: unknown[];
   customPrices: Record<number, string>;
+  /** Best Offer floor as typed per item (absent in older snapshots). */
+  customFloors?: Record<number, string>;
   customSkus: Record<number, string>;
   draftIds: Record<number, string>;
   // Previously not persisted: a recovered batch silently reverted every

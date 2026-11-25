@@ -1,6 +1,8 @@
 "use client";
 
 import CurrencyInput from "@/components/CurrencyInput";
+import PriceFloorFields from "@/components/PriceFloorFields";
+import { checkPriceAndFloor, defaultFloorFor, moneyText, withPriceCheck } from "@/lib/offer-floor";
 import { confirmAction } from "@/lib/confirm";
 import { takePendingPhotos } from "@/lib/pending-photos";
 import { groupingNoticeLines } from "@/lib/grouping-repair";
@@ -298,7 +300,11 @@ export default function BatchUploadPage() {
   const [listedUrls, setListedUrls] = useState<Record<number, string>>({});
   const [needsEbayConnect, setNeedsEbayConnect] = useState(false);
   const [needsEbayReconnect, setNeedsEbayReconnect] = useState(false);
+  // Price + Best Offer floor as the seller typed them. Absent = the AI's
+  // suggestion (see priceTextFor/floorTextFor), so untouched items follow
+  // live pricing when it arrives.
   const [customPrices, setCustomPrices] = useState<Record<number, string>>({});
+  const [customFloors, setCustomFloors] = useState<Record<number, string>>({});
   // cost_basis per item -- what the seller paid, optional (migration 017, src/lib/profit.ts)
   const [costs, setCosts] = useState<Record<number, string>>({});
   const [customSkus, setCustomSkus] = useState<Record<number, string>>({});
@@ -465,6 +471,7 @@ export default function BatchUploadPage() {
         setGroups(snapshot.groups);
         setResults(snapshot.results as AiResult[]);
         setCustomPrices(snapshot.customPrices);
+        if (snapshot.customFloors) setCustomFloors(snapshot.customFloors);
         setCustomSkus(snapshot.customSkus);
         setDraftIds(snapshot.draftIds);
         if (snapshot.heavyItems) setHeavyItems(snapshot.heavyItems);
@@ -491,6 +498,7 @@ export default function BatchUploadPage() {
         groups,
         results,
         customPrices,
+        customFloors,
         customSkus,
         draftIds,
         heavyItems,
@@ -504,7 +512,24 @@ export default function BatchUploadPage() {
     return () => {
       if (recoveryWriteTimer.current !== null) window.clearTimeout(recoveryWriteTimer.current);
     };
-  }, [step, photos, groups, results, customPrices, customSkus, draftIds, heavyItems, shippingCosts, shippingModes, storeCategoryChoice]);
+  }, [step, photos, groups, results, customPrices, customFloors, customSkus, draftIds, heavyItems, shippingCosts, shippingModes, storeCategoryChoice]);
+
+  // The AI's price for item i (live comps, else the built-in estimate).
+  function suggestionFor(i: number): PriceSuggestion {
+    const r = results[i];
+    return (r?.pricing && !r.pricing.noData ? r.pricing : null) ??
+      getPriceSuggestion(r?.condition, Boolean(r?.flaws && r.flaws.trim().length > 0), heavyItems[i] ?? estimateIsHeavy(r?.itemType, r?.material), r?.itemType, r?.size, shippingModes[i] ?? defaultShippingMode);
+  }
+  function priceTextFor(i: number, s: PriceSuggestion = suggestionFor(i)): string {
+    return customPrices[i] !== undefined ? customPrices[i] : moneyText(s.suggestedPrice > 0 ? s.suggestedPrice : null);
+  }
+  function floorTextFor(i: number, s: PriceSuggestion = suggestionFor(i)): string {
+    return customFloors[i] !== undefined ? customFloors[i] : moneyText(defaultFloorFor(s.suggestedPrice, s.floorPrice));
+  }
+  function priceCheckFor(i: number, s?: PriceSuggestion) {
+    const sug = s ?? suggestionFor(i);
+    return checkPriceAndFloor(priceTextFor(i, sug), floorTextFor(i, sug));
+  }
 
   function discardRecoveredBatch() {
     void clearBatchRecovery().catch(() => {});
@@ -1807,9 +1832,16 @@ export default function BatchUploadPage() {
       const suggestion: PriceSuggestion =
         (hasRealPricing ? result.pricing : null) ??
         getPriceSuggestion(result.condition, Boolean(result.flaws && result.flaws.trim().length > 0), heavyItems[index] ?? estimateIsHeavy(result.itemType, result.material), result.itemType, result.size, shippingModes[index] ?? defaultShippingMode);
-      const finalPrice = hasRealPricing
-        ? suggestion.suggestedPrice
-        : customPrices[index] ? Number(customPrices[index]) : suggestion.suggestedPrice;
+      // What's in the Price / Lowest offer boxes. An explicit save with an
+      // invalid value stops here (inline error); a silent auto-save just
+      // leaves that field as it was.
+      const priceCheck = checkPriceAndFloor(priceTextFor(index, suggestion), floorTextFor(index, suggestion));
+      if (!silent && !priceCheck.ok) {
+        setSaveErrors((prev) => ({ ...prev, [index]: priceCheck.priceError ?? `Offer floor: ${priceCheck.floorError}` }));
+        setSaveStatus((prev) => ({ ...prev, [index]: "error" }));
+        return null;
+      }
+      const priceOk = !priceCheck.priceError && priceCheck.price !== null;
 
       // Upload each photo in the group that hasn't already been uploaded
       // (see uploadedPhotoUrls above); first becomes the thumbnail. Only
@@ -1865,7 +1897,8 @@ export default function BatchUploadPage() {
         condition: result.condition,
         flaws: result.flaws,
         customSku: customSkus[index] || undefined,
-        suggestedPrice: finalPrice,
+        ...(priceOk ? { suggestedPrice: priceCheck.price } : {}),
+        ...(priceCheck.ok ? { bestOfferFloor: priceCheck.floor } : {}),
         costBasis: costs[index] ? Number(costs[index]) : null,
         avgSold: hasRealPricing ? suggestion.avgSold : null,
         activeRangeLow: hasRealPricing ? suggestion.activeRangeLow : null,
@@ -1999,20 +2032,12 @@ export default function BatchUploadPage() {
     }
     const result = results[index];
     const group = groups[index] ?? [];
-    const suggestedPrice = result.pricing && !result.pricing.noData
-      ? result.pricing.suggestedPrice
-      : getPriceSuggestion(
-          result.condition,
-          Boolean(result.flaws && result.flaws.trim().length > 0),
-          heavyItems[index] ?? estimateIsHeavy(result.itemType, result.material),
-          result.itemType,
-          result.size,
-          shippingModes[index] ?? defaultShippingMode
-        ).suggestedPrice;
+    const priceCheck = priceCheckFor(index);
     const readiness = getListingReadiness({
       photoCount: group.length,
       title: result.suggestedTitle,
-      price: customPrices[index] ? Number(customPrices[index]) : suggestedPrice,
+      price: priceCheck.price,
+      bestOfferFloor: floorTextFor(index),
       condition: result.condition,
       shippingMode: shippingModes[index] ?? defaultShippingMode,
       missingRequiredSpecifics: result.missingRequired,
@@ -2110,7 +2135,7 @@ export default function BatchUploadPage() {
   // item as it is now (after any edits).
   const isReadyItem = (i: number) => {
     const r = results[i];
-    return !!r && !r.error && !r.pending && currentConfidence(r, groups[i]?.length).ready;
+    return !!r && !r.error && !r.pending && currentConfidence(r, groups[i]?.length).ready && priceCheckFor(i).ok;
   };
 
   async function handleListAllOnEbay(onlyReady = false) {
@@ -3171,10 +3196,12 @@ export default function BatchUploadPage() {
             const pricingAttempted = Boolean(result.pricing);
             const pricingReady = Boolean(livePricing);
             const pricingNoData = pricingAttempted && !livePricing;
+            const priceCheck = priceCheckFor(i, suggestion);
             const readiness = getListingReadiness({
               photoCount: group.length,
               title: result.suggestedTitle,
-              price: customPrices[i] ? Number(customPrices[i]) : suggestion.suggestedPrice,
+              price: priceCheck.price,
+              bestOfferFloor: floorTextFor(i, suggestion),
               condition: result.condition,
               shippingMode: shippingModes[i] ?? defaultShippingMode,
               missingRequiredSpecifics: result.missingRequired,
@@ -3184,7 +3211,7 @@ export default function BatchUploadPage() {
 
             return (
               <div key={i} id={`result-item-${i}`} className="card overflow-hidden">
-                <ConfidenceBadge confidence={currentConfidence(result, group.length)} />
+                <ConfidenceBadge confidence={withPriceCheck(currentConfidence(result, group.length), priceCheck)} />
                 {saveStatus[i] !== "saved" && (
                   <div className="flex items-center gap-2 px-4 pt-3">
                     <button
@@ -3458,13 +3485,18 @@ export default function BatchUploadPage() {
                     />
                   ) : null}
 
+                  <PriceFloorFields
+                    idPrefix={`batch-${i}`}
+                    className="mb-1"
+                    price={priceTextFor(i, suggestion)}
+                    floor={floorTextFor(i, suggestion)}
+                    onPriceChange={(v) => setCustomPrices((prev) => ({ ...prev, [i]: v }))}
+                    onFloorChange={(v) => setCustomFloors((prev) => ({ ...prev, [i]: v }))}
+                    suggestedPrice={suggestion.suggestedPrice > 0 ? suggestion.suggestedPrice : null}
+                    suggestedFloor={defaultFloorFor(suggestion.suggestedPrice, suggestion.floorPrice)}
+                    disabled={saveStatus[i] === "saved"}
+                  />
                   <div className="flex items-baseline gap-2 mb-2 flex-wrap">
-                    <p className="text-2xl font-medium">${suggestion.suggestedPrice}</p>
-                    {suggestion.floorPrice != null && (
-                      <p className="text-xs text-[var(--text-tertiary)]">
-                        floor ${suggestion.floorPrice}
-                      </p>
-                    )}
                     {!pricingAttempted && (
                       <p className="text-xs text-[var(--text-tertiary)] flex items-center gap-1">
                         <Loader2 className="w-3 h-3 animate-spin" />
@@ -3489,16 +3521,6 @@ export default function BatchUploadPage() {
                       </>
                     )}
                   </div>
-
-                  {pricingNoData && (
-                    <CurrencyInput
-                      className="mb-3"
-                      value={customPrices[i] ?? ""}
-                      onChange={(v) => setCustomPrices((prev) => ({ ...prev, [i]: v }))}
-                      placeholder="Set your price"
-                      aria-label="Your price"
-                    />
-                  )}
 
                   <div className="mb-3">
                     <label className="text-xs text-[var(--text-secondary)] mb-1 block">

@@ -11,9 +11,10 @@ import type { LiveItem } from "@/lib/ebay-item";
 import { buildPackageWeightAndSize } from "@/lib/shipping";
 import { createTtlDedupeCache } from "@/lib/ttl-cache";
 import { saveListingLink } from "@/lib/listing-link";
+import { bestOfferTerms } from "@/lib/offer-floor";
 import {
   buildTradingItemXml, tradingRequestXml, parseTradingResponse, duplicateUuidItemId, isPackageError, isConditionError,
-  isCategoryError, isInventoryModelError, describeTradingErrors, listingUuid, listingPostalCode, scheduleTimeFromNow,
+  isCategoryError, isInventoryModelError, isBestOfferError, describeTradingErrors, listingUuid, listingPostalCode, scheduleTimeFromNow,
   CONDITION_ENUM_TO_ID, TRADING_COMPAT_LEVEL, type TradingItemInput, type TradingResult,
 } from "@/lib/trading-listing";
 
@@ -64,7 +65,20 @@ export type DraftRow = Record<string, unknown> & {
   custom_sku?: string | null;
   store_category_id?: string | null;
   ebay_listing_id?: string | null;
+  /** Migration 035; absent before it's applied. */
+  best_offer_floor?: number | string | null;
 };
+
+/**
+ * Best Offer for a draft: on with auto-decline below the floor when a valid
+ * floor is saved. With no floor: off for a new listing, untouched on a
+ * revise (so Best Offer set up in the eBay app isn't switched off).
+ */
+export function draftBestOffer(draft: Pick<DraftRow, "suggested_price" | "best_offer_floor">, mode: "add" | "revise"): TradingItemInput["bestOffer"] {
+  const terms = bestOfferTerms(Number(draft.suggested_price), draft.best_offer_floor);
+  if (terms.enabled) return { enabled: true, autoDecline: terms.autoDecline };
+  return mode === "add" ? { enabled: false } : undefined;
+}
 
 export function draftPictureUrls(d: Pick<DraftRow, "photo_urls" | "thumbnail_url">): string[] {
   const urls = (d.photo_urls ?? []).filter((u): u is string => typeof u === "string" && /^https?:\/\//.test(u));
@@ -129,6 +143,7 @@ export async function buildItemForDraft(draft: DraftRow, opts: { categoryId: str
       sku: opts.sku,
       package: { weightOz, lengthIn: pkg.dimensions.length, widthIn: pkg.dimensions.width, heightIn: pkg.dimensions.height, packageType: "packageType" in pkg ? (pkg as { packageType?: string }).packageType : undefined },
       storeCategoryId: draft.store_category_id ? String(draft.store_category_id) : null,
+      bestOffer: draftBestOffer(draft, draft.ebay_listing_id ? "revise" : "add"),
     },
   };
 }
@@ -144,9 +159,10 @@ export async function verifyWithFixes(
   base: { categoryId: string; sku: string; storeFooter: string | null },
   addFields: Pick<TradingItemInput, "uuid" | "policies" | "postalCode" | "scheduleTime">,
   call: (c: TradingCall, item: TradingItemInput) => Promise<TradingResult> = tradingItemCall,
-): Promise<{ result: TradingResult; item: TradingItemInput; missingRequired: string[]; attempts: number }> {
+): Promise<{ result: TradingResult; item: TradingItemInput; missingRequired: string[]; attempts: number; bestOfferDropped?: boolean }> {
   let categoryId = base.categoryId;
   let typed = true;
+  let dropBestOffer = false;
   let condIdx = 0;
   let triedFallbackCategory = false;
   let built = await buildItemForDraft(draft, { ...base, categoryId, packageTyped: typed });
@@ -154,7 +170,10 @@ export async function verifyWithFixes(
   let result = await call("VerifyAddFixedPriceItem", item);
   let attempts = 1;
   while (!result.ok && attempts < 5) {
-    if (isPackageError(result) && typed) {
+    if (isBestOfferError(result) && item.bestOffer?.enabled && !dropBestOffer) {
+      // Some categories don't allow offers: list at the fixed price instead.
+      dropBestOffer = true;
+    } else if (isPackageError(result) && typed) {
       typed = false;
     } else if (isConditionError(result) && condIdx + 1 < built.conditionIds.length) {
       condIdx++;
@@ -168,11 +187,11 @@ export async function verifyWithFixes(
       break;
     }
     built = await buildItemForDraft(draft, { ...base, categoryId, packageTyped: typed });
-    item = { ...built.item, conditionId: built.conditionIds[condIdx] ?? built.item.conditionId, ...addFields, forAdd: true };
+    item = { ...built.item, conditionId: built.conditionIds[condIdx] ?? built.item.conditionId, ...addFields, forAdd: true, ...(dropBestOffer ? { bestOffer: { enabled: false } } : {}) };
     result = await call("VerifyAddFixedPriceItem", item);
     attempts++;
   }
-  return { result, item, missingRequired: built.missingRequired, attempts };
+  return { result, item, missingRequired: built.missingRequired, attempts, ...(dropBestOffer ? { bestOfferDropped: true } : {}) };
 }
 
 export interface TradingPublishArgs {
@@ -200,6 +219,7 @@ export async function publishDraftTrading(a: TradingPublishArgs, call: (c: Tradi
   };
   const v = await verifyWithFixes(a.draft, { categoryId: a.categoryId, sku: a.sku, storeFooter: a.storeFooter }, addFields, call);
   const warnings = v.result.warnings.map((w) => w.long || w.short).filter(Boolean);
+  if (v.bestOfferDropped) warnings.unshift("eBay doesn't allow Best Offer for this item, so it lists at the fixed price (no offers).");
   const missingRequiredAspects = v.missingRequired.length ? v.missingRequired : undefined;
   if (!v.result.ok) {
     return NextResponse.json({ error: describeTradingErrors(v.result), verified: false, missingRequiredAspects }, { status: 400 });
@@ -255,6 +275,7 @@ export async function reviseDraftListing(
     categoryId: opts.live && !sanitizeStoredSpecifics(draft.item_specifics)?.categoryId ? undefined : built.item.categoryId,
   };
   let r = await call("ReviseFixedPriceItem", item);
+  if (!r.ok && item.bestOffer && isBestOfferError(r)) r = await call("ReviseFixedPriceItem", { ...item, bestOffer: undefined });
   if (!r.ok && isPackageError(r)) r = await call("ReviseFixedPriceItem", { ...item, package: item.package ? { ...item.package, packageType: undefined } : null });
   // A listing with sales can't change category/condition: retry without them.
   if (!r.ok && (isCategoryError(r) || isConditionError(r))) r = await call("ReviseFixedPriceItem", { ...item, categoryId: undefined, conditionId: undefined, conditionDescription: undefined });

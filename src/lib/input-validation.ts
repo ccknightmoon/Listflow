@@ -45,7 +45,7 @@ const TEXT_LIMITS: Record<string, number> = {
   description: 500_000, vintage: 50, character: 200, characterFamily: 200, yearManufactured: 50,
   season: 100, storeCategoryName: 300, sellOdds: 50, customSku: 100,
 };
-const MONEY_FIELDS = ["suggestedPrice", "avgSold", "activeRangeLow", "activeRangeHigh"];
+const MONEY_FIELDS = ["suggestedPrice", "avgSold", "activeRangeLow", "activeRangeHigh", "bestOfferFloor"];
 
 /** Type/size problems in a draft create/update body, or null when fine. */
 export function draftFieldsError(body: Record<string, unknown>): string | null {

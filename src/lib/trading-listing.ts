@@ -70,6 +70,12 @@ export interface TradingItemInput {
   scheduleTime?: string;
   /** Add only (revise keeps the listing's own). */
   forAdd?: boolean;
+  /**
+   * Best Offer. enabled + autoDecline = offers below it are declined
+   * automatically; autoAccept (optional) = offers at/above it are accepted.
+   * Omitted = left as is (revise) / off (add).
+   */
+  bestOffer?: { enabled: boolean; autoDecline?: number; autoAccept?: number } | null;
 }
 
 export function xmlEscape(s: string): string {
@@ -105,6 +111,19 @@ export function buildTradingItemXml(i: TradingItemInput): string {
   }
   if (i.price !== undefined) parts.push(`<StartPrice currencyID="USD">${i.price.toFixed(2)}</StartPrice>`);
   if (i.quantity !== undefined) parts.push(tag("Quantity", Math.max(0, Math.floor(i.quantity))));
+  if (i.bestOffer) {
+    parts.push(`<BestOfferDetails><BestOfferEnabled>${i.bestOffer.enabled ? "true" : "false"}</BestOfferEnabled></BestOfferDetails>`);
+    if (i.bestOffer.enabled) {
+      const ld: string[] = [];
+      const price = i.price;
+      const okUnder = (v: number | undefined): v is number => typeof v === "number" && Number.isFinite(v) && v > 0 && (price === undefined || v < price);
+      if (okUnder(i.bestOffer.autoAccept)) ld.push(`<BestOfferAutoAcceptPrice currencyID="USD">${i.bestOffer.autoAccept.toFixed(2)}</BestOfferAutoAcceptPrice>`);
+      if (okUnder(i.bestOffer.autoDecline) && (!okUnder(i.bestOffer.autoAccept) || i.bestOffer.autoDecline < i.bestOffer.autoAccept)) {
+        ld.push(`<MinimumBestOfferPrice currencyID="USD">${i.bestOffer.autoDecline.toFixed(2)}</MinimumBestOfferPrice>`);
+      }
+      if (ld.length) parts.push(`<ListingDetails>${ld.join("")}</ListingDetails>`);
+    }
+  }
   if (i.sku) parts.push(tag("SKU", i.sku.slice(0, 50)));
   if (i.package) {
     const p = i.package;
@@ -219,6 +238,11 @@ export function isConditionError(r: TradingResult): boolean {
 
 export function isCategoryError(r: TradingResult): boolean {
   return r.errors.some((e) => /category|item specific|is missing|required/i.test(`${e.short} ${e.long}`) && !/package|shipping/i.test(`${e.short} ${e.long}`));
+}
+
+/** eBay refused Best Offer for this listing/category. */
+export function isBestOfferError(r: TradingResult): boolean {
+  return r.errors.some((e) => /best ?offer|MinimumBestOfferPrice|auto-?decline|auto-?accept/i.test(`${e.short} ${e.long}`));
 }
 
 export function describeTradingErrors(r: TradingResult, fallback = "eBay rejected the listing"): string {
