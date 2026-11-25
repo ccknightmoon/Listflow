@@ -19,15 +19,15 @@ describe("desktop sidebar vs phone bottom bar", () => {
     const html = renderToString(createElement(Sidebar));
     expect(html).toContain("hidden lg:flex");
     expect(html).toContain("New listing");
-    for (const l of ["Home", "Listings", "Sales", "Drafts", "Messages", "Offers", "Ship", "Settings"]) expect(html).toContain(l);
+    for (const l of ["Home", "Inventory", "Sales", "Messages", "Offers", "Ship", "Settings"]) expect(html).toContain(l);
     expect(html.indexOf("New listing")).toBeLessThan(html.indexOf("Home"));
     expect(html).toMatch(/aria-current="page"[^>]*href="\/dashboard"|href="\/dashboard"[^>]*aria-current="page"/);
   });
 
-  it("sidebar marks a sub-route's section active (draft editor → Drafts)", () => {
+  it("sidebar marks a sub-route's section active (draft editor → Inventory)", () => {
     nav.path = "/drafts/abc";
     const html = renderToString(createElement(Sidebar));
-    expect(html).toMatch(/aria-current="page"[^>]*href="\/drafts"|href="\/drafts"[^>]*aria-current="page"/);
+    expect(html).toMatch(/aria-current="page"[^>]*href="\/inventory"|href="\/inventory"[^>]*aria-current="page"/);
     expect(html).not.toMatch(/aria-current="page"[^>]*href="\/dashboard"/);
   });
 

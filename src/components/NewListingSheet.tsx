@@ -67,7 +67,7 @@ export default function NewListingSheet({ open, onClose }: { open: boolean; onCl
             </span>
             <input type="file" accept="image/*" multiple className="hidden" onChange={(e) => go("batch", e.target.files, "/batch-upload")} />
           </label>
-          <button type="button" className={row} style={rowStyle} onClick={() => { onClose(); router.push("/drafts"); }}>
+          <button type="button" className={row} style={rowStyle} onClick={() => { onClose(); router.push("/inventory?status=draft"); }}>
             <span className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: "var(--glass)", color: "var(--text-secondary)" }}>
               <FileText className="w-5 h-5" />
             </span>

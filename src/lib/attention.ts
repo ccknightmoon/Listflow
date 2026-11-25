@@ -24,9 +24,9 @@ const DEFS: Array<Omit<AttentionItem, "count"> & { one: string }> = [
   { key: "offers", label: "Offers waiting", one: "Offer waiting", detail: "Accept, counter or decline", href: "/offers", tone: "accent" },
   { key: "questions", label: "Buyer questions", one: "Buyer question", detail: "Quick replies help close sales", href: "/messages", tone: "accent" },
   { key: "failedListings", label: "Listings that failed", one: "Listing that failed", detail: "Open the tray below to retry", href: "#publish-tray", tone: "danger" },
-  { key: "draftsNeedPhoto", label: "Drafts missing photos", one: "Draft missing photos", detail: "Add a photo to list them", href: "/drafts?filter=needs-photo", tone: "warning" },
-  { key: "draftsNeedPrice", label: "Drafts missing a price", one: "Draft missing a price", detail: "Set a price to list them", href: "/drafts?filter=needs-price", tone: "warning" },
-  { key: "stale", label: "Stale listings", one: "Stale listing", detail: "30+ days live — lower prices or send offers", href: "/store?filter=stale", tone: "warning" },
+  { key: "draftsNeedPhoto", label: "Drafts missing photos", one: "Draft missing photos", detail: "Add a photo to list them", href: "/inventory?status=draft&filter=needs-photo", tone: "warning" },
+  { key: "draftsNeedPrice", label: "Drafts missing a price", one: "Draft missing a price", detail: "Set a price to list them", href: "/inventory?status=draft&filter=needs-price", tone: "warning" },
+  { key: "stale", label: "Stale listings", one: "Stale listing", detail: "30+ days live — lower prices or send offers", href: "/inventory?status=live&filter=stale", tone: "warning" },
 ];
 
 export function attentionItems(c: AttentionCounts): AttentionItem[] {

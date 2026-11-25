@@ -14,7 +14,7 @@
 //    out, pending deletion), the saved copy is deleted and the open page is
 //    told to go there.
 //  * Never: /api/*, anything not GET, other sites.
-export const SW_PAGE_PATHS = ["/dashboard", "/store", "/drafts", "/sales"];
+export const SW_PAGE_PATHS = ["/dashboard", "/inventory", "/sales"];
 
 export function buildServiceWorker(version: string): string {
   const v = JSON.stringify(version.replace(/[^A-Za-z0-9._-]/g, "").slice(0, 40) || "dev");

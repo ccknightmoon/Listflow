@@ -982,7 +982,7 @@ export default function BatchUploadPage() {
     if (successCount === indices.length && !results.some((r) => r.error)) {
       void clearBatchRecovery().catch(() => {});
     }
-    if (successCount > 0) setTimeout(() => router.push("/drafts"), 1200);
+    if (successCount > 0) setTimeout(() => router.push("/inventory?status=draft"), 1200);
   }
 
   // Grouping by the pauses between shots (no AI for clear pauses). Unclear

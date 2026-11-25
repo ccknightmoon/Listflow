@@ -373,7 +373,7 @@ export default function DashboardPage() {
           <p className="font-display font-extrabold text-3xl mt-1.5">{weeklySales !== null ? weeklySales : statsLoaded ? "—" : <NumberSkeleton w={40} h={30} />}</p>
         </Link>
         <Link
-          href="/drafts"
+          href="/inventory?status=draft"
           className="card d2 stagger p-3.5 active:scale-[.97] lg:p-4 lg:col-start-5 lg:col-span-2 lg:row-start-1 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
@@ -381,7 +381,7 @@ export default function DashboardPage() {
           <p className="font-display font-extrabold text-xl mt-1.5">{drafts !== null ? drafts : statsLoaded ? "—" : <NumberSkeleton w={32} h={22} />}</p>
         </Link>
         <Link
-          href="/store"
+          href="/inventory?status=live"
           className="card d3 stagger p-3.5 active:scale-[.97] lg:p-4 lg:col-start-7 lg:col-span-2 lg:row-start-1 lg:hover:border-[var(--accent)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--accent)]"
           style={{ transitionTimingFunction: "var(--spring)" }}
         >
@@ -402,8 +402,8 @@ export default function DashboardPage() {
 
         <div className="col-span-2 grid grid-cols-4 gap-2 lg:col-start-4 lg:col-span-5 lg:row-start-3">
           <ActionTile href="/batch-upload" viewTransitionName="batch-panel" icon={ImagePlus} title="Batch upload" delay="d5" />
-          <ActionTile href="/drafts" viewTransitionName="drafts-panel" icon={FileText} title="Review drafts" delay="d6" />
-          <ActionTile href="/store" viewTransitionName="store-panel" icon={BarChart2} title="View store" delay="d6" />
+          <ActionTile href="/inventory?status=draft" viewTransitionName="drafts-panel" icon={FileText} title="Review drafts" delay="d6" />
+          <ActionTile href="/inventory?status=live" viewTransitionName="store-panel" icon={BarChart2} title="View store" delay="d6" />
           <ActionTile href="/sales" viewTransitionName="sales-panel" icon={TrendingUp} title="Sales history" delay="d6" />
         </div>
 

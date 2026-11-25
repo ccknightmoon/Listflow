@@ -4,7 +4,7 @@
 // back button and full-screen content instead.
 //
 // To change where the nav appears, edit NAV_VISIBLE_ROUTES only.
-export const NAV_VISIBLE_ROUTES = ["/dashboard", "/drafts", "/store", "/sales", "/messages", "/offers"] as const;
+export const NAV_VISIBLE_ROUTES = ["/dashboard", "/inventory", "/sales", "/messages", "/offers"] as const;
 
 /** Exact match only: "/drafts" shows the nav, "/drafts/123" (the editor) doesn't. */
 export function isNavVisible(pathname: string | null | undefined): boolean {
@@ -17,13 +17,12 @@ export function isNavVisible(pathname: string | null | undefined): boolean {
 // under "More" (or the "+" sheet, which already has Drafts).
 export const NAV_TABS = [
   { href: "/dashboard", label: "Home" },
-  { href: "/store", label: "Listings" },
+  { href: "/inventory", label: "Inventory" },
   // centre "+" goes here
   { href: "/sales", label: "Sales" },
 ] as const;
 
 export const MORE_LINKS = [
-  { href: "/drafts", label: "Drafts" },
   { href: "/messages", label: "Messages" },
   { href: "/offers", label: "Offers" },
   { href: "/ship", label: "Ship orders" },
@@ -54,9 +53,8 @@ export function isSidebarVisible(pathname: string | null | undefined): boolean {
 /** Sidebar order. "+ New listing" is a separate, prominent button above these. */
 export const SIDEBAR_LINKS = [
   { href: "/dashboard", label: "Home" },
-  { href: "/store", label: "Listings" },
+  { href: "/inventory", label: "Inventory" },
   { href: "/sales", label: "Sales" },
-  { href: "/drafts", label: "Drafts" },
   { href: "/messages", label: "Messages" },
   { href: "/offers", label: "Offers" },
   { href: "/ship", label: "Ship" },
@@ -64,9 +62,13 @@ export const SIDEBAR_LINKS = [
 ] as const;
 
 /** Sidebar link is "current" on its own route and its sub-routes (Drafts on /drafts/123). */
+// Inventory also owns the draft editor and the eBay listing editor/opener.
+const ALSO_ACTIVE: Record<string, string[]> = { "/inventory": ["/drafts", "/store"] };
+
 export function isSidebarLinkActive(href: string, pathname: string | null | undefined): boolean {
   if (!pathname) return false;
-  return pathname === href || pathname.startsWith(`${href}/`);
+  const under = (base: string) => pathname === base || pathname.startsWith(`${base}/`);
+  return under(href) || (ALSO_ACTIVE[href] ?? []).some(under);
 }
 
 export type NavMode = "bottom" | "sidebar" | "none";

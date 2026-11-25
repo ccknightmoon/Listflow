@@ -637,7 +637,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
       localStorage.removeItem(`shippingCost-${id}`);
       localStorage.removeItem(`shippingMode-${id}`);
       window.dispatchEvent(new Event("listflow:counts-changed"));
-      setTimeout(() => router.push("/store"), 1500);
+      setTimeout(() => router.push("/inventory?status=live"), 1500);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -971,7 +971,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     try {
       await apiFetch(`/api/drafts/${id}`, { method: "DELETE" });
       rememberDeleted([id]); // no saved copy on this device can show it again
-      router.push("/drafts");
+      router.push("/inventory?status=draft");
     } catch (err) {
       setError((err as Error).message);
       setDeleting(false);
@@ -1001,7 +1001,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   if (loading) {
     return (
       <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8" style={{ viewTransitionName: "draft-detail" }}>
-        <Link href="/drafts" className="inline-flex mb-4">
+        <Link href="/inventory?status=draft" className="inline-flex mb-4">
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <EditorSkeleton />
@@ -1012,7 +1012,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   if (error && !draft) {
     return (
       <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8" style={{ viewTransitionName: "draft-detail" }}>
-        <Link href="/drafts" className="inline-flex mb-4">
+        <Link href="/inventory?status=draft" className="inline-flex mb-4">
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div className="card p-4" style={{ color: "var(--danger)" }}>{error}</div>
@@ -1024,7 +1024,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
     <main className="min-h-screen max-w-md lg:max-w-[1360px] mx-auto px-5 lg:px-8 pt-6 lg:pt-8" style={{ viewTransitionName: "draft-detail", paddingBottom: `calc(${bottomBarH}px + var(--tray-offset, 0px) + 28px)`, ["--editor-bar-h" as string]: `${bottomBarH}px` }}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <Link href={draft?.ebay_listing_id ? "/store" : "/drafts"}>
+          <Link href={draft?.ebay_listing_id ? "/inventory?status=live" : "/inventory?status=draft"}>
             <ArrowLeft className="w-5 h-5" />
           </Link>
           <h1 className="text-xl font-medium">Edit draft</h1>

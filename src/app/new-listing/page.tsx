@@ -722,7 +722,7 @@ export default function NewListingPage() {
 
   async function handleSaveDraftAndRedirect() {
     const id = await handleSaveDraft();
-    if (id) setTimeout(() => router.push("/drafts"), 1200);
+    if (id) setTimeout(() => router.push("/inventory?status=draft"), 1200);
   }
 
   // Clears every per-item field back to a blank form so a seller can go
@@ -1214,7 +1214,7 @@ export default function NewListingPage() {
                     <Sparkles className="w-4 h-4" />
                     List another item
                   </button>
-                  <button className="btn btn-primary flex-1" onClick={() => router.push("/store")}>
+                  <button className="btn btn-primary flex-1" onClick={() => router.push("/inventory?status=live")}>
                     <Check className="w-4 h-4" />
                     Done — go to Store
                   </button>

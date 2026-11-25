@@ -5,13 +5,13 @@ import Sheet, { useAnyOverlayOpen } from "@/components/Sheet";
 import { NAV_SPACE_PX, Z } from "@/lib/z-layers";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Home, LayoutGrid, BarChart3, AlertTriangle, Plus, MoreHorizontal, FileText, MessageCircle, Tag, Truck, Settings, type LucideIcon } from "lucide-react";
+import { Home, LayoutGrid, BarChart3, AlertTriangle, Plus, MoreHorizontal, MessageCircle, Tag, Truck, Settings, type LucideIcon } from "lucide-react";
 import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
 import { isNavVisible, NAV_TABS, MORE_LINKS } from "@/lib/nav-config";
 import NewListingSheet from "@/components/NewListingSheet";
 
-const TAB_ICONS: Record<string, LucideIcon> = { "/dashboard": Home, "/store": LayoutGrid, "/sales": BarChart3 };
-const MORE_ICONS: Record<string, LucideIcon> = { "/drafts": FileText, "/messages": MessageCircle, "/offers": Tag, "/ship": Truck, "/settings": Settings };
+const TAB_ICONS: Record<string, LucideIcon> = { "/dashboard": Home, "/inventory": LayoutGrid, "/sales": BarChart3 };
+const MORE_ICONS: Record<string, LucideIcon> = { "/messages": MessageCircle, "/offers": Tag, "/ship": Truck, "/settings": Settings };
 
 // Height of the bar (without the safe-area inset) -- PublishTray and the
 // AI-usage banner sit just above it.
@@ -41,7 +41,7 @@ export default function BottomNav() {
 
   const moreActive = MORE_LINKS.some((l) => l.href === pathname);
   const tab = (href: string, label: string, Icon: LucideIcon) => {
-    const active = pathname === href;
+    const active = pathname === href || (href === "/inventory" && /^\/(drafts|store)(\/|$)/.test(pathname ?? ""));
     return (
       <Link
         key={href}

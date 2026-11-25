@@ -34,7 +34,7 @@ export default function EditListingPage({ params }: { params: Promise<{ itemId: 
 
   return (
     <main className="min-h-screen max-w-md mx-auto px-5 pt-6">
-      <Link href="/store" className="inline-flex items-center gap-1 text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
+      <Link href="/inventory?status=live" className="inline-flex items-center gap-1 text-sm mb-6" style={{ color: "var(--text-secondary)" }}>
         <ArrowLeft className="w-4 h-4" /> Listings
       </Link>
       {error ? (

@@ -187,7 +187,7 @@ export default function OffersPage() {
 
       <div className="flex items-center gap-3 mb-6">
         <Link
-          href="/store"
+          href="/inventory?status=live"
           className="w-[34px] h-[34px] rounded-[11px] flex items-center justify-center flex-none"
           style={{ background: "var(--glass)", border: "1px solid var(--glass-line)" }}
         >

@@ -9,10 +9,10 @@ import NewListingSheet from "./NewListingSheet";
 import { ListSkeleton, EmptyState } from "./ui";
 
 describe("shared UI renders", () => {
-  it("bottom nav: Home, Listings, +, Sales, More — 5 slots, 44px+ targets", () => {
+  it("bottom nav: Home, Inventory, +, Sales, More — 5 slots, 44px+ targets", () => {
     const html = renderToString(createElement(BottomNav));
     expect(html).toContain('aria-label="Start a listing"');
-    for (const label of ["Home", "Listings", "Sales", "More"]) expect(html).toContain(label);
+    for (const label of ["Home", "Inventory", "Sales", "More"]) expect(html).toContain(label);
     expect(html).toContain("grid-cols-5");
     expect(html).toContain("min-h-[48px]");
     expect(html).toContain("safe-area-inset-bottom");
@@ -44,7 +44,7 @@ describe("NeedsAttention", () => {
   it("shows rows with one-tap links, most urgent first", () => {
     const html = renderToString(createElement(NeedsAttention, { counts: { ...zero, toShip: 2, draftsNeedPrice: 5 } }));
     expect(html.indexOf("Orders to ship")).toBeLessThan(html.indexOf("Drafts missing a price"));
-    expect(html).toContain('href="/drafts?filter=needs-price"');
+    expect(html).toContain('href="/inventory?status=draft&amp;filter=needs-price"');
   });
   it("says all caught up when everything is zero", () => {
     expect(renderToString(createElement(NeedsAttention, { counts: zero }))).toContain("All caught up");

@@ -1011,7 +1011,7 @@ export default function SalesPage() {
                       {t.kind === "missing_costs" && (
                         <button type="button" className="underline ml-1" style={{ color: "var(--accent)" }} onClick={() => setShowCostEditor(true)}>Add costs</button>
                       )}
-                      {t.kind === "stale" && <Link href="/store" className="underline ml-1" style={{ color: "var(--accent)" }}>See listings</Link>}
+                      {t.kind === "stale" && <Link href="/inventory?status=live" className="underline ml-1" style={{ color: "var(--accent)" }}>See listings</Link>}
                     </span>
                   </li>
                 ))}

@@ -3,7 +3,7 @@ import { isNavVisible, NAV_TABS, MORE_LINKS, NAV_VISIBLE_ROUTES } from "./nav-co
 
 describe("bottom nav visibility", () => {
   it("shows on top-level screens", () => {
-    for (const r of ["/dashboard", "/drafts", "/store", "/sales", "/messages", "/offers", "/sales/"]) expect(isNavVisible(r), r).toBe(true);
+    for (const r of ["/dashboard", "/inventory", "/sales", "/messages", "/offers", "/sales/"]) expect(isNavVisible(r), r).toBe(true);
   });
   it("hides on focused task screens and auth", () => {
     for (const r of ["/new-listing", "/drafts/abc-123", "/batch-upload", "/settings", "/ship", "/login", "/forgot-password", "/reset-password", "/", "/membership", "/account/pending-deletion", null]) {
@@ -34,7 +34,7 @@ describe("desktop layout switch", () => {
     for (const r of ["/new-listing", "/drafts/abc", "/batch-upload", "/settings", "/ship"]) expect(navModeFor(r, 390), r).toBe("none");
   });
   it("shows the sidebar on every signed-in desktop screen, task screens included", () => {
-    for (const r of ["/dashboard", "/store", "/sales", "/drafts", "/drafts/abc", "/new-listing", "/batch-upload", "/settings", "/ship", "/offers", "/messages", "/membership"]) {
+    for (const r of ["/dashboard", "/inventory", "/sales", "/drafts/abc", "/new-listing", "/batch-upload", "/settings", "/ship", "/offers", "/messages", "/membership"]) {
       expect(navModeFor(r, 1280), r).toBe("sidebar");
     }
   });
@@ -45,9 +45,11 @@ describe("desktop layout switch", () => {
     }
   });
   it("lists every requested destination, and marks sub-routes active", () => {
-    expect(SIDEBAR_LINKS.map((l) => l.label)).toEqual(["Home", "Listings", "Sales", "Drafts", "Messages", "Offers", "Ship", "Settings"]);
-    expect(isSidebarLinkActive("/drafts", "/drafts/123")).toBe(true);
-    expect(isSidebarLinkActive("/drafts", "/dashboard")).toBe(false);
+    expect(SIDEBAR_LINKS.map((l) => l.label)).toEqual(["Home", "Inventory", "Sales", "Messages", "Offers", "Ship", "Settings"]);
+    expect(isSidebarLinkActive("/inventory", "/drafts/123")).toBe(true);
+    expect(isSidebarLinkActive("/inventory", "/store/edit/123")).toBe(true);
+    expect(isSidebarLinkActive("/inventory", "/dashboard")).toBe(false);
+    expect(isSidebarLinkActive("/sales", "/salesx")).toBe(false);
     expect(isSidebarLinkActive("/sales", "/sales")).toBe(true);
   });
 });
