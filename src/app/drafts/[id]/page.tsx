@@ -4,6 +4,8 @@ import { rememberDeleted } from "@/lib/deleted-drafts";
 import CurrencyInput from "@/components/CurrencyInput";
 import PriceFloorFields from "@/components/PriceFloorFields";
 import DraftExtrasFields from "@/components/DraftExtrasFields";
+import { useStorageSettings } from "@/components/StorageSettings";
+import { locationFor, showsLocationField } from "@/lib/storage-locations";
 import StoreIntroHint from "@/components/StoreIntroHint";
 import { checkPriceAndFloor, moneyText } from "@/lib/offer-floor";
 import Sheet from "@/components/Sheet";
@@ -185,6 +187,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const priceCheck = checkPriceAndFloor(price, floor);
   const [cost, setCost] = useState(""); // cost_basis (migration 017, src/lib/profit.ts)
   // Bin + auto-offer opt-in (migrations 041/042); undefined = column not there yet.
+  // Settings → Storage & pick list (OFF by default = no location field).
+  const storage = useStorageSettings();
   const [extras, setExtras] = useState<{ bin: string | null | undefined; optIn: boolean | undefined } | null>(null);
   const [customSku, setCustomSku] = useState("");
   const initialCustomSku = useRef<string | null>(null);
@@ -1442,7 +1446,16 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             onChange={(e) => setCustomSku(e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 50))}
           />
         </div>
-        {extras && <DraftExtrasFields key={id} draftId={id} bin={extras.bin} autoOfferOptIn={extras.optIn} />}
+        {extras && (
+          <DraftExtrasFields
+            key={id}
+            draftId={id}
+            bin={extras.bin}
+            autoOfferOptIn={extras.optIn}
+            showLocation={showsLocationField(storage)}
+            derivedLocation={storage?.enabled && storage.mode === "sku_boxes" ? locationFor({ sku: customSku }, storage) : null}
+          />
+        )}
         {storeCategories.length > 0 && (
           <div className="relative">
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">

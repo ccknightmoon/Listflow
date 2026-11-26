@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
-import { MAX_BIN_LENGTH, normalizeBin } from "@/lib/bins";
+import { MAX_LOCATION_LENGTH, normalizeLocation } from "@/lib/storage-locations";
 
 type Props = {
   draftId: string;
@@ -10,23 +10,28 @@ type Props = {
   bin: string | null | undefined;
   /** undefined = column not in the database yet (migration 042) -> hidden. */
   autoOfferOptIn: boolean | undefined;
+  /** Settings → Storage & pick list is ON in "Bins / racks" mode (default false = no field). */
+  showLocation?: boolean;
+  /** "SKU boxes" mode: the box worked out from the SKU (read-only), else null/undefined. */
+  derivedLocation?: string | null;
   disabled?: boolean;
 };
 
 /**
- * Bin location + "Include in automatic offers", saved on their own
+ * Storage location (only in "Bins / racks" mode) + "Include in automatic offers", saved on their own
  * (POST /api/drafts/extras) the moment they change, so they never touch the
  * main draft save. Hidden when the database doesn't have the columns yet.
  */
-export default function DraftExtrasFields({ draftId, bin, autoOfferOptIn, disabled }: Props) {
-  const hasBin = bin !== undefined;
+export default function DraftExtrasFields({ draftId, bin, autoOfferOptIn, showLocation = false, derivedLocation, disabled }: Props) {
+  const hasBin = bin !== undefined && showLocation;
+  const hasDerived = !!derivedLocation;
   const hasOptIn = autoOfferOptIn !== undefined;
   const [binText, setBinText] = useState(bin ?? "");
   const [savedBin, setSavedBin] = useState(bin ?? "");
   const [optIn, setOptIn] = useState(!!autoOfferOptIn);
   const [status, setStatus] = useState<string | null>(null);
 
-  if (!hasBin && !hasOptIn) return null;
+  if (!hasBin && !hasOptIn && !hasDerived) return null;
 
   async function save(patch: Record<string, unknown>) {
     setStatus("Saving…");
@@ -41,22 +46,29 @@ export default function DraftExtrasFields({ draftId, bin, autoOfferOptIn, disabl
   }
 
   async function saveBin() {
-    const norm = normalizeBin(binText);
-    if (norm === undefined) { setStatus(`Bin: up to ${MAX_BIN_LENGTH} characters`); return; }
+    const norm = normalizeLocation(binText);
+    if (norm === undefined) { setStatus(`Storage location: up to ${MAX_LOCATION_LENGTH} characters`); return; }
     if ((norm ?? "") === savedBin) return;
     if (await save({ binLocation: norm })) { setSavedBin(norm ?? ""); setBinText(norm ?? ""); }
   }
 
   return (
     <div className="grid grid-cols-2 gap-3" data-testid="draft-extras">
+      {hasDerived && (
+        <div>
+          <p className="text-xs text-[var(--text-secondary)] mb-1">Storage location</p>
+          <p className="text-sm font-medium" data-testid="derived-location">{derivedLocation}</p>
+          <p className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>From the SKU (Settings → Storage &amp; pick list)</p>
+        </div>
+      )}
       {hasBin && (
         <div>
-          <label htmlFor={`bin-${draftId}`} className="text-xs text-[var(--text-secondary)] mb-1 block">Bin / shelf</label>
+          <label htmlFor={`bin-${draftId}`} className="text-xs text-[var(--text-secondary)] mb-1 block">Storage location</label>
           <input
             id={`bin-${draftId}`}
             className="input w-full uppercase"
-            placeholder="e.g. B3"
-            maxLength={MAX_BIN_LENGTH}
+            placeholder="e.g. RACK B"
+            maxLength={MAX_LOCATION_LENGTH}
             value={binText}
             disabled={disabled}
             onChange={(e) => setBinText(e.target.value)}

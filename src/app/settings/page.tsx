@@ -30,8 +30,10 @@ import {
   Mail,
   Images,
   HardDrive,
+  Package,
 } from "lucide-react";
 import AutomationSettings from "@/components/AutomationSettings";
+import StorageSettingsCard from "@/components/StorageSettings";
 import EbayPermissionsCard from "@/components/EbayPermissionsCard";
 import PhotoCleanupSettings from "@/components/PhotoCleanupSettings";
 import { setStoreIntroCache } from "@/components/StoreIntroHint";
@@ -1089,6 +1091,10 @@ export default function SettingsPage() {
           </p>
         )}
         </>)}
+      </SettingsSection>
+
+      <SettingsSection delay="d8" title="Storage & pick list" description="Where your items live, so To-ship can tell you where to grab each one. Off by default." icon={Package}>
+        <StorageSettingsCard />
       </SettingsSection>
 
       <SettingsSection delay="d8" title="Automation" description="Things Listflow can do for you on a schedule. All off until you turn them on." icon={Sparkles}>

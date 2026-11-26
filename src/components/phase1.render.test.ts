@@ -8,17 +8,23 @@ describe("DraftExtrasFields", () => {
   it("is hidden until the database has the columns", () => {
     expect(renderToString(createElement(DraftExtrasFields, { draftId: "d", bin: undefined, autoOfferOptIn: undefined }))).toBe("");
   });
-  it("shows bin + opt-in (opt-in unchecked by default)", () => {
+  it("storage location is OFF by default even when the column exists", () => {
+    expect(renderToString(createElement(DraftExtrasFields, { draftId: "d", bin: "B3", autoOfferOptIn: undefined }))).toBe("");
     const html = renderToString(createElement(DraftExtrasFields, { draftId: "d", bin: "B3", autoOfferOptIn: false }));
-    expect(html).toContain("Bin / shelf");
-    expect(html).toContain('value="B3"');
+    expect(html).not.toContain("Storage location");
     expect(html).toContain("Include in automatic offers");
     expect(html).not.toContain("checked");
   });
-  it("shows only what exists", () => {
-    const html = renderToString(createElement(DraftExtrasFields, { draftId: "d", bin: null, autoOfferOptIn: undefined }));
-    expect(html).toContain("Bin / shelf");
-    expect(html).not.toContain("automatic offers");
+  it("Bins / racks mode shows the typed field, renamed", () => {
+    const html = renderToString(createElement(DraftExtrasFields, { draftId: "d", bin: "RACK B", autoOfferOptIn: undefined, showLocation: true }));
+    expect(html).toContain("Storage location");
+    expect(html).toContain('value="RACK B"');
+    expect(html).not.toMatch(/Bin \/ shelf/);
+  });
+  it("SKU boxes mode shows the box from the SKU, read-only", () => {
+    const html = renderToString(createElement(DraftExtrasFields, { draftId: "d", bin: null, autoOfferOptIn: undefined, derivedLocation: "Box 18" }));
+    expect(html).toContain("Box 18");
+    expect(html).not.toContain("<input");
   });
 });
 
@@ -55,5 +61,27 @@ describe("eBay permissions prompt", () => {
     expect(html).toContain("/api/ebay/connect?scopes=extended");
     expect(html).toContain("current connection keeps working");
     expect(html).toContain("markdown sales");
+  });
+});
+
+import { StorageSettingsView } from "./StorageSettings";
+import { STORAGE_DEFAULTS } from "@/lib/storage-locations";
+
+describe("Storage & pick list settings", () => {
+  const save = async () => null;
+  it("off by default: switch off, no modes shown, SKU sort explained", () => {
+    const html = renderToString(createElement(StorageSettingsView, { initial: STORAGE_DEFAULTS, available: true, onSave: save }));
+    expect(html).toContain('aria-checked="false"');
+    expect(html).toContain("To-ship sorted by SKU");
+    expect(html).not.toContain("SKU boxes");
+  });
+  it("on in SKU boxes mode: box rows + generate helper", () => {
+    const html = renderToString(createElement(StorageSettingsView, { initial: { enabled: true, mode: "sku_boxes", boxes: [{ name: "Box 18", from: 1701, to: 1800 }] }, available: true, onSave: save }));
+    expect(html).toContain('value="Box 18"');
+    expect(html).toContain("Generate boxes");
+    expect(html).toContain("Unassigned");
+  });
+  it("missing column: explains, stays off", () => {
+    expect(renderToString(createElement(StorageSettingsView, { initial: STORAGE_DEFAULTS, available: false, onSave: save }))).toContain("migration 041");
   });
 });
