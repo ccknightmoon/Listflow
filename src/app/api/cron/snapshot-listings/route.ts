@@ -8,6 +8,8 @@ import { fetchEbayIdentity, storeEbayIdentity } from "@/lib/ebay-identity";
 import { maybeRunWeeklyBackup } from "@/lib/backup";
 import { runSyncPass } from "@/lib/ebay-auto-sync";
 import { sendBackupEmail } from "@/lib/email";
+import { autoOffersLive } from "@/lib/auto-offers";
+import { runAutoOffers } from "@/lib/auto-offers-server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -29,6 +31,7 @@ async function snapshotOne(
       userId: row.user_id,
       ebayUserId: row.ebay_user_id,
       refreshToken: decryptToken(row.encrypted_refresh_token),
+      grantedScopes: (row as { granted_scopes?: string | null }).granted_scopes ?? null,
       policies: {},
     };
     const { body } = await ebayContext.run(connection, () => fetchListPage("ActiveList", 1));
@@ -78,6 +81,28 @@ export async function GET(req: NextRequest) {
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, rows.length) }, () => worker()));
 
+  // Automatic offers to watchers (Phase 1). Only when Vercel env
+  // AUTO_OFFERS_ENABLED=1; then only for sellers who switched it on in
+  // Settings (runAutoOffers re-checks both). Floor/cost protected.
+  const autoOffers: Array<{ userId: string; sent?: number; failed?: number; reason?: string }> = [];
+  if (autoOffersLive()) {
+    for (const row of rows) {
+      try {
+        const connection = {
+          userId: row.user_id,
+          ebayUserId: row.ebay_user_id,
+          refreshToken: decryptToken(row.encrypted_refresh_token),
+          grantedScopes: (row as { granted_scopes?: string | null }).granted_scopes ?? null,
+          policies: {},
+        };
+        const r = await runAutoOffers({ db: supabase, logDb: supabase, connection }, row.user_id, { send: true });
+        autoOffers.push({ userId: row.user_id, sent: r.sent, failed: r.failed, reason: r.reason });
+      } catch (e) {
+        autoOffers.push({ userId: row.user_id, reason: (e as Error).message });
+      }
+    }
+  }
+
   // Weekly backup piggybacks on this daily cron (the free plan's two cron
   // slots are both used). Runs only when the last backup is ~a week old.
   const backup = await maybeRunWeeklyBackup(supabase, {
@@ -89,5 +114,5 @@ export async function GET(req: NextRequest) {
     },
   }).catch((e) => ({ ran: false, reason: (e as Error).message }));
 
-  return NextResponse.json({ date: today, results, backup });
+  return NextResponse.json({ date: today, results, autoOffers, backup });
 }

@@ -31,6 +31,8 @@ import {
   Images,
   HardDrive,
 } from "lucide-react";
+import AutomationSettings from "@/components/AutomationSettings";
+import EbayPermissionsCard from "@/components/EbayPermissionsCard";
 import PhotoCleanupSettings from "@/components/PhotoCleanupSettings";
 import { setStoreIntroCache } from "@/components/StoreIntroHint";
 import { STORE_INTRO_DEFAULT, STORE_INTRO_MAX, introTextToHtml } from "@/lib/store-intro";
@@ -887,6 +889,7 @@ export default function SettingsPage() {
               </div>
               <a href="/api/ebay/connect" className="btn text-xs px-3 py-1.5">Reconnect</a>
             </div>
+            <EbayPermissionsCard />
 
             {needsPolicySetup ? (
               <div
@@ -1086,6 +1089,10 @@ export default function SettingsPage() {
           </p>
         )}
         </>)}
+      </SettingsSection>
+
+      <SettingsSection delay="d8" title="Automation" description="Things Listflow can do for you on a schedule. All off until you turn them on." icon={Sparkles}>
+        <AutomationSettings />
       </SettingsSection>
 
       <SettingsSection delay="d8" title="Listing accuracy" description="Test the listing AI against your own live listings (read-only — nothing on eBay changes)." icon={Sparkles}>

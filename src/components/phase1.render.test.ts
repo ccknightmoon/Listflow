@@ -33,3 +33,27 @@ describe("HaulsPanel", () => {
     expect(r[1].fee).toBeGreaterThan(0);
   });
 });
+
+import AutomationSettings, { Switch } from "./AutomationSettings";
+import { EbayPermissionsView } from "./EbayPermissionsCard";
+
+describe("Automation settings", () => {
+  it("renders a loader first, never a switched-on state", () => {
+    expect(renderToString(createElement(AutomationSettings))).toContain("Loading");
+  });
+  it("Switch reflects its value", () => {
+    expect(renderToString(createElement(Switch, { checked: false, onChange: () => {}, label: "x" }))).toContain('aria-checked="false"');
+  });
+});
+
+describe("eBay permissions prompt", () => {
+  it("hidden when nothing is missing", () => {
+    expect(renderToString(createElement(EbayPermissionsView, { missing: [] }))).toBe("");
+  });
+  it("links to the extended reconnect and reassures", () => {
+    const html = renderToString(createElement(EbayPermissionsView, { missing: ["marketing", "analytics"] }));
+    expect(html).toContain("/api/ebay/connect?scopes=extended");
+    expect(html).toContain("current connection keeps working");
+    expect(html).toContain("markdown sales");
+  });
+});
