@@ -22,6 +22,33 @@ export function Switch({ checked, onChange, label, disabled }: { checked: boolea
   );
 }
 
+interface CorrectionsResponse { available: boolean; minRepeats?: number; corrections: Array<{ field: string; from: string; to: string; count: number }> }
+
+function LearnedFixesList() {
+  const [data, setData] = useState<CorrectionsResponse | null>(null);
+  useEffect(() => {
+    apiFetch<CorrectionsResponse>("/api/ai-corrections").then(setData, () => setData(null));
+  }, []);
+  if (!data?.available || data.corrections.length === 0) return null;
+  const min = data.minRepeats ?? 2;
+  return (
+    <details className="mt-2 text-[11px]">
+      <summary>Fixes seen so far ({data.corrections.length})</summary>
+      <ul>
+        {data.corrections.map((c) => (
+          <li key={`${c.field}|${c.from}|${c.to}`} className="flex items-center gap-2 py-0.5">
+            <span className="flex-1">{c.field.replace("_", " ")}: &ldquo;{c.from}&rdquo; → &ldquo;{c.to}&rdquo; ×{c.count}{c.count >= min ? " (applied)" : ""}</span>
+            <button type="button" className="underline" onClick={async () => {
+              await apiFetch("/api/ai-corrections", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify(c) }).catch(() => null);
+              setData({ ...data, corrections: data.corrections.filter((x) => x !== c) });
+            }}>Forget</button>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
 export default function AutomationSettings() {
   const [data, setData] = useState<AutomationResponse | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -127,6 +154,7 @@ export default function AutomationSettings() {
             When you correct the same AI value twice (e.g. brand &ldquo;Polo RL&rdquo; → &ldquo;Polo Ralph Lauren&rdquo;), new items get your fix automatically. Brand, color, material, style, pattern, type, neckline, sleeve and fit only — never size, condition or price.
           </p>
           {data.learnFixes === null && <p className="text-[11px] mt-1" style={{ color: "var(--text-tertiary)" }}>Needs a one-time database update (migration 043).</p>}
+          {data.learnFixes !== null && <LearnedFixesList />}
         </div>
         {data.learnFixes !== null && <Switch label="Learn my fixes" checked={data.learnFixes} onChange={(v) => void save({ learnFixes: v }, { ...data, learnFixes: v })} />}
       </div>

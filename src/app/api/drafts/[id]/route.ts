@@ -1,5 +1,7 @@
 import { draftFieldsError, isUuid } from "@/lib/input-validation";
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse, after } from "next/server";
+import { diffCorrections } from "@/lib/learned-fixes";
+import { learnableColumnsIn, recordCorrections } from "@/lib/learned-fixes-server";
 import { requireUser } from "@/lib/auth";
 import { trashDrafts } from "@/lib/draft-trash";
 import { serviceDb } from "@/lib/jobs/supabase-store";
@@ -141,6 +143,14 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       ...(specifics !== undefined && { item_specifics: specifics }),
       ...(body.bestOfferFloor !== undefined && { best_offer_floor: body.bestOfferFloor ?? null }),
   };
+  // "Learn my fixes" (migration 043): remember what the seller changed.
+  // Read-only here; recorded after the response, best-effort.
+  const learnCols = learnableColumnsIn(body);
+  let before: Record<string, unknown> | null = null;
+  if (learnCols.length) {
+    const { data: cur } = await auth.supabase.from("drafts").select(learnCols.join(", ")).eq("id", id).eq("user_id", auth.user.id).maybeSingle();
+    before = (cur as Record<string, unknown> | null) ?? null;
+  }
   const run = (values: Record<string, unknown>) => {
     let q = auth.supabase.from("drafts").update(values).eq("id", id).eq("user_id", auth.user!.id);
     if (expectedUpdatedAt) q = q.eq("updated_at", expectedUpdatedAt);
@@ -167,6 +177,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       { error: "This draft changed in another tab. Reload it before saving your changes.", stale: true },
       { status: 409 }
     );
+  }
+  if (before) {
+    const corrections = diffCorrections(before, body);
+    if (corrections.length) {
+      const supabase = auth.supabase;
+      const userId = auth.user.id;
+      const record = () => recordCorrections(supabase as never, userId, corrections).catch(() => 0);
+      try {
+        after(record);
+      } catch {
+        await record(); // outside a request scope (tests/scripts)
+      }
+    }
   }
   return NextResponse.json({ draft: data });
 }

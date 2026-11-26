@@ -7,6 +7,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AiResult } from "@/lib/ai-result";
 import { currentConfidence } from "@/lib/ai-result";
 import { analyzeAndEnrich, isOwnPhotoUrl } from "@/lib/analyze-core";
+import type { Correction } from "@/lib/learned-fixes";
+import { loadLearnedRules } from "@/lib/learned-fixes-server";
 import { checkAndConsumeAiUsage, type UsageCheckResult } from "@/lib/ai-usage";
 import { buildDraftPayload } from "@/lib/draft-payload";
 import { draftRowFromBody, withoutMissingColumn } from "@/lib/draft-row";
@@ -41,6 +43,8 @@ export interface ProcessorDeps {
   ebayConnection(userId: string): Promise<EbayConnectionContext | null>;
   publish(ctx: Omit<PublishContext, "supabase">, draftId: string): Promise<{ status: number; json: Record<string, unknown> }>;
   groupChunk(apiKey: string, parts: GroupImagePart[]): Promise<GroupChunkResult>;
+  /** "Learn my fixes" rules for a seller ([] when off). Optional. */
+  learnedRules?(userId: string): Promise<Correction[]>;
 }
 
 const errMsg = (e: unknown) => (e as Error)?.message || "Unexpected error";
@@ -70,7 +74,8 @@ export async function processAnalyze(job: Job, ctx: ProcessorContext, deps: Proc
     const runWithEbay = conn ? <T,>(fn: () => Promise<T>) => ebayContext.run(conn, fn) : null;
     try {
       const images = await deps.resolveImages(urls.slice(0, MAX_ANALYSIS_PHOTOS).map((url) => ({ url })), userId);
-      const { enriched, timings } = await deps.analyze(deps.apiKey, images, runWithEbay);
+      const rules = deps.learnedRules ? await deps.learnedRules(userId).catch(() => []) : [];
+      const { enriched, timings } = await deps.analyze(deps.apiKey, images, runWithEbay, rules);
       r.analysis = enriched;
       r.timings = timings;
     } catch (e) {
@@ -252,5 +257,6 @@ export function productionDeps(db: SupabaseClient, store: JobStore): ProcessorDe
       return { status: res.status, json: (await res.json()) as Record<string, unknown> };
     },
     groupChunk: groupPhotosCore,
+    learnedRules: (userId) => loadLearnedRules(db, userId),
   };
 }

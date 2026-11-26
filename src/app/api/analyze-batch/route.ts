@@ -6,7 +6,9 @@ import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { enrichVisionResult } from "@/lib/listing-enrich";
-import { analyzeGroup, type InImage } from "@/lib/analyze-core";
+import { analyzeGroupSmart, type InImage } from "@/lib/analyze-core";
+import { applyLearnedFixes } from "@/lib/learned-fixes";
+import { loadLearnedRules } from "@/lib/learned-fixes-server";
 import { resolveImagesForOpenAI } from "@/lib/private-photos-server";
 
 export const runtime = "nodejs";
@@ -71,6 +73,9 @@ export async function POST(req: NextRequest) {
   const connection = await requireEbayConnection(auth).catch(() => null);
   const runWithEbay = connection ? <T,>(fn: () => Promise<T>) => ebayContext.run(connection, fn) : null;
 
+  // "Learn my fixes": [] unless the seller turned it on (migration 043).
+  const rules = await loadLearnedRules(auth.supabase as never, auth.user.id);
+
   for (let i = 0; i < groups.length; i++) {
     if (i >= processLimit) {
       results.push({ error: usage.message || AI_USAGE_LIMIT_MESSAGE });
@@ -79,9 +84,9 @@ export async function POST(req: NextRequest) {
     const timings: Record<string, number> = {};
     try {
       const images = await resolveImagesForOpenAI(groups[i].images ?? [], auth.user.id);
-      const result = await analyzeGroup(apiKey, images, timings);
+      const result = await analyzeGroupSmart(apiKey, images, timings);
       const t = Date.now();
-      const enriched = await enrichVisionResult(apiKey, result, runWithEbay);
+      const enriched = applyLearnedFixes(await enrichVisionResult(apiKey, result, runWithEbay), rules);
       timings.enrichMs = Date.now() - t;
       // Per-stage timings: returned to the page and logged for Vercel logs.
       console.log(JSON.stringify({ event: "analyze_item", ...timings }));

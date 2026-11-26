@@ -1,6 +1,8 @@
 // Pass A vision + enrichment for one item, shared by POST /api/analyze-batch
 // (in-browser flow) and the background queue worker (Volume Phase 3).
-import { visionModel } from "@/lib/ai-models";
+import { visionModel, escalationModel } from "@/lib/ai-models";
+import { tagEvidence } from "@/lib/listing-enrich";
+import { applyLearnedFixes, type Correction } from "@/lib/learned-fixes";
 import { openAIPost } from "@/lib/openai-request";
 import { ITEM_VISION_PROMPT as PROMPT } from "@/lib/vision-prompt";
 import { enrichVisionResult } from "@/lib/listing-enrich";
@@ -49,7 +51,7 @@ async function findTags(apiKey: string, images: InImage[]): Promise<TagFinderAns
  * at full detail, the rest at low detail (Volume Phase 1). Rate limits are
  * retried with backoff (src/lib/backoff.ts).
  */
-export async function analyzeGroup(apiKey: string, imagesIn: InImage[], timings: Record<string, number>) {
+export async function analyzeGroup(apiKey: string, imagesIn: InImage[], timings: Record<string, number>, opts: { model?: string } = {}) {
   const images = imagesIn.slice(0, MAX_ANALYSIS_PHOTOS);
   let t = Date.now();
   const finder = images.length > ALL_HIGH_UP_TO ? await findTags(apiKey, images) : null;
@@ -61,7 +63,7 @@ export async function analyzeGroup(apiKey: string, imagesIn: InImage[], timings:
   ]);
   t = Date.now();
   const data = (await withBackoff(() => openAIPost(apiKey, {
-    model: visionModel(),
+    model: opts.model ?? visionModel(),
     max_tokens: 2000,
     response_format: { type: "json_object" },
     messages: [{ role: "user", content: [{ type: "text", text: PROMPT }, ...content] }],
@@ -74,14 +76,54 @@ export async function analyzeGroup(apiKey: string, imagesIn: InImage[], timings:
 }
 
 
+/**
+ * Why an item is "hard" (worth a second look by a stronger model): brand or
+ * size not read from a tag, or it looks vintage (where details = money).
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- raw vision JSON
+export function hardItemReasons(v: any): string[] {
+  if (!v || typeof v !== "object") return [];
+  const ev = tagEvidence(v);
+  const reasons: string[] = [];
+  const brand = typeof v.brand === "string" ? v.brand.trim() : "";
+  if (!ev.brandFromTag && !/^unbranded$/i.test(brand)) reasons.push("brand not from a tag");
+  if (!ev.sizeFromTag) reasons.push("size not from a tag");
+  const vintage = (typeof v.vintage === "string" && /^yes$/i.test(v.vintage.trim())) || (typeof v.era === "string" && v.era.trim() !== "") || !!ev.dateCode;
+  if (vintage) reasons.push("vintage");
+  return reasons;
+}
+
+/**
+ * Pass A, escalated: the normal model first; when AI_ESCALATION_MODEL is set
+ * (off by default) and the item is hard (see hardItemReasons), the stronger
+ * model reads the same photos and its answer is used. Any failure of the
+ * second pass keeps the first answer.
+ */
+export async function analyzeGroupSmart(apiKey: string, images: InImage[], timings: Record<string, number>) {
+  const first = await analyzeGroup(apiKey, images, timings);
+  const strong = escalationModel();
+  if (!strong || images.length < 2) return first;
+  if (!hardItemReasons(first).length) return first;
+  const t = Date.now();
+  try {
+    const second = await analyzeGroup(apiKey, images, {}, { model: strong });
+    timings.escalated = 1;
+    timings.escalationMs = Date.now() - t;
+    return second;
+  } catch {
+    timings.escalationFailed = 1;
+    return first;
+  }
+}
+
 type RunWithEbay = (<T>(fn: () => Promise<T>) => Promise<T>) | null;
 
 /** Vision pass + Pass B enrichment, with per-stage timings. Throws on failure. */
-export async function analyzeAndEnrich(apiKey: string, images: InImage[], runWithEbay: RunWithEbay) {
+export async function analyzeAndEnrich(apiKey: string, images: InImage[], runWithEbay: RunWithEbay, rules: Correction[] = []) {
   const timings: Record<string, number> = {};
-  const result = await analyzeGroup(apiKey, images, timings);
+  const result = await analyzeGroupSmart(apiKey, images, timings);
   const t = Date.now();
-  const enriched = await enrichVisionResult(apiKey, result, runWithEbay);
+  const enriched = applyLearnedFixes(await enrichVisionResult(apiKey, result, runWithEbay), rules);
   timings.enrichMs = Date.now() - t;
   return { enriched, timings };
 }
