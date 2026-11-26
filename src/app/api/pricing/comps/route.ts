@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { planGate } from "@/lib/billing/entitlements";
 import { findComps } from "@/lib/pricing-comps";
 import { estimateShipping } from "@/lib/shipping";
 import { fetchOwnPhotoBase64 } from "@/lib/jobs/processors";
@@ -13,6 +14,8 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  const gated = await planGate(auth.user.id, "ai");
+  if (gated) return gated;
   let body: { draftId?: unknown; useImage?: unknown; title?: unknown; brand?: unknown; size?: unknown; condition?: unknown };
   try {
     body = await req.json();

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { openAIPost } from "@/lib/openai-request";
 import { requireUser } from "@/lib/auth";
+import { planGate } from "@/lib/billing/entitlements";
 import { checkAndConsumeAiUsage, AI_USAGE_LIMIT_MESSAGE } from "@/lib/ai-usage";
 
 export const runtime = "nodejs";
@@ -8,6 +9,8 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  const gated = await planGate(auth.user.id, "ai");
+  if (gated) return gated;
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {

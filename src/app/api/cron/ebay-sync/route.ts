@@ -3,6 +3,7 @@ import { getServiceClient } from "@/lib/supabase-service";
 import { ebayConnectionForUser } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { runSyncPass } from "@/lib/ebay-auto-sync";
+import { featureBlocked } from "@/lib/billing/entitlements";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -33,6 +34,7 @@ export async function GET(req: NextRequest) {
     while (cursor < users.length) {
       const userId = users[cursor++];
       try {
+        if (await featureBlocked(userId, "sync")) { results.push({ userId, skipped: "plan" }); continue; }
         const conn = await ebayConnectionForUser(db, userId);
         if (!conn) { results.push({ userId, skipped: "not connected" }); continue; }
         const r = await ebayContext.run(conn, () => runSyncPass(db, userId, { editLimit: 15 }));

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { planGate } from "@/lib/billing/entitlements";
 import { computePriceSuggestion, type PriceInput } from "@/lib/pricing-suggest";
 
 export const runtime = "nodejs";
@@ -7,6 +8,8 @@ export const runtime = "nodejs";
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  const gated = await planGate(auth.user.id, "ai");
+  if (gated) return gated;
   let input: PriceInput;
   try {
     input = (await req.json()) as PriceInput;

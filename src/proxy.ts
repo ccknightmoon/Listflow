@@ -48,7 +48,8 @@ import { allowRequest, clientIp, rateLimitConfig, rateTier } from "@/lib/rate-li
 const PUBLIC_PATHS = ["/", "/login", "/privacy", "/terms", "/forgot-password", "/reset-password", "/manifest.webmanifest", "/sw.js"];
 // "/api/ebay/account-deletion": eBay's Marketplace Account Deletion
 // notifications (signed by eBay, verified in the route itself).
-const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout", "/api/cron", "/api/jobs/worker", "/api/ebay/account-deletion"];
+// "/api/billing/webhook": Stripe events (Stripe-Signature verified in the route).
+const PUBLIC_PREFIXES = ["/_next", "/favicon", "/api/ebay/callback", "/api/auth/lockout", "/api/cron", "/api/jobs/worker", "/api/ebay/account-deletion", "/api/billing/webhook"];
 
 // Self-service account deletion (src/lib/account-deletion.ts): a signed-in
 // user with a pending deletion request is locked to /account/pending-deletion

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { planGate } from "@/lib/billing/entitlements";
 import { MAX_ANALYSIS_PHOTOS } from "@/lib/photo-plan";
 import type { NewJob } from "@/lib/jobs/types";
 import { isUsersPhotoUrl, jobStore, kickWorkerAfterResponse, queueAvailable, QUEUE_UNAVAILABLE, UUID_RE } from "@/lib/jobs/server";
@@ -16,6 +17,8 @@ const MAX_BATCH_PHOTOS = 600;
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  const gated = await planGate(auth.user.id, "bulk");
+  if (gated) return gated;
   if (!(await queueAvailable())) return NextResponse.json(QUEUE_UNAVAILABLE);
   const userId = auth.user.id;
 

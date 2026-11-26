@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { planGate } from "@/lib/billing/entitlements";
 
 // Durable record of one batch-upload "List all on eBay" / "Retry failed
 // listings" run -- see supabase-migrations/022_batch_jobs.sql. Only the
@@ -10,6 +11,8 @@ import { requireUser } from "@/lib/auth";
 export async function POST(req: NextRequest) {
   const auth = await requireUser();
   if (!auth.user) return auth.unauthorized;
+  const gated = await planGate(auth.user.id, "bulk");
+  if (gated) return gated;
 
   let body: { totalItems?: unknown };
   try {

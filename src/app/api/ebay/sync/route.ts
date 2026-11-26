@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
+import { featureBlocked } from "@/lib/billing/entitlements";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { dismissUnlinked, parseState, readSyncState, runSyncPass } from "@/lib/ebay-auto-sync";
@@ -33,6 +34,10 @@ export async function POST(req: NextRequest) {
     if (saved.persisted) await auth.supabase.from("app_settings").update({ ebay_sync_state: next }).eq("user_id", userId);
     return NextResponse.json({ state: next, persisted: saved.persisted }, { headers: noStore });
   }
+
+  // Automatic two-way sync is a Pro feature once billing is on (off today: no-op).
+  const blocked = await featureBlocked(userId, "sync");
+  if (blocked) return NextResponse.json({ connected: true, skipped: blocked, planBlocked: true }, { headers: noStore });
 
   const connection = await requireEbayConnection(auth).catch(() => null);
   if (!connection) return NextResponse.json({ connected: false }, { headers: noStore });

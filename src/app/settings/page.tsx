@@ -1092,6 +1092,12 @@ export default function SettingsPage() {
         <Link href="/benchmark" className="btn text-sm">Open the accuracy benchmark</Link>
       </SettingsSection>
 
+      {process.env.NEXT_PUBLIC_BILLING_ENABLED === "1" && (
+        <SettingsSection delay="d8" title="Membership" description="Your plan, helper seats and billing (Stripe test mode)." icon={Sparkles}>
+          <Link href="/membership" className="btn text-sm">Plans &amp; billing</Link>
+        </SettingsSection>
+      )}
+
       <SettingsSection delay="d8" title="Account" icon={UserCircle}>
         <button
           onClick={handleSignOut}
