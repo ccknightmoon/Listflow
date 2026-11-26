@@ -1,5 +1,16 @@
 # Listflow — change notes
 
+## Nov 25, 2026 — `feat/upgrade-v2b` (upgrade v2, rebuilt on today's fixes) — PROGRESS LOG
+
+Base: `fix/settings-intro-layout` (46093a9, newest: contains origin/main 8fb4acd). The 5 commits from `feat/upgrade-v2` were cherry-picked cleanly (no conflicts); today's price/floor, size mapping, store-category reset, unlock-after-error, store intro and Drafts integrity code is untouched. Work is done in a sandbox clone and fetched back into the repo (the mounted .git can't delete lock files; stale locks are moved to `.git/junk-to-delete/`).
+
+Status (resume from the first unchecked line):
+- [x] Cherry-pick upgrade-v2 (#1 Inventory, #4 recycle bin, #2 auto-sync, #3 Finish on eBay, #6 deprecation watch)
+- [x] Renumber migrations: recycle bin 035→**037**, sync state 036→**038** (035/036 are taken by best-offer floor and store intro)
+- [x] Safety (a) rate limiting: needs `RATE_LIMIT_ENABLED=1` + Upstash; generous tiers; fail open (`src/lib/rate-limit-policy.ts`)
+- [ ] #7 billing (plans, gating, Stripe test mode, flag off) — migration **039**
+- [ ] Full tests + tsc + next build; final notes
+
 ## Nov 25, 2026 — `fix/settings-intro-layout` (cleaner Store intro card)
 
 Sel: the Store intro card was wordy and repeated the text. UI only, no data/API changes.
