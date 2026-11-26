@@ -1,15 +1,26 @@
 # Listflow — change notes
 
-## Nov 25, 2026 — `feat/upgrade-v2b` (upgrade v2, rebuilt on today's fixes) — PROGRESS LOG
+## Nov 25, 2026 — `feat/upgrade-v2b` (upgrade v2, rebuilt on today's fixes)
 
-Base: `fix/settings-intro-layout` (46093a9, newest: contains origin/main 8fb4acd). The 5 commits from `feat/upgrade-v2` were cherry-picked cleanly (no conflicts); today's price/floor, size mapping, store-category reset, unlock-after-error, store intro and Drafts integrity code is untouched. Work is done in a sandbox clone and fetched back into the repo (the mounted .git can't delete lock files; stale locks are moved to `.git/junk-to-delete/`).
+Base: `fix/settings-intro-layout` (46093a9 — newest; contains origin/main 8fb4acd, which GitHub confirmed is main's tip). The 5 commits from `feat/upgrade-v2` cherry-picked with **no conflicts**; today's price/floor fields, size mapping, store-category reset, unlock-after-error, store intro and Drafts integrity are untouched (their tests all pass). Built in a sandbox clone and fetched back (the mounted .git can't delete lock files; stale locks were moved to `.git/junk-to-delete/` — safe to `rm -rf`).
 
-Status (resume from the first unchecked line):
-- [x] Cherry-pick upgrade-v2 (#1 Inventory, #4 recycle bin, #2 auto-sync, #3 Finish on eBay, #6 deprecation watch)
-- [x] Renumber migrations: recycle bin 035→**037**, sync state 036→**038** (035/036 are taken by best-offer floor and store intro)
-- [x] Safety (a) rate limiting: needs `RATE_LIMIT_ENABLED=1` + Upstash; generous tiers; fail open (`src/lib/rate-limit-policy.ts`)
-- [ ] #7 billing (plans, gating, Stripe test mode, flag off) — migration **039**
-- [ ] Full tests + tsc + next build; final notes
+Status: all done. 913 tests green, `tsc` clean, `eslint` 0 errors, `next build` clean (sandbox build used a temporary system-font stub for layout.tsx because Google Fonts is unreachable here; not committed).
+
+### What's in it
+1. **Inventory** — one screen, Draft / Scheduled / Live / Sold / Ended filters; `/drafts`, `/store`, `/store/scheduled` redirect with filters kept.
+2. **Background eBay sync** — app-wide agent every 5 min while open (read-only GetSellerEvents/GetItem); `/api/cron/ebay-sync` for every seller (CRON_SECRET), run by `.github/workflows/ebay-sync.yml` every 10 min — OFF until repo variable `EBAY_SYNC_ENABLED=true` + secret `CRON_SECRET` are set (Vercel Hobby crons are daily only; the daily `snapshot-listings` cron also runs a sync pass). eBay push notifications were not added (would need SetNotificationPreferences, a write to the eBay account).
+3. **Finish on eBay** — main button for unpublished drafts; first use opens the explainer (scheduled listing → eBay app Selling → Scheduled; the eBay Drafts tab can't be filled by outside apps).
+4. **Recycle bin** — delete = 7 days in `draft_trash` with Undo / Restore; daily cron purges row + photos; falls back to permanent delete until migration 037 is applied.
+5. **"Synced with eBay X min ago"** + "live on eBay but not in Listflow" alert (Inventory + Home).
+6. **eBay deprecations** — checked eBay's deprecation page 2026-11-25: **GetMyeBaySelling is NOT deprecated and has no date.** Deprecated Trading calls (GetOrders, CompleteSale, GeteBayDetails → 2027-06-30; discount profiles → 2027-01-30) are not used by Listflow. `src/lib/ebay-api-inventory.ts` + its test fail the build if code ever uses a deprecated call or a used call gets within 6 months of shutdown. Eventual replacement for GetMyeBaySelling/GetSellerEvents is the GraphQL Listing API `sellerListingSearch`; not switched now (not required, can't be verified without live eBay calls).
+7. **Plans + Stripe (TEST MODE), OFF by default** — `src/lib/billing/*`, `/api/billing/{status,checkout,portal,webhook}`, `/membership`. Free (manual listing) / Pro $29 / Power Seller $59 / helper seats $10 each (proposal). Gated when on: AI (analyze, group photos, specifics, pricing, dividers), bulk (analyze-batch, batch-jobs, jobs/enqueue), auto-sync. Off = no DB read, nothing changes. Owner exempt via `BILLING_EXEMPT_USER_IDS`. Live keys refused (`sk_live_` → error), live-mode webhook events ignored. Helper seats are billed/recorded only — helper logins don't exist yet.
+- **Rate limiting** — `src/lib/rate-limit-policy.ts`: needs `RATE_LIMIT_ENABLED=1` AND Upstash vars; per-IP per-min auth 30 / AI 120 / bulk 300 / general 600; cron, worker, webhooks, photo proxy never limited; fails open.
+
+### Migrations (NOT applied)
+- `037_draft_recycle_bin.sql` (was 035 on feat/upgrade-v2), `038_ebay_sync_state.sql` (was 036), `039_billing_subscriptions.sql`.
+
+### Env vars the code no longer reads (grep 2026-11-25; listed for removal after approval, NOT deleted)
+EBAY_RETURN_POLICY_ID, EBAY_SHIPPING_CALCULATED_ID, EBAY_SHIPPING_FREE_ID, EBAY_SHIPPING_HEAVY_ID, EBAY_OAUTH_REFRESH_TOKEN, EBAY_USER_TOKEN, EBAY_DEV_ID.
 
 ## Nov 25, 2026 — `fix/settings-intro-layout` (cleaner Store intro card)
 
