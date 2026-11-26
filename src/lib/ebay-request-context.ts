@@ -17,6 +17,8 @@ export interface EbayConnectionContext {
   userId: string;
   ebayUserId: string | null;
   refreshToken: string;
+  /** ebay_connections.granted_scopes (migration 044); null/absent = original scopes. */
+  grantedScopes?: string | null;
   policies: {
     shippingFreeId?: string | null;
     shippingHeavyId?: string | null;

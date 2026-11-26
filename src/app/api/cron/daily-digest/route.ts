@@ -111,6 +111,7 @@ export async function GET(req: NextRequest) {
           userId: row.user_id,
           ebayUserId: row.ebay_user_id,
           refreshToken: decryptToken(row.encrypted_refresh_token),
+          grantedScopes: (row as { granted_scopes?: string | null }).granted_scopes ?? null,
           policies: {
             shippingFreeId: row.shipping_free_policy_id,
             shippingHeavyId: row.shipping_heavy_policy_id,

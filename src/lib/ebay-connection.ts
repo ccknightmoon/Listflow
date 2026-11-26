@@ -19,6 +19,7 @@ export async function requireEbayConnection(auth: {
     userId: data.user_id,
     ebayUserId: data.ebay_user_id,
     refreshToken: decryptToken(data.encrypted_refresh_token),
+    grantedScopes: (data.granted_scopes as string | null | undefined) ?? null,
     policies: {
       shippingFreeId: data.shipping_free_policy_id,
       shippingHeavyId: data.shipping_heavy_policy_id,
@@ -43,6 +44,7 @@ export async function ebayConnectionForUser(
     userId: data.user_id,
     ebayUserId: data.ebay_user_id,
     refreshToken: decryptToken(data.encrypted_refresh_token),
+    grantedScopes: (data.granted_scopes as string | null | undefined) ?? null,
     policies: {
       shippingFreeId: data.shipping_free_policy_id,
       shippingHeavyId: data.shipping_heavy_policy_id,

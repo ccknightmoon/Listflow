@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { uuidList } from "@/lib/input-validation";
 import { normalizeBin } from "@/lib/bins";
-import { isMissingRelation } from "@/lib/hauls";
+import { isMissingRelation } from "@/lib/db-errors";
 
 export const runtime = "nodejs";
 

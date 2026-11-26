@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
+import { missingExtraScopes } from "@/lib/ebay-oauth";
 
 export const runtime = "nodejs";
 
@@ -17,5 +18,11 @@ export async function GET() {
   if (!auth.user) return auth.unauthorized;
 
   const connection = await requireEbayConnection(auth);
-  return NextResponse.json({ connected: !!connection });
+  // missingPermissions: extra eBay permissions (markdown sales, promoted
+  // listings, views, tracking) this connection doesn't have yet. Settings
+  // offers "Reconnect eBay to unlock" for them; nothing else changes.
+  return NextResponse.json({
+    connected: !!connection,
+    missingPermissions: connection ? missingExtraScopes(connection.grantedScopes) : [],
+  });
 }

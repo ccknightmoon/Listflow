@@ -24,13 +24,55 @@ export function generateOAuthState(): string {
 // sell.account.readonly above; until a seller reconnects, calls needing
 // this scope get a 403 that's handled as "not available yet," not an error
 // (see fetchRealFeesForRange).
-export const EBAY_SCOPES = [
+// The original permissions every existing connection granted. Token
+// refresh asks ONLY for what the seller actually granted: eBay refuses a
+// refresh that asks for more, which would break every eBay call.
+export const EBAY_BASE_SCOPE_LIST = [
   "https://api.ebay.com/oauth/api_scope",
   "https://api.ebay.com/oauth/api_scope/sell.inventory",
   "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
   "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
   "https://api.ebay.com/oauth/api_scope/sell.finances",
-].join(" ");
+] as const;
+export const EBAY_SCOPES = EBAY_BASE_SCOPE_LIST.join(" ");
+
+// Phase 1 (Nov 26, 2026): optional extra permissions, asked for only when
+// the seller taps "Reconnect eBay to unlock" (/api/ebay/connect?scopes=extended).
+// sell.marketing -> markdown sales + promoted listings; sell.analytics.readonly
+// -> views/impressions; sell.fulfillment -> orders/tracking. All three are in
+// eBay's standard production scope list for every app keyset.
+export const EBAY_EXTRA_SCOPES = {
+  marketing: "https://api.ebay.com/oauth/api_scope/sell.marketing",
+  analytics: "https://api.ebay.com/oauth/api_scope/sell.analytics.readonly",
+  fulfillment: "https://api.ebay.com/oauth/api_scope/sell.fulfillment",
+} as const;
+export const EBAY_EXTENDED_SCOPE_LIST = [...EBAY_BASE_SCOPE_LIST, ...Object.values(EBAY_EXTRA_SCOPES)];
+export const EBAY_EXTENDED_SCOPES = EBAY_EXTENDED_SCOPE_LIST.join(" ");
+export const EBAY_OAUTH_SCOPES_COOKIE = "ebay_oauth_scopes";
+
+const KNOWN_SCOPES = new Set<string>(EBAY_EXTENDED_SCOPE_LIST);
+
+/**
+ * Scopes to ask for on refresh: what the seller granted (stored in
+ * ebay_connections.granted_scopes, migration 044), limited to scopes we
+ * know, and always including the base set. null/unknown -> base set.
+ */
+export function scopesForRefresh(granted: string | null | undefined): string {
+  if (!granted) return EBAY_SCOPES;
+  const list = granted.split(/\s+/).filter((x) => KNOWN_SCOPES.has(x));
+  if (!EBAY_BASE_SCOPE_LIST.every((b) => list.includes(b))) return EBAY_SCOPES;
+  return EBAY_EXTENDED_SCOPE_LIST.filter((x) => list.includes(x)).join(" ");
+}
+
+/** Has the seller granted this permission? (null granted = base set only) */
+export function hasScope(granted: string | null | undefined, scope: string): boolean {
+  return scopesForRefresh(granted).split(" ").includes(scope);
+}
+
+/** Extra permissions the seller hasn't granted yet. */
+export function missingExtraScopes(granted: string | null | undefined): Array<keyof typeof EBAY_EXTRA_SCOPES> {
+  return (Object.keys(EBAY_EXTRA_SCOPES) as Array<keyof typeof EBAY_EXTRA_SCOPES>).filter((k) => !hasScope(granted, EBAY_EXTRA_SCOPES[k]));
+}
 
 function credentials() {
   return Buffer.from(
@@ -118,16 +160,22 @@ export async function getAccessToken(): Promise<string> {
 
   const refreshPromise = (async () => {
     try {
-      const body = new URLSearchParams({
-        grant_type: "refresh_token",
-        refresh_token: ctx.refreshToken,
-        scope: EBAY_SCOPES,
-      }).toString();
-
-      const raw = await httpsPost("/identity/v1/oauth2/token", body, {
-        Authorization: `Basic ${credentials()}`,
-      });
-      const data = JSON.parse(raw) as { access_token?: string; expires_in?: number; error_description?: string };
+      const refresh = async (scope: string) => {
+        const body = new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: ctx.refreshToken,
+          scope,
+        }).toString();
+        const raw = await httpsPost("/identity/v1/oauth2/token", body, {
+          Authorization: `Basic ${credentials()}`,
+        });
+        return JSON.parse(raw) as { access_token?: string; expires_in?: number; error?: string; error_description?: string };
+      };
+      const wanted = scopesForRefresh(ctx.grantedScopes);
+      let data = await refresh(wanted);
+      // Safety net: if the extra permissions are ever refused, fall back to
+      // the original set so the connection keeps working.
+      if (!data.access_token && wanted !== EBAY_SCOPES) data = await refresh(EBAY_SCOPES);
       if (!data.access_token) throw new Error(data.error_description ?? "Token refresh failed");
 
       const ttlMs = (data.expires_in ?? 7200) * 1000;
