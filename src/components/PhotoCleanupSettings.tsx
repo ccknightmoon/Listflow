@@ -16,6 +16,40 @@ export default function PhotoCleanupSettings() {
   const [s, setS] = useState<State | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ orphans: { files: number; mb: number; error?: string }; legacy: { files: number; mb: number; error?: string } | null } | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [runMsg, setRunMsg] = useState<string | null>(null);
+
+  async function check() {
+    setChecking(true);
+    setRunMsg(null);
+    try {
+      const r = await fetch("/api/settings/photo-cleanup?preview=1");
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Couldn't check");
+      setPreview(d.preview);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  async function runNow() {
+    setChecking(true);
+    try {
+      const r = await fetch("/api/settings/photo-cleanup", { method: "POST" });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || "Cleanup failed");
+      const rep = d.report ?? {};
+      setRunMsg(rep.skippedReason ? `Nothing done: ${rep.skippedReason}.` : `Done: ${rep.photosDeleted ?? 0} listed-item photos, ${rep.orphansDeleted ?? 0} unused, ${rep.legacyDeleted ?? 0} old shared-folder photos deleted.`);
+      setPreview(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setChecking(false);
+    }
+  }
 
   useEffect(() => {
     fetch("/api/settings/photo-cleanup")
@@ -78,6 +112,24 @@ export default function PhotoCleanupSettings() {
           </span>
         </span>
       </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" className="btn text-xs py-1.5 px-2.5" disabled={checking} onClick={() => void check()}>
+          {checking ? <Loader2 className="w-3 h-3 animate-spin" /> : null} Check storage (deletes nothing)
+        </button>
+        {preview && (
+          <button type="button" className="btn text-xs py-1.5 px-2.5" disabled={checking || !s.orphans} onClick={() => void runNow()} title={s.orphans ? "" : "Turn on 'Also delete unused photos' first"}>
+            Clean up now
+          </button>
+        )}
+      </div>
+      {preview && (
+        <p className="text-xs" data-testid="cleanup-preview" style={{ color: "var(--text-secondary)" }}>
+          Unused photos older than 7 days: {preview.orphans.files} ({preview.orphans.mb} MB){preview.orphans.error ? ` — ${preview.orphans.error}` : ""}.
+          {preview.legacy ? ` Old shared-folder photos nothing uses (30+ days): ${preview.legacy.files} (${preview.legacy.mb} MB)${preview.legacy.error ? ` — ${preview.legacy.error}` : ""}.` : ""}
+          {!s.orphans ? " Turn on “Also delete unused photos” to remove them." : ""}
+        </p>
+      )}
+      {runMsg && <p className="text-xs" role="status">{runMsg}</p>}
       <p className="text-xs" style={{ color: "var(--text-secondary)" }}>
         Runs once a day when you open the app.{s.lastRun ? ` Last run ${new Date(s.lastRun).toLocaleString()}.` : ""}
         {saving ? " Saving…" : ""}

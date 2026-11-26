@@ -22,7 +22,9 @@ export async function POST(req: NextRequest) {
   after(async () => {
     try {
       const r = await runPhotoCleanupForUser(userId);
-      if (r.draftsCleaned || r.orphansDeleted) console.log(JSON.stringify({ event: "photo_cleanup", userId, ...r }));
+      // Logged every run (incl. why it skipped) so a cleanup that frees
+      // nothing can be diagnosed from Vercel logs.
+      if (r.skippedReason !== "already ran today") console.log(JSON.stringify({ event: "photo_cleanup", userId, ...r }));
     } catch (err) {
       console.error("photo cleanup:", (err as Error).message);
     }

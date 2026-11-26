@@ -7,8 +7,11 @@
 //   the app's thumbnails keep working from eBay's copies. If eBay's copies
 //   can't be read, the draft is skipped (nothing deleted).
 // * Unpublished drafts: never touched.
-// * Orphans (optional, default off): photos no draft and no queued job
-//   uses, older than 7 days.
+// * Orphans (optional, default off): photos no draft, no queued job and no
+//   recycle-bin entry uses, older than 7 days -- in BOTH buckets (the
+//   private bucket was added Nov 2026 and wasn't swept before).
+// * Old shared folder photos/public/ (pre per-seller folders): only for the
+//   seller named in PHOTO_LEGACY_OWNER_ID, only unused + 30+ days old.
 // A photo still used by ANY other draft is never deleted.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parsePrivatePhotoRef, PRIVATE_BUCKET } from "@/lib/private-photos";
@@ -112,6 +115,8 @@ export interface CleanupReport {
   draftsCleaned: number;
   photosDeleted: number;
   orphansDeleted: number;
+  /** Old photos/public/ files removed (only for PHOTO_LEGACY_OWNER_ID). */
+  legacyDeleted?: number;
   skipped: number;
   skippedReason?: string;
 }
@@ -181,10 +186,17 @@ export async function runPhotoCleanup(deps: CleanupDeps, userId: string, opts: {
   }
 
   if (settings.orphans) report.orphansDeleted = await removeOrphans(deps, userId, drafts, now);
+  if (settings.orphans && legacyOwner() === userId) {
+    const l = await findLegacyOrphans(deps, now);
+    let n = 0;
+    for (let i = 0; i < l.paths.length; i += 100) n += await removeStoragePaths(deps.db, l.paths.slice(i, i + 100));
+    report.legacyDeleted = n;
+  }
   return report;
 }
 
-async function removeOrphans(deps: CleanupDeps, userId: string, drafts: CleanupDraft[], now: number): Promise<number> {
+/** Every storage path this seller's drafts, queued jobs and recycle bin still use; null = unsure (delete nothing). */
+async function pathsInUse(deps: CleanupDeps, userId: string, drafts: CleanupDraft[]): Promise<Set<string> | null> {
   const used = new Set<string>();
   for (const d of drafts) for (const u of draftUrls(d)) {
     const p = storagePath(u, deps.supabaseUrl);
@@ -196,7 +208,7 @@ async function removeOrphans(deps: CleanupDeps, userId: string, drafts: CleanupD
     .select("input")
     .eq("user_id", userId)
     .in("status", ["queued", "running", "dead"]);
-  if (jErr && !/listing_jobs|does not exist|could not find/i.test(jErr.message)) return 0; // unsure -> delete nothing
+  if (jErr && !/listing_jobs|does not exist|could not find/i.test(jErr.message)) return null;
   for (const j of jobs ?? []) {
     for (const u of ((j.input as { photoUrls?: string[] })?.photoUrls ?? [])) {
       const p = storagePath(u, deps.supabaseUrl);
@@ -205,31 +217,142 @@ async function removeOrphans(deps: CleanupDeps, userId: string, drafts: CleanupD
   }
   // Drafts in the recycle bin (migration 037) still own their photos.
   const { data: trash, error: tErr } = await deps.db.from("draft_trash").select("photo_urls").eq("user_id", userId);
-  if (tErr && !/draft_trash|does not exist|could not find/i.test(tErr.message)) return 0; // unsure -> delete nothing
+  if (tErr && !/draft_trash|does not exist|could not find/i.test(tErr.message)) return null;
   for (const t of (trash ?? []) as Array<{ photo_urls?: unknown }>) {
     for (const u of Array.isArray(t.photo_urls) ? (t.photo_urls as string[]) : []) {
       const p = storagePath(u, deps.supabaseUrl);
       if (p) used.add(p);
     }
   }
+  return used;
+}
+
+export interface OrphanScan {
+  /** Paths to delete ("userId/x.jpg" public, "private:userId/x.jpg" private). */
+  paths: string[];
+  bytes: number;
+  /** Why nothing could be scanned, if so. */
+  error?: string;
+}
+
+/**
+ * Orphans in BOTH buckets (Phase 1 fix: the private bucket was never swept),
+ * in the seller's own folder: files no draft, queued job or recycle-bin
+ * entry uses, older than ORPHAN_MIN_AGE_DAYS.
+ */
+export async function findOrphans(deps: CleanupDeps, userId: string, drafts: CleanupDraft[], now: number): Promise<OrphanScan> {
+  const used = await pathsInUse(deps, userId, drafts);
+  if (!used) return { paths: [], bytes: 0, error: "couldn't check which photos are in use" };
   const cutoff = now - ORPHAN_MIN_AGE_DAYS * 86400_000;
-  const orphans: string[] = [];
-  for (let offset = 0; offset < 20_000; offset += 1000) {
-    const { data, error } = await deps.db.storage.from(BUCKET).list(userId, { limit: 1000, offset, sortBy: { column: "created_at", order: "asc" } });
-    if (error) return 0;
+  const out: OrphanScan = { paths: [], bytes: 0 };
+  for (const [bucket, mark] of [[BUCKET, ""], [PRIVATE_BUCKET, PRIVATE_PATH_MARK]] as const) {
+    for (let offset = 0; offset < 20_000; offset += 1000) {
+      const { data, error } = await deps.db.storage.from(bucket).list(userId, { limit: 1000, offset, sortBy: { column: "created_at", order: "asc" } });
+      if (error) {
+        // A missing private bucket just means private photos were never used.
+        if (bucket === PRIVATE_BUCKET) break;
+        return { paths: [], bytes: 0, error: `listing ${bucket}: ${error.message}` };
+      }
+      for (const f of data ?? []) {
+        const path = `${mark}${userId}/${f.name}`;
+        const created = Date.parse(f.created_at ?? "");
+        if (f.id && Number.isFinite(created) && created <= cutoff && !used.has(path)) {
+          out.paths.push(path);
+          out.bytes += Number((f.metadata as { size?: number } | null)?.size ?? 0) || 0;
+        }
+      }
+      if (!data || data.length < 1000) break;
+    }
+  }
+  return out;
+}
+
+async function removeOrphans(deps: CleanupDeps, userId: string, drafts: CleanupDraft[], now: number): Promise<number> {
+  const scan = await findOrphans(deps, userId, drafts, now);
+  let removed = 0;
+  for (let i = 0; i < scan.paths.length; i += 100) removed += await removeStoragePaths(deps.db, scan.paths.slice(i, i + 100));
+  return removed;
+}
+
+// ------------------------------------------------------------------------
+// Legacy folder (Phase 1 fix). Before per-seller folders, uploads went to
+// photos/public/ (470 files, 214 MB live on Nov 26, 2026 -- 73% of storage
+// and the main reason "650 photos for 8 drafts"). No sweep ever looked
+// there. These belong to the single seller who used the app back then, so
+// they're only swept when PHOTO_LEGACY_OWNER_ID is set to that seller's
+// user id (unset = never touched), and only files that NO draft, recycle
+// bin entry or queued job of ANY seller uses, older than 30 days.
+export const LEGACY_FOLDER = "public";
+export const LEGACY_MIN_AGE_DAYS = 30;
+
+export function legacyOwner(env: Record<string, string | undefined> = process.env): string | null {
+  const v = env.PHOTO_LEGACY_OWNER_ID?.trim();
+  return v && /^[0-9a-f-]{36}$/i.test(v) ? v : null;
+}
+
+/** Every legacy path still referenced anywhere (all sellers); null = unsure. */
+async function legacyPathsInUse(db: SupabaseClient, supabaseUrl: string): Promise<Set<string> | null> {
+  const used = new Set<string>();
+  const add = (u: unknown) => {
+    if (typeof u !== "string") return;
+    const p = storagePath(u, supabaseUrl);
+    if (p && p.startsWith(`${LEGACY_FOLDER}/`)) used.add(p);
+  };
+  for (let from = 0; from < 200_000; from += 1000) {
+    const { data, error } = await db.from("drafts").select("photo_urls, thumbnail_url").range(from, from + 999);
+    if (error) return null;
+    for (const d of data ?? []) { (d.photo_urls as string[] | null)?.forEach(add); add(d.thumbnail_url); }
+    if (!data || data.length < 1000) break;
+  }
+  const { data: trash, error: tErr } = await db.from("draft_trash").select("photo_urls");
+  if (tErr && !/draft_trash|does not exist|could not find/i.test(tErr.message)) return null;
+  for (const t of (trash ?? []) as Array<{ photo_urls?: unknown }>) if (Array.isArray(t.photo_urls)) t.photo_urls.forEach(add);
+  const { data: jobs, error: jErr } = await db.from("listing_jobs").select("input").in("status", ["queued", "running", "dead"]);
+  if (jErr && !/listing_jobs|does not exist|could not find/i.test(jErr.message)) return null;
+  for (const j of jobs ?? []) ((j.input as { photoUrls?: unknown[] })?.photoUrls ?? []).forEach(add);
+  return used;
+}
+
+export async function findLegacyOrphans(deps: CleanupDeps, now: number): Promise<OrphanScan> {
+  const used = await legacyPathsInUse(deps.db, deps.supabaseUrl);
+  if (!used) return { paths: [], bytes: 0, error: "couldn't check which old photos are in use" };
+  const cutoff = now - LEGACY_MIN_AGE_DAYS * 86400_000;
+  const out: OrphanScan = { paths: [], bytes: 0 };
+  for (let offset = 0; offset < 50_000; offset += 1000) {
+    const { data, error } = await deps.db.storage.from(BUCKET).list(LEGACY_FOLDER, { limit: 1000, offset, sortBy: { column: "created_at", order: "asc" } });
+    if (error) return { paths: [], bytes: 0, error: `listing old photos: ${error.message}` };
     for (const f of data ?? []) {
-      const path = `${userId}/${f.name}`;
+      const path = `${LEGACY_FOLDER}/${f.name}`;
       const created = Date.parse(f.created_at ?? "");
-      if (f.id && Number.isFinite(created) && created <= cutoff && !used.has(path)) orphans.push(path);
+      if (f.id && Number.isFinite(created) && created <= cutoff && !used.has(path)) {
+        out.paths.push(path);
+        out.bytes += Number((f.metadata as { size?: number } | null)?.size ?? 0) || 0;
+      }
     }
     if (!data || data.length < 1000) break;
   }
-  let removed = 0;
-  for (let i = 0; i < orphans.length; i += 100) {
-    const { error } = await deps.db.storage.from(BUCKET).remove(orphans.slice(i, i + 100));
-    if (!error) removed += Math.min(100, orphans.length - i);
+  return out;
+}
+
+export interface StoragePreview {
+  orphans: { files: number; mb: number; error?: string };
+  legacy: { files: number; mb: number; enabled: boolean; error?: string } | null;
+}
+
+const mb = (b: number) => Math.round((b / 1048576) * 10) / 10;
+
+/** What a cleanup would delete right now. Read-only. */
+export async function previewCleanup(deps: CleanupDeps, userId: string): Promise<StoragePreview> {
+  const now = (deps.now ?? Date.now)();
+  const { data: rows } = await deps.db.from("drafts").select("id, ebay_listing_id, ebay_listed_at, photo_urls, thumbnail_url").eq("user_id", userId).limit(10_000);
+  const o = await findOrphans(deps, userId, (rows ?? []) as CleanupDraft[], now);
+  const isOwner = legacyOwner() === userId;
+  let legacy: StoragePreview["legacy"] = null;
+  if (isOwner) {
+    const l = await findLegacyOrphans(deps, now);
+    legacy = { files: l.paths.length, mb: mb(l.bytes), enabled: true, error: l.error };
   }
-  return removed;
+  return { orphans: { files: o.paths.length, mb: mb(o.bytes), error: o.error }, legacy };
 }
 
 /** Picture URLs of a live listing, from eBay GetItem (eBay-hosted copies). */
