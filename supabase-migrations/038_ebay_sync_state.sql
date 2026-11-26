@@ -1,4 +1,4 @@
--- 036 (NOT APPLIED -- needs Sel's approval). Background eBay sync state.
+-- 038 (NOT APPLIED -- needs Sel's approval). Background eBay sync state.
 --   app_settings.ebay_sync_state  { lastRunAt, lastChangeAt, lastError,
 --                                   unlinked: [{listingId, title, seenAt}] }
 -- Lets the "Synced with eBay X min ago" indicator and the "live on eBay

@@ -120,7 +120,7 @@ export function parseState(raw: unknown): SyncState {
   };
 }
 
-/** Saved state (migration 036). null = column missing; the client keeps its own copy then. */
+/** Saved state (migration 038). null = column missing; the client keeps its own copy then. */
 export async function readSyncState(db: SupabaseClient, userId: string): Promise<{ state: SyncState; persisted: boolean; eventsSyncedAt: string | null }> {
   const full = await db.from("app_settings").select("ebay_sync_state, ebay_events_synced_at").eq("user_id", userId).maybeSingle();
   if (!full.error) return { state: parseState(full.data?.ebay_sync_state), persisted: true, eventsSyncedAt: (full.data?.ebay_events_synced_at as string | null) ?? null };
@@ -137,7 +137,7 @@ export interface PassResult {
 
 /**
  * One sync pass. Must run inside an eBay request context (ebayContext.run).
- * `clientState` lets a seller without migration 036 keep the alert list on
+ * `clientState` lets a seller without migration 038 keep the alert list on
  * their device; `force` skips the 2-minute guard (tests / manual refresh).
  */
 export async function runSyncPass(db: SupabaseClient, userId: string, opts: { now?: number; clientState?: SyncState; force?: boolean; editLimit?: number } = {}): Promise<PassResult> {

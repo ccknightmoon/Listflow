@@ -1,6 +1,6 @@
 // Recycle bin for drafts (Nov 2026). Server only.
 //
-// Deleting a draft now MOVES it to `draft_trash` (migration 035): the
+// Deleting a draft now MOVES it to `draft_trash` (migration 037): the
 // whole row is kept as JSON, the photos stay in storage, and the draft is
 // removed from `drafts`. Because the row really leaves `drafts`, every
 // list, count, cache and sync that reads `drafts` stops seeing it at once
@@ -10,7 +10,7 @@
 // - After TRASH_DAYS the daily cron purges it for good: the trash row AND
 //   the seller's own photos that nothing else still uses.
 // - "Delete now" in the bin purges immediately.
-// - Without migration 035 the old behaviour is kept (permanent delete).
+// - Without migration 037 the old behaviour is kept (permanent delete).
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { deleteDraftsCompletely, photoPathsToPurge, urlsInJson, type DeletableDraft, type DeleteResult } from "@/lib/draft-delete";
 import { draftUrls, removeStoragePaths } from "@/lib/photo-cleanup";
@@ -60,7 +60,7 @@ export function toTrashedItem(t: Pick<TrashRow, "id" | "row" | "deleted_at" | "p
 }
 
 export interface TrashResult {
-  /** "trash" = moved to the bin (undo possible); "permanent" = migration 035 missing, deleted for good. */
+  /** "trash" = moved to the bin (undo possible); "permanent" = migration 037 missing, deleted for good. */
   mode: "trash" | "permanent";
   trashed: string[];
   notFound: string[];
@@ -198,7 +198,7 @@ export async function purgeTrashNow(db: SupabaseClient, storageDb: SupabaseClien
 export async function purgeExpiredTrash(service: SupabaseClient, supabaseUrl: string, now = Date.now(), limit = 2000): Promise<{ sellers: number; purged: number; photosRemoved: number; skipped?: string; errors: number }> {
   const { data, error } = await service.from(TRASH_TABLE).select("id, user_id, photo_urls").lte("purge_after", new Date(now).toISOString()).limit(limit);
   if (error) {
-    if (isMissingTrashTable(error)) return { sellers: 0, purged: 0, photosRemoved: 0, skipped: "migration 035 not applied", errors: 0 };
+    if (isMissingTrashTable(error)) return { sellers: 0, purged: 0, photosRemoved: 0, skipped: "migration 037 not applied", errors: 0 };
     throw new Error(error.message);
   }
   const byUser = new Map<string, Array<Pick<TrashRow, "id" | "photo_urls">>>();

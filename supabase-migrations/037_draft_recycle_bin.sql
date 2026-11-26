@@ -1,4 +1,4 @@
--- 035 (NOT APPLIED -- needs Sel's approval). Recycle bin for drafts.
+-- 037 (NOT APPLIED -- needs Sel's approval). Recycle bin for drafts.
 --
 -- Deleting a draft moves the whole row here (as JSON) and removes it from
 -- public.drafts, so it disappears from every list, count and cache at

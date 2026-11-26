@@ -106,7 +106,7 @@ describe("runSyncPass", () => {
     expect(trading.calls).toBe(0);
   });
 
-  it("without migration 036 it uses the device's copy and doesn't write the column", async () => {
+  it("without migration 038 it uses the device's copy and doesn't write the column", async () => {
     trading.body = events();
     const f = fakeDb({ stateColumn: false });
     const r = await runSyncPass(f.db, "u1", { now: NOW, clientState: { lastRunAt: null, lastChangeAt: null, lastError: null, unlinked: [{ listingId: "100000009", title: "x", seenAt: "" }] } });

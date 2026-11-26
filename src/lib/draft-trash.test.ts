@@ -75,7 +75,7 @@ describe("trashDrafts (delete = move to the bin)", () => {
     expect(m.tables.draft_trash).toHaveLength(0);
   });
 
-  it("without migration 035 it falls back to the old permanent delete", async () => {
+  it("without migration 037 it falls back to the old permanent delete", async () => {
     const m = memDb({ drafts: [draft("d1")] }, { noTrashTable: true });
     const r = await trashDrafts(m.db, m.db, U, ["d1"], SB, NOW);
     expect(r.mode).toBe("permanent");
@@ -156,9 +156,9 @@ describe("purging", () => {
     expect(m.removedFiles.sort()).toEqual([`${OTHER}/c.jpg`, `${U}/a.jpg`]);
   });
 
-  it("the daily job is a no-op before migration 035", async () => {
+  it("the daily job is a no-op before migration 037", async () => {
     const m = memDb({}, { noTrashTable: true });
-    expect((await purgeExpiredTrash(m.db, SB, NOW)).skipped).toMatch(/035/);
+    expect((await purgeExpiredTrash(m.db, SB, NOW)).skipped).toMatch(/037/);
     expect((await listTrash(m.db, U)).available).toBe(false);
   });
 });

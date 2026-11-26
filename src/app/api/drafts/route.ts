@@ -172,7 +172,7 @@ export async function DELETE(req: NextRequest) {
   }
 
   // Recycle bin: the drafts leave every list now and are purged for good
-  // (row + photos) after 7 days unless restored. Without migration 035 this
+  // (row + photos) after 7 days unless restored. Without migration 037 this
   // is the old permanent delete. Answers with the ids really removed.
   try {
     const r = await trashDrafts(auth.supabase, process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceDb() : auth.supabase, auth.user.id, ids, process.env.NEXT_PUBLIC_SUPABASE_URL!);

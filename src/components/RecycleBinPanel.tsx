@@ -14,7 +14,7 @@ export function daysLeft(purgeAfter: string, now = Date.now()): number {
 }
 
 // "Recently deleted" at the bottom of Inventory → Draft. Hidden when the
-// bin is empty or migration 035 isn't applied (deletes are permanent then).
+// bin is empty or migration 037 isn't applied (deletes are permanent then).
 export default function RecycleBinPanel({ refreshKey, onRestored, onAvailability }: { refreshKey: number; onRestored: (ids: string[]) => void; onAvailability?: (available: boolean) => void }) {
   const [items, setItems] = useState<Item[]>([]);
   const [open, setOpen] = useState(false);

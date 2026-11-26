@@ -177,7 +177,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
 
   try {
-    // To the recycle bin (7 days, undo), or permanent without migration 035.
+    // To the recycle bin (7 days, undo), or permanent without migration 037.
     const r = await trashDrafts(auth.supabase, process.env.SUPABASE_SERVICE_ROLE_KEY ? serviceDb() : auth.supabase, auth.user.id, [id], process.env.NEXT_PUBLIC_SUPABASE_URL!);
     // Already gone counts as success for the caller (idempotent), but says so.
     return NextResponse.json({ deleted: true, alreadyGone: r.trashed.length === 0, mode: r.mode, purgeAfter: r.purgeAfter }, { headers: { "Cache-Control": "no-store" } });

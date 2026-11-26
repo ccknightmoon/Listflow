@@ -96,7 +96,7 @@ function resolveShippingCost(id: string, draft: Draft | undefined): number | und
 
 export default function DraftsView() {
   const embed = useInventoryEmbed();
-  // Recycle bin (migration 035): deletes can be undone for 7 days.
+  // Recycle bin (migration 037): deletes can be undone for 7 days.
   const [binAvailable, setBinAvailable] = useState(false);
   const [binKey, setBinKey] = useState(0);
   const [undo, setUndo] = useState<{ ids: string[]; message: string } | null>(null);

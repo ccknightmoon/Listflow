@@ -4,7 +4,7 @@ import { uuidList } from "@/lib/input-validation";
 import { listTrash, purgeTrashNow, restoreDrafts, TRASH_DAYS } from "@/lib/draft-trash";
 import { serviceDb } from "@/lib/jobs/supabase-store";
 
-// Recycle bin for drafts (migration 035).
+// Recycle bin for drafts (migration 037).
 //   GET              what's in the bin (newest first)
 //   POST {ids}       restore (Undo)
 //   DELETE {ids}     delete for good now (row + unused photos)
