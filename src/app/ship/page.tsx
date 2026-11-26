@@ -4,7 +4,7 @@ import { ListSkeleton } from "@/components/ui";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, ExternalLink, ListChecks, Loader2, Package, Printer, RefreshCw, Shirt } from "lucide-react";
-import { groupByBin, sortPickList } from "@/lib/bins";
+import { groupPickList, sortPickList, STORAGE_DEFAULTS, UNASSIGNED, type StorageSettings } from "@/lib/storage-locations";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
@@ -29,8 +29,8 @@ interface ShipItem {
     zip: string;
   } | null;
   thumbnail: string | null;
-  /** From the item's draft (Phase 1 pick list); null when unknown. */
-  bin?: string | null;
+  /** From the item's draft + Settings → Storage & pick list; null = none. */
+  location?: string | null;
   sku?: string | null;
 }
 
@@ -54,8 +54,12 @@ export default function ShipPage() {
   const [checking, setChecking] = useState(true);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
-  // Pick list: sorted by bin, then SKU, with a printable view.
+  // Pick list: by storage location then SKU (or SKU only when storage is
+  // off -- the default), with a printable view.
   const [pickMode, setPickMode] = useState(false);
+  const [storage, setStorage] = useState<Pick<StorageSettings, "enabled" | "mode">>(STORAGE_DEFAULTS);
+  const storageFull: StorageSettings = { ...STORAGE_DEFAULTS, ...storage };
+  const byLocation = storage.enabled && storage.mode !== "sku_only";
 
   useEffect(() => { load(); }, []);
 
@@ -66,7 +70,8 @@ export default function ShipPage() {
     setNeedsConnect(false);
     setNeedsReconnect(false);
     try {
-      const data = await apiFetch<{ items?: ShipItem[]; error?: string; connect?: boolean; reconnect?: boolean }>("/api/ebay/ship");
+      const data = await apiFetch<{ items?: ShipItem[]; error?: string; connect?: boolean; reconnect?: boolean; storage?: Pick<StorageSettings, "enabled" | "mode"> }>("/api/ebay/ship");
+      if (data.storage) setStorage(data.storage);
       if (data.error) {
         setError(data.error);
         setNeedsConnect(!!data.connect);
@@ -144,7 +149,7 @@ export default function ShipPage() {
             aria-pressed={pickMode}
             className="btn text-xs py-1.5 px-2.5"
           >
-            <ListChecks className="w-3.5 h-3.5" /> {pickMode ? "Normal view" : "Pick list (by bin)"}
+            <ListChecks className="w-3.5 h-3.5" /> {pickMode ? "Normal view" : byLocation ? "Pick list (by location)" : "Pick list (by SKU)"}
           </button>
           {pickMode && (
             <button type="button" onClick={() => window.print()} className="btn text-xs py-1.5 px-2.5">
@@ -157,11 +162,13 @@ export default function ShipPage() {
       {!loading && pickMode && items.length > 0 && (
         <div className="card p-3 mb-4" data-testid="pick-list">
           <p className="text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
-            Walk the shelves in this order. Items without a bin are last — set one in the item&apos;s editor.
+            {byLocation
+              ? (storage.mode === "sku_boxes" ? "Grab them in this order: by box, then SKU. Items whose SKU isn't in a box are under Unassigned." : "Grab them in this order: by location, then SKU. Items without a location are last.")
+              : "Grab them in SKU order."}
           </p>
-          {groupByBin(items.map((it, i) => ({ ...it, key: `${it.listingId}-${it.transactionId}-${i}`, bin: it.bin ?? null, sku: it.sku ?? null }))).map((g) => (
-            <div key={g.bin ?? "none"} className="mb-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-tertiary)" }}>{g.bin ? `Bin ${g.bin}` : "No bin"}</p>
+          {groupPickList(items.map((it, i) => ({ ...it, key: `${it.listingId}-${it.transactionId}-${i}`, location: it.location ?? null, sku: it.sku ?? null, title: it.title ?? "" })), storageFull).map((g) => (
+            <div key={g.location ?? "all"} className="mb-2">
+              {byLocation && <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-tertiary)" }}>{g.location === UNASSIGNED ? (storage.mode === "sku_boxes" ? "Unassigned" : "No location") : g.location}</p>}
               <ul className="text-sm">
                 {g.rows.map((r) => (
                   <li key={r.key} className="flex items-center gap-2 py-1 border-b border-[var(--glass-line)] last:border-0">
@@ -207,7 +214,7 @@ export default function ShipPage() {
 
       {!loading && items.length > 0 && (
         <div className="flex flex-col gap-2 lg:grid lg:grid-cols-2 xl:grid-cols-3 lg:gap-3 lg:items-start">
-          {(pickMode ? sortPickList(items.map((it, i) => ({ ...it, key: String(i), bin: it.bin ?? null, sku: it.sku ?? null }))) : items).map((item, i) => {
+          {(pickMode ? sortPickList(items.map((it, i) => ({ ...it, key: String(i), location: it.location ?? null, sku: it.sku ?? null, title: it.title ?? "" })), storageFull) : items).map((item, i) => {
             const days = daysSince(item.paidAt);
             const ebayOrderUrl = `https://www.ebay.com/sh/ord/details?orderid=${item.listingId}-${item.transactionId}`;
             const isUrgent = days >= 3;
@@ -231,10 +238,14 @@ export default function ShipPage() {
 
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{item.title || "Unknown item"}</p>
-                  {(item.bin || item.sku) && (
-                    <p className="text-[11px] mt-0.5 flex gap-2" style={{ color: "var(--text-secondary)" }}>
-                      {item.bin && <span className="font-semibold px-1.5 rounded" style={{ background: "var(--accent-tint)", color: "var(--accent-soft)" }}>Bin {item.bin}</span>}
-                      {item.sku && <span className="font-mono">{item.sku}</span>}
+                  {(item.location || item.sku) && (
+                    <p className="text-[11px] mt-0.5 flex gap-2 flex-wrap" style={{ color: "var(--text-secondary)" }} data-testid="ship-location">
+                      {item.sku && <span className="font-mono">SKU {item.sku}</span>}
+                      {item.location && (
+                        <span className="font-semibold px-1.5 rounded" style={{ background: "var(--accent-tint)", color: "var(--accent-soft)" }}>
+                          {item.sku ? "→ " : ""}{item.location}
+                        </span>
+                      )}
                     </p>
                   )}
 

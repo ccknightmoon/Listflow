@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { uuidList } from "@/lib/input-validation";
-import { normalizeBin } from "@/lib/bins";
+import { MAX_LOCATION_LENGTH, normalizeLocation } from "@/lib/storage-locations";
 import { isMissingRelation } from "@/lib/db-errors";
 
 export const runtime = "nodejs";
@@ -20,8 +20,8 @@ export async function POST(req: Request) {
   if (!ids) return NextResponse.json({ error: "ids must be 1–500 item ids." }, { status: 400 });
   const patch: Record<string, unknown> = {};
   if (body.binLocation !== undefined) {
-    const bin = normalizeBin(body.binLocation);
-    if (bin === undefined) return NextResponse.json({ error: "Bin must be up to 24 characters (e.g. B3)." }, { status: 400 });
+    const bin = normalizeLocation(body.binLocation);
+    if (bin === undefined) return NextResponse.json({ error: `Storage location must be up to ${MAX_LOCATION_LENGTH} characters (e.g. RACK B).` }, { status: 400 });
     patch.bin_location = bin;
   }
   if (body.autoOfferOptIn !== undefined) {

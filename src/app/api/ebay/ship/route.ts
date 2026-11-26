@@ -4,6 +4,7 @@ import { requireUser } from "@/lib/auth";
 import { requireEbayConnection } from "@/lib/ebay-connection";
 import { ebayContext } from "@/lib/ebay-request-context";
 import { fetchUnshippedOrders, type UnshippedOrder } from "@/lib/ebay-ship-orders";
+import { locationFor, storageFromRow, STORAGE_DEFAULTS } from "@/lib/storage-locations";
 
 export const runtime = "nodejs";
 // Always ask eBay: an order must drop off the moment it ships.
@@ -141,10 +142,14 @@ export async function GET(req: Request) {
     }
   }
 
-  // Pick list (Phase 1): bin + SKU from the item's draft. Its own query so a
-  // database without migration 041 (no bin_location column) still works.
-  const picked: (typeof items[number] & { bin: string | null; sku: string | null; draftId: string | null })[] =
-    items.map((i) => ({ ...i, bin: null, sku: null, draftId: null }));
+  // Pick list (Phase 1): SKU + storage location from the item's draft and
+  // the seller's "Storage & pick list" setting (OFF by default -> no
+  // location, sorted by SKU). Own queries so a database without migration
+  // 041 (no bin_location / storage_settings) still works.
+  const { data: st, error: stErr } = await supabase.from("app_settings").select("storage_settings").maybeSingle();
+  const storage = stErr ? STORAGE_DEFAULTS : storageFromRow((st as { storage_settings?: unknown } | null)?.storage_settings);
+  const picked: (typeof items[number] & { location: string | null; sku: string | null; draftId: string | null })[] =
+    items.map((i) => ({ ...i, location: null, sku: null, draftId: null }));
   if (includeThumbnails && picked.length > 0) {
     const ids = [...new Set(picked.map((i) => i.listingId).filter(Boolean))];
     let rows: Array<Record<string, unknown>> | null = null;
@@ -157,14 +162,15 @@ export async function GET(req: Request) {
     const byListing = new Map((rows ?? []).map((r) => [String(r.ebay_listing_id), r]));
     for (const it of picked) {
       const r = byListing.get(it.listingId);
-      if (!r) continue;
-      it.draftId = (r.id as string) ?? null;
-      it.sku = (r.custom_sku as string | null) ?? null;
-      it.bin = (r.bin_location as string | null | undefined) ?? null;
+      if (r) {
+        it.draftId = (r.id as string) ?? null;
+        it.sku = (r.custom_sku as string | null) ?? null;
+      }
+      it.location = locationFor({ sku: it.sku, location: (r?.bin_location as string | null | undefined) ?? null }, storage);
     }
   }
 
-  return NextResponse.json({ items: picked, count: picked.length }, { headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ items: picked, count: picked.length, storage: { enabled: storage.enabled, mode: storage.mode } }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("[api/ebay/ship] failed:", err);
     return NextResponse.json({ error: (err as Error).message, items: [], count: 0 }, { status: 500 });
