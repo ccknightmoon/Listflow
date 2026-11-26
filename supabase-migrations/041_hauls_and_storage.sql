@@ -1,12 +1,18 @@
--- 041 (NOT APPLIED -- needs Sel's approval). Hauls (sourcing trips) + bin locations.
+-- 041 (NOT APPLIED -- needs Sel's approval). Hauls (sourcing trips) +
+-- storage locations for the pick list.
 --
 -- * hauls: one row per sourcing trip ("Rag house X, Nov 26, $120").
 -- * drafts.haul_id: which haul an item came from (null = none).
--- * drafts.bin_location: shelf/bin label like "B3" for the pick list.
+-- * drafts.bin_location: free-text storage location ("RACK B", "BIN 3"),
+--   used only when the seller picks "Bins / racks" in Settings.
+-- * app_settings.storage_settings: Settings → "Storage & pick list"
+--   ({enabled, mode: sku_boxes | bins | sku_only, boxes: [{name, from, to}]}).
+--   NULL = OFF (the default): no location anywhere, To-ship sorts by SKU.
 -- Additive only. The app works without this file (the Hauls page says
--- "database update pending"; bins aren't shown).
+-- "database update pending"; storage stays off).
 --
 -- Rollback:
+--   alter table public.app_settings drop column if exists storage_settings;
 --   alter table public.drafts drop column if exists bin_location;
 --   alter table public.drafts drop column if exists haul_id;
 --   drop table if exists public.hauls;
@@ -47,3 +53,5 @@ alter table public.drafts add column if not exists haul_id uuid references publi
 alter table public.drafts add column if not exists bin_location text
   check (bin_location is null or char_length(bin_location) <= 24);
 create index if not exists drafts_haul_idx on public.drafts (haul_id) where haul_id is not null;
+
+alter table public.app_settings add column if not exists storage_settings jsonb;
