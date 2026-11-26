@@ -40,7 +40,7 @@ export default function MembershipPage() {
     setError(null);
     try {
       const r = await apiFetch<{ url?: string; error?: string }>(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}) });
-      if (r.url) window.location.href = r.url;
+      if (r.url) window.location.assign(r.url);
       else throw new Error(r.error ?? "Stripe didn't answer.");
     } catch (e) {
       setError((e as Error).message);
