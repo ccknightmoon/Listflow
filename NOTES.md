@@ -23,6 +23,9 @@ Base: `docs/roadmap` (= main `07232dc` + ROADMAP). Built in a sandbox clone, fet
 ### Env vars (all optional; unset = feature off)
 `AUTO_OFFERS_ENABLED=1` (real sends), `AI_ESCALATION_MODEL=gpt-4o`, `PHOTO_LEGACY_OWNER_ID=<Sel's user id>`.
 
+### Migration review before applying (Nov 26)
+Checked live (read-only, Postgres 17.6): none of the new tables/columns exist yet; only 025's `drafts_user_listing_idx` does (040 skips it). Fixes: 041 `drafts.haul_id` has no foreign key (so a recycle-bin restore can't fail on a deleted haul; deleting a haul unlinks its items first); 046 push subscriptions are unique per seller+device.
+
 ### Self-review (storage rework, Nov 26)
 Off by default checked by tests (defaults, missing column, junk settings all = off and no location; editor field hidden unless Bins/racks; render test of the Settings card). Range lookup (edges inclusive), overlaps, duplicate names, generate helper, numeric SKU sort and per-mode pick-list order are unit-tested. Ship route reads the setting with its own query, falls back to off. 986 tests on phase-1, `tsc`, `eslint` (0 errors, 16 warnings = main), `next build` all clean.
 
