@@ -1,5 +1,30 @@
 # Listflow — change notes
 
+## Nov 26, 2026 — `feat/phase-1` (roadmap Phase 1 + competitor study)
+
+Base: `docs/roadmap` (= main `07232dc` + ROADMAP). Built in a sandbox clone, fetched back. **Nothing was applied to the live database, nothing was sent to eBay** (all eBay calls in this branch that write — offers — are behind switches that are off).
+
+### What's done
+1. **Competitor gaps** section in ROADMAP.md (Vendoo, List Perfectly, Crosslist, PrimeLister, Flyp, Closo, eBay Magical Listing, eBay's own automated offers, 2026 entrants) + priority changes.
+2. **Hauls + profit** (Business screen, new nav item): log a trip, add items (grouped by day), split cost evenly or by price (to the cent; keeps hand-typed costs unless "Replace all"), profit per haul/item, sell-through, return. `src/lib/hauls.ts`, `/api/hauls`, migration 041.
+3. **Bins + pick list**: Bin/shelf field in the draft editor (saved separately via `/api/drafts/extras`), To-ship shows bin + SKU, "Pick list (by bin)" view with Print. `src/lib/bins.ts`, migration 041.
+4. **Automatic offers to watchers** — OFF by default, three locks: env `AUTO_OFFERS_ENABLED=1`, Settings → Automation switch, item opt-in (or "all live items"). Never below floor, cost or $0.99 (smaller % or skip); items with no floor and no cost are skipped; min days listed + repeat window; 50/run; logged in `auto_offer_log`. Runs from the daily `snapshot-listings` cron. "Preview what would be sent" in Settings is read-only. Warns about eBay's own automated offers. `src/lib/auto-offers*.ts`, migration 042.
+5. **AI**: reads up to 24 photos/item (was 16); batch upload waits longer instead of dropping still-uploading tag shots. **Learn my fixes** (OFF by default, migration 043): repeated corrections (2+) on brand/color/material/style/pattern/type/neckline/sleeve/fit are applied to new results (fields, specifics, brand in title); list/forget in Settings. **Hard-item escalation**: env `AI_ESCALATION_MODEL` (e.g. `gpt-4o`; unset = off) re-reads items whose brand/size weren't read from a tag or that look vintage.
+6. **Photo storage**: diagnosed live — 470 files / 214 MB in the old shared `photos/public/` folder (Jun–Aug, before per-seller folders) that no sweep looked at; 180 unused files / 78 MB in the seller folder; 18 unused in `photos-private` (never swept). Fix: orphan sweep covers both buckets; old folder only when env `PHOTO_LEGACY_OWNER_ID` = Sel's user id, only unused by any seller and 30+ days old; Settings "Check storage" (preview) + "Clean up now"; every run logged. (Why the 180 weren't removed by the existing sweep couldn't be proven — Vercel Hobby keeps 1 h of logs; most likely the sweep hadn't run since "unused photos" was switched on. The new preview shows it.)
+7. **Migration 025**: live check shows its index exists but `sale_costs` doesn't (half-ran; its `create policy` lines aren't re-runnable). **040** replaces it (idempotent).
+8. **eBay permission upgrade**: refresh asks only for granted scopes (`granted_scopes`, migration 044; unknown = original 5) and falls back to the original 5 if refused. Settings shows "Reconnect eBay to unlock" (`/api/ebay/connect?scopes=extended`: + sell.marketing, sell.analytics.readonly, sell.fulfillment). Cancelling on eBay changes nothing.
+
+### Migrations (NOT applied) — 040, 041, 042, 043, 044. All idempotent (verified by running each twice on PGlite), additive, rollback notes inside.
+
+### Env vars (all optional; unset = feature off)
+`AUTO_OFFERS_ENABLED=1` (real sends), `AI_ESCALATION_MODEL=gpt-4o`, `PHOTO_LEGACY_OWNER_ID=<Sel's user id>`.
+
+### Self-review (Phase 1)
+Re-read every diff against the rules: flags default OFF (offers: env + setting + opt-in; learn fixes; escalation; legacy sweep; extended scopes opt-in) ✓ · floor/cost enforced in the planner and re-checked by tests (floor, cost, 5% minimum, no-floor skip, rounding down) ✓ · no eBay writes during development; preview is read-only ✓ · migrations additive + idempotent ✓ · today's flows: draft save only gained a read-before-save for learnable fields and a post-response record (errors swallowed); new columns are saved through a separate endpoint so a missing migration can't break saving; ship route's bin lookup falls back without the column; callback falls back without `granted_scopes` ✓. Found + fixed during review: nav test expected the old link list; offer price now rounds DOWN for the floor check; haul split keeps hand-typed costs and splits only the remainder. Results: **974 tests green (was 913)**, `tsc` clean, `eslint` 0 errors (16 warnings, same as main), `next build` clean (sandbox build stubs Google Fonts in a throwaway copy, not committed).
+
+### How to resume
+Branch `feat/phase-2` starts from `feat/phase-1`. Work in a clone (`git clone ~/Downloads/listflow`), `npm ci`, run `npx vitest run`, `npx tsc --noEmit`, `npx eslint .`, build.
+
 ## Nov 25, 2026 — `feat/upgrade-v2b` (upgrade v2, rebuilt on today's fixes)
 
 Base: `fix/settings-intro-layout` (46093a9 — newest; contains origin/main 8fb4acd, which GitHub confirmed is main's tip). The 5 commits from `feat/upgrade-v2` cherry-picked with **no conflicts**; today's price/floor fields, size mapping, store-category reset, unlock-after-error, store intro and Drafts integrity are untouched (their tests all pass). Built in a sandbox clone and fetched back (the mounted .git can't delete lock files; stale locks were moved to `.git/junk-to-delete/` — safe to `rm -rf`).
