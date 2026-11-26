@@ -141,7 +141,30 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ items, count: items.length }, { headers: { "Cache-Control": "no-store" } });
+  // Pick list (Phase 1): bin + SKU from the item's draft. Its own query so a
+  // database without migration 041 (no bin_location column) still works.
+  const picked: (typeof items[number] & { bin: string | null; sku: string | null; draftId: string | null })[] =
+    items.map((i) => ({ ...i, bin: null, sku: null, draftId: null }));
+  if (includeThumbnails && picked.length > 0) {
+    const ids = [...new Set(picked.map((i) => i.listingId).filter(Boolean))];
+    let rows: Array<Record<string, unknown>> | null = null;
+    const withBin = await supabase.from("drafts").select("id, ebay_listing_id, custom_sku, bin_location").in("ebay_listing_id", ids);
+    if (!withBin.error) rows = withBin.data;
+    else {
+      const noBin = await supabase.from("drafts").select("id, ebay_listing_id, custom_sku").in("ebay_listing_id", ids);
+      rows = noBin.error ? null : noBin.data;
+    }
+    const byListing = new Map((rows ?? []).map((r) => [String(r.ebay_listing_id), r]));
+    for (const it of picked) {
+      const r = byListing.get(it.listingId);
+      if (!r) continue;
+      it.draftId = (r.id as string) ?? null;
+      it.sku = (r.custom_sku as string | null) ?? null;
+      it.bin = (r.bin_location as string | null | undefined) ?? null;
+    }
+  }
+
+  return NextResponse.json({ items: picked, count: picked.length }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
     console.error("[api/ebay/ship] failed:", err);
     return NextResponse.json({ error: (err as Error).message, items: [], count: 0 }, { status: 500 });

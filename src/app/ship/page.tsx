@@ -3,7 +3,8 @@
 import { ListSkeleton } from "@/components/ui";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Loader2, Package, RefreshCw, Shirt } from "lucide-react";
+import { ArrowLeft, ExternalLink, ListChecks, Loader2, Package, Printer, RefreshCw, Shirt } from "lucide-react";
+import { groupByBin, sortPickList } from "@/lib/bins";
 import Toast from "@/components/Toast";
 import { apiFetch } from "@/lib/api";
 import { getPageCache, setPageCache } from "@/lib/page-cache";
@@ -28,6 +29,9 @@ interface ShipItem {
     zip: string;
   } | null;
   thumbnail: string | null;
+  /** From the item's draft (Phase 1 pick list); null when unknown. */
+  bin?: string | null;
+  sku?: string | null;
 }
 
 function daysSince(dateStr: string): number {
@@ -50,6 +54,8 @@ export default function ShipPage() {
   const [checking, setChecking] = useState(true);
   const [needsConnect, setNeedsConnect] = useState(false);
   const [needsReconnect, setNeedsReconnect] = useState(false);
+  // Pick list: sorted by bin, then SKU, with a printable view.
+  const [pickMode, setPickMode] = useState(false);
 
   useEffect(() => { load(); }, []);
 
@@ -130,6 +136,47 @@ export default function ShipPage() {
         </button>
       </div>
 
+      {!loading && items.length > 0 && (
+        <div className="flex items-center gap-2 mb-3 print:hidden">
+          <button
+            type="button"
+            onClick={() => setPickMode((v) => !v)}
+            aria-pressed={pickMode}
+            className="btn text-xs py-1.5 px-2.5"
+          >
+            <ListChecks className="w-3.5 h-3.5" /> {pickMode ? "Normal view" : "Pick list (by bin)"}
+          </button>
+          {pickMode && (
+            <button type="button" onClick={() => window.print()} className="btn text-xs py-1.5 px-2.5">
+              <Printer className="w-3.5 h-3.5" /> Print
+            </button>
+          )}
+        </div>
+      )}
+
+      {!loading && pickMode && items.length > 0 && (
+        <div className="card p-3 mb-4" data-testid="pick-list">
+          <p className="text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
+            Walk the shelves in this order. Items without a bin are last — set one in the item&apos;s editor.
+          </p>
+          {groupByBin(items.map((it, i) => ({ ...it, key: `${it.listingId}-${it.transactionId}-${i}`, bin: it.bin ?? null, sku: it.sku ?? null }))).map((g) => (
+            <div key={g.bin ?? "none"} className="mb-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--text-tertiary)" }}>{g.bin ? `Bin ${g.bin}` : "No bin"}</p>
+              <ul className="text-sm">
+                {g.rows.map((r) => (
+                  <li key={r.key} className="flex items-center gap-2 py-1 border-b border-[var(--glass-line)] last:border-0">
+                    <span aria-hidden>☐</span>
+                    <span className="flex-1 min-w-0 truncate">{r.title || "Unknown item"}{r.qty > 1 ? ` ×${r.qty}` : ""}</span>
+                    {r.sku && <span className="text-[11px] font-mono" style={{ color: "var(--text-secondary)" }}>{r.sku}</span>}
+                    <span className="text-[11px] print:hidden" style={{ color: "var(--text-tertiary)" }}>{r.address?.name ?? ""}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+
       <Toast
         type="error"
         message={
@@ -160,7 +207,7 @@ export default function ShipPage() {
 
       {!loading && items.length > 0 && (
         <div className="flex flex-col gap-2 lg:grid lg:grid-cols-2 xl:grid-cols-3 lg:gap-3 lg:items-start">
-          {items.map((item, i) => {
+          {(pickMode ? sortPickList(items.map((it, i) => ({ ...it, key: String(i), bin: it.bin ?? null, sku: it.sku ?? null }))) : items).map((item, i) => {
             const days = daysSince(item.paidAt);
             const ebayOrderUrl = `https://www.ebay.com/sh/ord/details?orderid=${item.listingId}-${item.transactionId}`;
             const isUrgent = days >= 3;
@@ -184,6 +231,12 @@ export default function ShipPage() {
 
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium truncate">{item.title || "Unknown item"}</p>
+                  {(item.bin || item.sku) && (
+                    <p className="text-[11px] mt-0.5 flex gap-2" style={{ color: "var(--text-secondary)" }}>
+                      {item.bin && <span className="font-semibold px-1.5 rounded" style={{ background: "var(--accent-tint)", color: "var(--accent-soft)" }}>Bin {item.bin}</span>}
+                      {item.sku && <span className="font-mono">{item.sku}</span>}
+                    </p>
+                  )}
 
                   {item.address && (
                     <p className="text-xs text-[var(--text-secondary)] mt-0.5 truncate lg:whitespace-normal">

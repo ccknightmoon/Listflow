@@ -3,6 +3,7 @@
 import { rememberDeleted } from "@/lib/deleted-drafts";
 import CurrencyInput from "@/components/CurrencyInput";
 import PriceFloorFields from "@/components/PriceFloorFields";
+import DraftExtrasFields from "@/components/DraftExtrasFields";
 import StoreIntroHint from "@/components/StoreIntroHint";
 import { checkPriceAndFloor, moneyText } from "@/lib/offer-floor";
 import Sheet from "@/components/Sheet";
@@ -183,6 +184,8 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
   const [floor, setFloor] = useState("");
   const priceCheck = checkPriceAndFloor(price, floor);
   const [cost, setCost] = useState(""); // cost_basis (migration 017, src/lib/profit.ts)
+  // Bin + auto-offer opt-in (migrations 041/042); undefined = column not there yet.
+  const [extras, setExtras] = useState<{ bin: string | null | undefined; optIn: boolean | undefined } | null>(null);
   const [customSku, setCustomSku] = useState("");
   const initialCustomSku = useRef<string | null>(null);
   const [itemType, setItemType] = useState("");
@@ -254,6 +257,10 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
         setPrice(d.suggested_price != null ? String(d.suggested_price) : "");
         setFloor(d.best_offer_floor != null && d.best_offer_floor !== "" ? moneyText(Number(d.best_offer_floor)) : "");
         setCost(d.cost_basis != null ? String(d.cost_basis) : "");
+        setExtras({
+          bin: "bin_location" in d ? ((d.bin_location as string | null) ?? null) : undefined,
+          optIn: "auto_offer_opt_in" in d ? !!d.auto_offer_opt_in : undefined,
+        });
         const loadedSku = str(d.custom_sku).trim();
         initialCustomSku.current = loadedSku || null;
         setCustomSku(loadedSku);
@@ -1435,6 +1442,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
             onChange={(e) => setCustomSku(e.target.value.replace(/[^a-zA-Z0-9]/g, "").slice(0, 50))}
           />
         </div>
+        {extras && <DraftExtrasFields key={id} draftId={id} bin={extras.bin} autoOfferOptIn={extras.optIn} />}
         {storeCategories.length > 0 && (
           <div className="relative">
             <label className="text-xs text-[var(--text-secondary)] mb-1 block">
