@@ -45,7 +45,7 @@ describe("desktop layout switch", () => {
     }
   });
   it("lists every requested destination, and marks sub-routes active", () => {
-    expect(SIDEBAR_LINKS.map((l) => l.label)).toEqual(["Home", "Inventory", "Sales", "Messages", "Offers", "Ship", "Settings"]);
+    expect(SIDEBAR_LINKS.map((l) => l.label)).toEqual(["Home", "Inventory", "Sales", "Messages", "Offers", "Ship", "Business", "Settings"]);
     expect(isSidebarLinkActive("/inventory", "/drafts/123")).toBe(true);
     expect(isSidebarLinkActive("/inventory", "/store/edit/123")).toBe(true);
     expect(isSidebarLinkActive("/inventory", "/dashboard")).toBe(false);
