@@ -2,7 +2,7 @@
 -- storage locations for the pick list.
 --
 -- * hauls: one row per sourcing trip ("Rag house X, Nov 26, $120").
--- * drafts.haul_id: which haul an item came from (null = none).
+-- * drafts.haul_id: which haul an item came from (null = none; plain uuid, no FK).
 -- * drafts.bin_location: free-text storage location ("RACK B", "BIN 3"),
 --   used only when the seller picks "Bins / racks" in Settings.
 -- * app_settings.storage_settings: Settings → "Storage & pick list"
@@ -49,7 +49,11 @@ create policy "hauls_delete_own" on public.hauls
 revoke all on public.hauls from anon;
 grant select, insert, update, delete on public.hauls to authenticated;
 
-alter table public.drafts add column if not exists haul_id uuid references public.hauls(id) on delete set null;
+-- No foreign key on purpose: a draft restored from the recycle bin (037)
+-- must never fail because its haul was deleted meanwhile. Deleting a haul
+-- clears the link in the app (DELETE /api/hauls/[id]); a stale id just
+-- matches no haul.
+alter table public.drafts add column if not exists haul_id uuid;
 alter table public.drafts add column if not exists bin_location text
   check (bin_location is null or char_length(bin_location) <= 24);
 create index if not exists drafts_haul_idx on public.drafts (haul_id) where haul_id is not null;

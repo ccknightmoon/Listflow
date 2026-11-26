@@ -91,7 +91,10 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!auth.user) return auth.unauthorized;
   const { id } = await params;
   if (!isUuid(id)) return NextResponse.json({ error: "Not found." }, { status: 404 });
-  // Items keep their cost; their haul link is cleared by the FK (on delete set null).
+  // Items keep their cost; their haul link is cleared first (no FK on
+  // drafts.haul_id, so recycle-bin restores can never fail on it).
+  const { error: uErr } = await auth.supabase.from("drafts").update({ haul_id: null }).eq("user_id", auth.user.id).eq("haul_id", id);
+  if (uErr) return NextResponse.json({ error: "Couldn't delete the haul." }, { status: 500 });
   const { error } = await auth.supabase.from("hauls").delete().eq("id", id).eq("user_id", auth.user.id);
   if (error) return NextResponse.json({ error: "Couldn't delete the haul." }, { status: 500 });
   return NextResponse.json({ ok: true });
