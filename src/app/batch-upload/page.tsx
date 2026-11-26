@@ -1341,6 +1341,12 @@ export default function BatchUploadPage() {
   async function groupImagesForRequest(group: number[]) {
     const idxs = group.slice(0, MAX_ANALYSIS_PHOTOS);
     const urls = await Promise.all(idxs.map((idx) => waitForPhotoUrl(idx)));
+    // Phase 1: more photos still uploading than fit inline? Give those
+    // uploads extra time instead of silently skipping tag shots at the end.
+    if (urls.filter((u) => !u).length > MAX_PHOTOS_PER_ITEM) {
+      const late = await Promise.all(idxs.map((idx, k) => (urls[k] ? Promise.resolve(urls[k]) : waitForPhotoUrl(idx, UPLOAD_WAIT_MS * 2))));
+      late.forEach((u, k) => { if (u) urls[k] = u; });
+    }
     const out: { url?: string; data?: string; mediaType?: string }[] = [];
     let inline = 0;
     idxs.forEach((idx, k) => {

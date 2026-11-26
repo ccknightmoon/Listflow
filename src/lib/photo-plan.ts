@@ -3,7 +3,10 @@
 // "high" detail (so tags and measurements are readable), the rest at "low"
 // (cheap — still useful for color, graphics, flaws, back views).
 
-export const MAX_ANALYSIS_PHOTOS = 16; // per item
+// Phase 1: every photo a draft can hold (24, same cap as drafts.photo_urls)
+// is read -- was 16, so tag/care-label shots at the end of a long item
+// could be missed. Extra photos go at "low" detail (cheap).
+export const MAX_ANALYSIS_PHOTOS = 24; // per item
 export const MAX_HIGH_DETAIL = 6;
 /** Up to this many photos, all go at full detail (no tag-finder call needed). */
 export const ALL_HIGH_UP_TO = 6;
