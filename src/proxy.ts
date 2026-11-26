@@ -3,6 +3,7 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { Ratelimit } from "@upstash/ratelimit";
 import { Redis } from "@upstash/redis";
+import { allowRequest, clientIp, rateLimitConfig, rateTier } from "@/lib/rate-limit-policy";
 
 // Routes that must stay reachable without this middleware's own session check:
 // - "/", "/login", "/privacy", "/terms" are public entry points.
@@ -60,47 +61,22 @@ const PENDING_DELETION_ALLOWED_PATHS = [
   "/api/account/reactivate",
 ];
 
-// Rate limiting, two tiers. Built defensively either way: if the two
-// Upstash env vars aren't set, rate limiting is silently skipped rather
-// than throwing on every single request through this middleware. A missing
-// secondary/optional feature should never be able to take down the whole
-// app — the same principle behind every other "warn, don't block" pattern
-// in this codebase (see storeCategoryWarning in api/ebay/list, for one).
-//
-// Tier 1 — AI_RATE_LIMITED_PATHS: every endpoint that triggers a real paid
-// OpenAI call, or fans out multiple eBay calls per invocation (originally
-// just analyze-item/analyze-batch; group-photos and ai/suggest-specifics
-// are the same OpenAI cost shape and were simply missed when this was
-// first added; pricing/suggest fans out several eBay Browse API calls per
-// item, so it gets the tighter limit too). 15 requests/min/IP, matching
-// the original limit.
-//
-// Tier 2 — everything else under /api (except the eBay OAuth callback,
-// which isn't reached through normal in-app navigation and doesn't need
-// gating here). A much looser 60 requests/min/IP catch-all: cheap
-// Supabase-backed CRUD and read endpoints don't need the AI tier's limit,
-// but "no limit at all" left the entire rest of the API surface open to
-// unbounded scripted requests. 60/min comfortably covers real usage
-// (a page loading a couple of parallel fetches, or the store/sales pages
-// refetching on a filter change) while still capping abuse.
-const AI_RATE_LIMITED_PATHS = [
-  "/api/analyze-item",
-  "/api/analyze-batch",
-  "/api/group-photos",
-  "/api/ai/suggest-specifics",
-  "/api/pricing/suggest",
-  "/api/pricing/comps",
-];
-// Accept either Upstash's own variable names or the KV_* names Vercel's
-// Upstash (Marketplace) integration injects when connected from Storage.
-const upstashUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
-const upstashToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-const redis = upstashUrl && upstashToken ? new Redis({ url: upstashUrl, token: upstashToken }) : null;
-const aiRatelimit = redis
-  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(15, "1 m"), analytics: true, prefix: "listflow:rl:ai" })
-  : null;
-const generalRatelimit = redis
-  ? new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(60, "1 m"), analytics: true, prefix: "listflow:rl:general" })
+// Rate limiting: OFF unless RATE_LIMIT_ENABLED=1 AND Upstash Redis env vars
+// are set. Four generous per-IP tiers (auth 30, AI 120, bulk/listing 300,
+// general 600 per minute); cron, queue worker, eBay/Stripe webhooks and the
+// photo proxy are never limited; a Redis error or slow answer lets the
+// request through (fail open), so it can't lock the owner out.
+// Nov 2026: tiers, limits and the on/off switch live in
+// src/lib/rate-limit-policy.ts (RATE_LIMIT_ENABLED=1 + Upstash vars).
+const rl = rateLimitConfig();
+const redis = rl.enabled ? new Redis({ url: rl.url!, token: rl.token! }) : null;
+const limiters = redis
+  ? {
+      auth: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(rl.limits.auth, "1 m"), analytics: false, prefix: "listflow:rl:auth" }),
+      ai: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(rl.limits.ai, "1 m"), analytics: false, prefix: "listflow:rl:ai2" }),
+      bulk: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(rl.limits.bulk, "1 m"), analytics: false, prefix: "listflow:rl:bulk" }),
+      general: new Ratelimit({ redis, limiter: Ratelimit.slidingWindow(rl.limits.general, "1 m"), analytics: false, prefix: "listflow:rl:general2" }),
+    }
   : null;
 
 const notPendingUntil = new Map<string, number>();
@@ -112,20 +88,15 @@ export async function proxy(request: NextRequest) {
   // is both public (reachable pre-sign-in) AND rate-limited, and the eBay
   // callback is the only /api path that should skip this entirely (it's a
   // one-time OAuth redirect, not a route a script would hammer).
-  if (redis && pathname.startsWith("/api") && !pathname.startsWith("/api/ebay/callback") && !pathname.startsWith("/api/ebay/account-deletion") && !pathname.startsWith("/api/photos/")) {
-    const isAiPath = AI_RATE_LIMITED_PATHS.some((p) => pathname.startsWith(p));
-    const limiter = isAiPath ? aiRatelimit : generalRatelimit;
-    if (limiter) {
-      const forwardedFor = request.headers.get("x-forwarded-for");
-      const ip =
-        forwardedFor?.split(",", 1)[0]?.trim() ??
-        request.headers.get("x-real-ip") ??
-        "127.0.0.1";
-      const { success } = await limiter.limit(ip);
-      if (!success) {
+  if (limiters) {
+    const tier = rateTier(pathname);
+    if (tier !== "skip") {
+      const limiter = limiters[tier];
+      const ok = await allowRequest(() => limiter.limit(`${tier}:${clientIp(request.headers)}`));
+      if (!ok) {
         return NextResponse.json(
-          { error: "Too many requests. Please wait a minute before trying again." },
-          { status: 429 }
+          { error: "Too many requests. Please wait a minute before trying again.", rateLimited: true },
+          { status: 429, headers: { "Retry-After": "60" } }
         );
       }
     }
