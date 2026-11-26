@@ -33,7 +33,9 @@ import {
 } from "lucide-react";
 import PhotoCleanupSettings from "@/components/PhotoCleanupSettings";
 import { setStoreIntroCache } from "@/components/StoreIntroHint";
-import { STORE_INTRO_DEFAULT, STORE_INTRO_MAX } from "@/lib/store-intro";
+import { STORE_INTRO_DEFAULT, STORE_INTRO_MAX, introTextToHtml } from "@/lib/store-intro";
+import Sheet from "@/components/Sheet";
+import { AutoGrowTextarea, EbayDescriptionMock, SaveRow } from "@/components/SettingsTextCard";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
 import { EBAY_STANDARD_FEE_PERCENT } from "@/lib/ebay-fees";
@@ -92,6 +94,7 @@ export default function SettingsPage() {
   const [introSaving, setIntroSaving] = useState(false);
   const [introSaved, setIntroSaved] = useState(false);
   const [introError, setIntroError] = useState<string | null>(null);
+  const [introPreviewOpen, setIntroPreviewOpen] = useState(false);
   const [measSeePhotos, setMeasSeePhotos] = useState(false);
   const [measSaving, setMeasSaving] = useState(false);
   const [measError, setMeasError] = useState<string | null>(null);
@@ -376,8 +379,8 @@ export default function SettingsPage() {
 
   async function handleIntroToggle(next: boolean) {
     if (introSaving || next === introEnabled) return;
-    // Turning it on also saves the text on screen (e.g. the prefilled default).
-    await saveIntro(next && introText !== savedIntroText ? { storeIntroEnabled: true, storeIntroText: introText } : { storeIntroEnabled: next });
+    // Flipping the switch also saves any unsaved text (e.g. the prefilled default).
+    await saveIntro(introText !== savedIntroText ? { storeIntroEnabled: next, storeIntroText: introText } : { storeIntroEnabled: next });
   }
 
   async function handleMeasToggle(next: boolean) {
@@ -766,96 +769,79 @@ export default function SettingsPage() {
 
       <SettingsSection
         delay="d4"
-        title="Store intro (added to every listing)"
-        description="Write your welcome message once. When this is On, it's put at the very top of every eBay listing's Description, exactly as typed (line breaks kept), when you list, check with eBay, or update a listing. It isn't shown in the description box on review cards, and it's never added twice."
+        title="Store intro"
+        description="Shown at the top of every eBay description."
         icon={MessageSquareText}
+        action={<Switch checked={introEnabled} disabled={introSaving} onChange={handleIntroToggle} label="Store intro on" />}
       >
-        <div className="flex items-center justify-between gap-3 mb-2">
-          <span className="text-xs text-[var(--text-secondary)]">Add to every listing</span>
-          <Switch checked={introEnabled} disabled={introSaving} onChange={handleIntroToggle} label="Store intro on" />
-        </div>
-        <textarea
-          className="input"
-          rows={10}
+        <AutoGrowTextarea
+          aria-label="Store intro text"
+          minRows={4}
           maxLength={STORE_INTRO_MAX}
           value={introText}
+          dimmed={!introEnabled}
           onChange={(e) => { setIntroText(e.target.value); setIntroSaved(false); }}
         />
-        <div className="flex items-center gap-3 mt-2">
-          <button
-            onClick={() => void saveIntro({ storeIntroText: introText })}
-            disabled={introSaving || introText === savedIntroText}
-            className="btn btn-primary text-xs px-3 py-1.5"
-          >
-            {introSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save"}
-          </button>
-          <span className="text-[11px] text-[var(--text-tertiary)]">{introText.length}/{STORE_INTRO_MAX}</span>
-          {introError && <p className="text-xs" style={{ color: "var(--danger)" }}>{introError}</p>}
-          {introSaved && (
-            <p className="text-xs flex items-center gap-1" style={{ color: "var(--success)" }}>
-              <Check className="w-3 h-3" /> Saved
-            </p>
-          )}
-        </div>
-        <div className="mt-3">
-          <p className="text-[11px] uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Where it lands on eBay</p>
-          <div className="rounded-lg p-3 text-xs leading-relaxed" style={{ background: "var(--glass)", opacity: introEnabled ? 1 : 0.55 }}>
-            <p className="text-[10px] font-semibold text-[var(--text-tertiary)] mb-1">DESCRIPTION</p>
-            {introText.trim() ? (
-              <p className="whitespace-pre-line line-clamp-4 text-[var(--text-primary)]">{introText.trim()}</p>
-            ) : (
-              <p className="text-[var(--text-tertiary)]">(empty)</p>
+        <SaveRow
+          dirty={introText !== savedIntroText}
+          saving={introSaving}
+          saved={introSaved}
+          error={introError}
+          onSave={() => void saveIntro({ storeIntroText: introText })}
+          length={introText.length}
+          max={STORE_INTRO_MAX}
+        />
+        <EbayDescriptionMock highlight="intro" dimmed={!introEnabled} onPreview={introText.trim() ? () => setIntroPreviewOpen(true) : undefined} />
+        <Sheet open={introPreviewOpen} onClose={() => setIntroPreviewOpen(false)} title="Description preview">
+          <p className="text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
+            {introEnabled ? "How the top of each listing's description reads on eBay." : "Store intro is Off — listings won't include it."}
+          </p>
+          <div className="rounded-xl p-3 text-[15px] leading-normal" style={{ background: "#fff", color: "#111", fontFamily: "Arial, Helvetica, sans-serif" }}>
+            {/* introTextToHtml escapes the text: same markup eBay receives. */}
+            <div style={{ background: "#f6f6f6", borderRadius: 6, padding: "10px 12px", marginBottom: 14 }} dangerouslySetInnerHTML={{ __html: introTextToHtml(introText) }} />
+            <p style={{ color: "#888", fontSize: 13 }}>Item title, details, measurements and condition…</p>
+            {footer.trim() && (
+              <>
+                <p style={{ fontWeight: 700, fontSize: 16, margin: "14px 0 6px" }}>Shipping &amp; returns</p>
+                <p className="whitespace-pre-line">{footer.trim()}</p>
+              </>
             )}
-            <p className="mt-2 text-[var(--text-tertiary)]">Item title · Details · Measurements · Condition</p>
-            <p className="text-[var(--text-tertiary)]">Shipping &amp; returns notes</p>
-            {!introEnabled && <p className="mt-2 text-[var(--text-tertiary)]">Off — listings won&apos;t include it.</p>}
           </div>
-        </div>
+        </Sheet>
       </SettingsSection>
 
       <SettingsSection
         delay="d4"
         title="Measurements: see photos"
-        description="On: listings say “See photos for measurements.” instead of the measurements the AI read from your tape-measure photos. Off (default): the AI's measurements are listed."
+        description="Say “See photos for measurements.” instead of listing them."
         icon={Ruler}
+        action={<Switch checked={measSeePhotos} disabled={measSaving} onChange={handleMeasToggle} label="Measurements: see photos" />}
       >
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-xs text-[var(--text-secondary)]">{measSeePhotos ? "On — “See photos for measurements.”" : "Off — list the AI's measurements"}</span>
-          <Switch checked={measSeePhotos} disabled={measSaving} onChange={handleMeasToggle} label="Measurements: see photos" />
-        </div>
-        {measError && <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{measError}</p>}
+        {measError && <p className="text-xs" style={{ color: "var(--danger)" }} role="alert">{measError}</p>}
       </SettingsSection>
 
       <SettingsSection
         delay="d4"
         title="Shipping & returns notes"
-        description="Write this once. It's added to every listing's description under a “Shipping & returns” heading (after the item details, measurements and condition). Keep it short — e.g. how fast you ship, how items are packed, and your returns policy."
+        description="Shown at the bottom of every eBay description."
         icon={FileText}
       >
-        <textarea
-          className="input"
-          rows={8}
-          placeholder={'Ships within 1 business day, carefully packed.\n30-day returns accepted.\nMeasurements are taken flat and are approximate.'}
+        <AutoGrowTextarea
+          aria-label="Shipping and returns notes"
+          minRows={3}
+          placeholder={'Ships within 1 business day, carefully packed.\n30-day returns accepted.'}
           value={footer}
           onChange={(e) => { setFooter(e.target.value); setFooterSaved(false); }}
         />
-        <div className="flex items-center gap-3 mt-2">
-          <button
-            onClick={handleSaveFooter}
-            disabled={footerSaving || footer === savedFooter}
-            className="btn btn-primary text-xs px-3 py-1.5"
-          >
-            {footerSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save"}
-          </button>
-          {footerError && (
-            <p className="text-xs" style={{ color: "var(--danger)" }}>{footerError}</p>
-          )}
-          {footerSaved && (
-            <p className="text-xs flex items-center gap-1" style={{ color: "var(--success)" }}>
-              <Check className="w-3 h-3" /> Saved
-            </p>
-          )}
-        </div>
+        <SaveRow
+          dirty={footer !== savedFooter}
+          saving={footerSaving}
+          saved={footerSaved}
+          error={footerError}
+          onSave={() => void handleSaveFooter()}
+          length={footer.length}
+          max={4000}
+        />
       </SettingsSection>
 
       <SettingsSection
@@ -1154,28 +1140,32 @@ function SettingsSection({
   icon: Icon,
   children,
   delay,
+  action,
 }: {
   title: string;
   description?: string;
   icon: React.ElementType;
-  children: React.ReactNode;
+  children?: React.ReactNode;
   delay?: string;
+  /** Right side of the title row (e.g. an On/Off switch). */
+  action?: React.ReactNode;
 }) {
   return (
     <section className={`card stagger p-4 mb-4 ${delay ?? ""}`}>
-      <div className="flex items-start gap-3 mb-3">
+      <div className={`flex items-start gap-3 ${children ? "mb-3" : ""}`}>
         <div
           className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
           style={{ background: "color-mix(in srgb, var(--accent) 14%, var(--bg-surface))" }}
         >
           <Icon className="w-[18px] h-[18px]" style={{ color: "var(--accent)" }} />
         </div>
-        <div className="flex-1 pt-1">
+        <div className="flex-1 pt-1 min-w-0">
           <p className="text-sm font-semibold text-[var(--text-primary)]">{title}</p>
           {description && (
             <p className="text-xs text-[var(--text-tertiary)] mt-1 leading-relaxed">{description}</p>
           )}
         </div>
+        {action && <div className="pt-1.5 flex-shrink-0">{action}</div>}
       </div>
       {children}
     </section>

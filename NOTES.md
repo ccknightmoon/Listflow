@@ -1,5 +1,13 @@
 # Listflow — change notes
 
+## Nov 25, 2026 — `fix/settings-intro-layout` (cleaner Store intro card)
+
+Sel: the Store intro card was wordy and repeated the text. UI only, no data/API changes.
+- Store intro: title + On/Off switch on one row, one-line subtitle "Shown at the top of every eBay description." Auto-growing textarea (whole text visible, no inner scroll). Character count only near the 2000 limit. Save is disabled until something changes, then turns into "Saved ✓"; flipping the switch also saves unsaved text. Off dims the editor and mock.
+- The duplicated preview is replaced by a compact mock of eBay's Description: "eBay · Description" → highlighted "Your store intro" (skeleton lines) → "Item details & measurements" → "Shipping & returns". "Preview full description" opens a sheet with the real rendered intro (same escaped markup eBay gets) and the shipping notes.
+- Same pattern on "Measurements: see photos" (switch in the title row, one-line subtitle) and "Shipping & returns notes" ("Shown at the bottom of every eBay description.", auto-grow, same Save row).
+- New `src/components/SettingsTextCard.tsx` (AutoGrowTextarea, SaveRow, EbayDescriptionMock); `SettingsSection` takes an optional `action` for the title row. Render test `settings-text-card.render.test.ts`. 856 tests green, `tsc` + `next build` clean.
+
 ## Nov 25, 2026 — `feat/store-intro` (Store intro on every listing + "Measurements: see photos")
 
 Asked by Sel: stop pasting the same welcome paragraph into every eBay listing. Write it once in Settings; it goes at the very top of eBay's item Description (where he was pasting it), exactly as typed.
