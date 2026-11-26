@@ -61,6 +61,35 @@ What this means for Listflow:
 
 ---
 
+## 1.4 Competitor gaps (studied Nov 26, 2026)
+
+Sources: Trustpilot, eBay Community, Value Added Resource, vendor pricing/comparison pages (vendor blogs are biased; treated as hints, not facts). Reeva and OneShop had too little public information to judge.
+
+| Tool | Top weaknesses for a solo clothing/vintage seller | How Listflow beats it |
+|---|---|---|
+| **Vendoo** (free → ~$150/mo, priced by new items/month) | Auto-delist and sync failures reported at volume (sold items left live elsewhere); marketplace connections drop and need reconnecting; add-ons cost extra; billing/cancellation complaints. | eBay-first two-way sync with a visible "Synced X min ago" and a "live on eBay but not in Listflow" alert; flat plans, no per-item credits; no fragile multi-site connections to babysit. |
+| **List Perfectly** (~$29–$249/mo) | Auto-delist only on the top tier (~$249), needs a computer + Chrome extension running, quantity = 1 only; crosslisting opens one tab per site to click through. | Everything runs server-side (no laptop left on). Automations (offers, markdowns) on the normal plan. Phone-first. |
+| **Crosslist** (~$30–$45/mo) | Browser-extension form-filler; AI fill is generic, not tuned to vintage tags/sizing; no profit or sourcing view. | Vintage-tuned AI (tag/size mapping, Lacoste-style brand sizes), reads every photo, learns your fixes; haul cost → profit per item. |
+| **PrimeLister** (Posh $25 + eBay $15/mo per store) | Desktop-only Chrome extension (nothing from the phone); crosslisting basic; eBay bot is offers + relist only; no AI listing, no central inventory. | Phone-first PWA, AI listing + inventory + offers in one app; offers respect floor **and** cost. |
+| **Flyp** (~$9/mo) | 6 sites only, little automation, sync stability complaints, basic AI. | Deeper eBay automation and accuracy instead of breadth. |
+| **Closo** (free crosslisting; paid tiers sell wholesale perks / take commissions) | Revenue model leans on commissions/sourcing; weak native app (per competitors). | No commission on sales, ever. Sourcing ROI per rag-house trip built in. |
+| **eBay Magical Listing** (free, in the eBay app) | Forced photo-first flow sellers can't turn off; misidentifies items and **puts clothing in wrong size types** (blocks listing); corrections take "3× longer"; one photo → can miss tag shots; no profit/aging/after-sale tools. | Listflow already validates Size against eBay's real list and maps brand sizes; Phase 1 reads **all** photos and escalates hard items to a stronger model; the seller stays in control (nothing forced). |
+| **eBay native automated offers** (Active Listings → Send offers → "Send automated offers"; Store subscribers can automate by category/price) | A flat % for everything you select; doesn't know your cost or floor, and doesn't change with item age. | Listflow offers are **per-item, floor- and cost-aware**, can deepen with age, and are logged. **Warning shown in Settings:** don't run both on the same listings (buyers would get two offers). |
+| **New 2026 entrants** (Sell AI, Trendy Lister: photo → listing apps) | Generic "snap and list"; no batch grouping, no profit, no after-sale. | Batch camera + grouping at rag-house volume, then profit, markdowns, pick lists. |
+
+**What this changes in the plan**
+
+1. **Keep "profit per haul" (D1/D2) as #1.** No competitor does sourcing ROI per trip; it's Listflow's clearest niche.
+2. **Automatic offers (B1) stays in Phase 1, but positioned as "smarter than eBay's own".** eBay now has free automated offers, so Listflow's version must add what eBay lacks: never below floor/cost, age-based %, a log, and a clash warning. Off by default.
+3. **Reliability is a selling point.** The most common complaint across every crosslister is sync/delist failures. Phase 3's tests + monitoring and the "synced X min ago" signal matter more than adding sites.
+4. **Accuracy (A1 all photos, A4 learn my fixes, A10 hard-item model) moves up inside Phase 1** — eBay's free AI is the main competitor and its weak spot is accuracy on clothing sizes/types.
+5. **Crosslisting stays "copy-ready helpers only"** (no bots), and must ship with delist reminders — the exact failure users hate in Vendoo/List Perfectly.
+6. **Phone-first, nothing to leave running.** PrimeLister and List Perfectly need a desktop + extension; Listflow's automations run on the server on a schedule.
+
+Sources: https://www.trustpilot.com/review/vendoo.co · https://www.voolist.com/blog/voolist-vs-list-perfectly · https://listperfectly.com/selling/list-perfectlys-auto-delist/ · https://blog.vendoo.co/primelister-review · https://blog.vendoo.co/crosslist-vs-flyp · https://flowlister.com/vs-closo/ · https://www.valueaddedresource.net/ebay-ai-magical-listing-complaints/ · https://www.ebay.com/sellercenter/resources/seller-updates/timeline/automated-offers · https://apps.apple.com/app/id6758883858 · https://apps.apple.com/us/app/-/id6773644047
+
+---
+
 ## 2. Roadmap by area
 
 Each item lists what it is, why it helps, effort, what it depends on, and cost.
