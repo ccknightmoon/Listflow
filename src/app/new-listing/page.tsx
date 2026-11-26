@@ -2,6 +2,7 @@
 
 import CurrencyInput from "@/components/CurrencyInput";
 import PriceFloorFields from "@/components/PriceFloorFields";
+import StoreIntroHint from "@/components/StoreIntroHint";
 import { checkPriceAndFloor, defaultFloorFor, moneyText } from "@/lib/offer-floor";
 import Sheet from "@/components/Sheet";
 import { takePendingPhotos } from "@/lib/pending-photos";
@@ -1090,6 +1091,7 @@ export default function NewListingPage() {
               {aiResult.description}
             </p>
           )}
+          <StoreIntroHint className="mt-2" />
         </div>
       )}
 

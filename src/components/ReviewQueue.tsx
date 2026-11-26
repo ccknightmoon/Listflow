@@ -12,6 +12,7 @@ import { AlertTriangle, Check, ChevronLeft, Loader2, Pencil, Send, X } from "luc
 import { Z } from "@/lib/z-layers";
 import { formatMoney } from "@/lib/format";
 import PriceFloorFields from "@/components/PriceFloorFields";
+import StoreIntroHint from "@/components/StoreIntroHint";
 import { checkPriceAndFloor, moneyText } from "@/lib/offer-floor";
 import {
   nextUndecided, swipeDecision, willList, draftIdsToList,
@@ -186,6 +187,7 @@ export default function ReviewQueue({ open, items, decisions, onDecide, onSavePr
               disabled={savingPrice}
             />
             {priceError && <span className="text-xs mt-1 block" style={{ color: "var(--danger)" }} role="alert">{priceError}</span>}
+            <StoreIntroHint className="mt-2" />
             <Link href={`/drafts/${item.draftId}`} target="_blank" className="text-xs underline mt-3 inline-flex items-center gap-1" style={{ color: "var(--accent)" }}>
               <Pencil className="w-3 h-3" /> Fix other fields in the editor (E)
             </Link>

@@ -2,6 +2,7 @@
 // seller) and the background queue worker (Volume Phase 3), which runs it
 // with the service-role client -- so EVERY drafts query below is scoped to
 // ctx.userId explicitly, not left to RLS.
+import { descriptionPrefsFrom } from "@/lib/store-intro";
 import { storedFloorError } from "@/lib/offer-floor";
 import { isPrivatePhotoRef } from "@/lib/private-photos";
 import { externalPhotoUrls, EBAY_URL_TTL_S } from "@/lib/private-photos-server";
@@ -129,6 +130,14 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
     .eq("user_id", userId)
     .maybeSingle();
   const storeFooter = settingsRow?.store_description_footer || null;
+  // Store intro + "Measurements: see photos" (migration 036). Read on its own
+  // so a database without those columns yet still publishes normally.
+  const { data: introRow } = await supabase
+    .from("app_settings")
+    .select("store_intro_enabled, store_intro_text, measurements_see_photos")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const descPrefs = descriptionPrefsFrom(introRow as Record<string, unknown> | null);
 
   const connection = ctx.connection;
   if (!connection) {
@@ -331,7 +340,7 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
             return NextResponse.json({ conflict: true, error: "This listing was changed on eBay after you opened it here." }, { status: 200 });
           }
         }
-        const r = await reviseDraftListing(draft as DraftRow, { categoryId, sku, storeFooter, live });
+        const r = await reviseDraftListing(draft as DraftRow, { categoryId, sku, storeFooter, descPrefs, live });
         if (r.ok) {
           // New fingerprint = in sync again (migration 034; no-op before).
           const after = await getLiveItem(String(draft.ebay_listing_id)).catch(() => null);
@@ -349,7 +358,7 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
         if (!r.inventoryModel) return NextResponse.json({ error: r.error }, { status: 400 });
       } else {
         return await publishDraftTrading({
-          supabase, userId, draft: draft as DraftRow, sku, categoryId, storeFooter,
+          supabase, userId, draft: draft as DraftRow, sku, categoryId, storeFooter, descPrefs,
           shippingProfileId: connection.policies.shippingCalculatedId as string,
           savedReturnProfileId: connection.policies.returnPolicyId,
           verifyOnly, scheduleDays,
@@ -380,7 +389,7 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
       await deleteInventoryItem(candidateSku);
     }));
 
-    const itemResult = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter);
+    const itemResult = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter, "typed", descPrefs);
     if (itemResult.status >= 400) {
       const errData = itemResult.data as { errors?: Array<{ longMessage?: string; message?: string }>; message?: string };
       const msg = errData.errors?.[0]?.longMessage ?? errData.errors?.[0]?.message ?? errData.message ?? JSON.stringify(itemResult.data);
@@ -478,7 +487,7 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
     if (publishResult.status >= 400) {
       const firstErr = (publishResult.data as { errors?: EbayApiError[] }).errors?.[0];
       if (isShippingPackageError(firstErr)) {
-        const repack = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter, "untyped");
+        const repack = await upsertInventoryItem(sku, draft, categoryId, undefined, shippingMode, storeFooter, "untyped", descPrefs);
         if (repack.status < 400) {
           packageVariant = "untyped";
           publishResult = await publishOffer(offerId);
@@ -543,7 +552,7 @@ export async function publishDraft(ctx: PublishContext, body: PublishBody): Prom
         const conditionsToTry = getConditionCandidates(draft.condition, draft.title || "");
 
         for (const tryCondition of conditionsToTry) {
-          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter, packageVariant);
+          const upsertResult = await upsertInventoryItem(sku, draft, safeCategory, tryCondition, shippingMode, storeFooter, packageVariant, descPrefs);
           if (upsertResult.status >= 400) continue;
           missingRequiredAspects = upsertResult.missingRequiredAspects ?? missingRequiredAspects;
           // Same try-then-retry-once-on-failure treatment as the primary

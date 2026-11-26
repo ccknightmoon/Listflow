@@ -23,6 +23,8 @@ import {
   FileText,
   ScanLine,
   Sparkles,
+  MessageSquareText,
+  Ruler,
   Tags,
   DollarSign,
   Mail,
@@ -30,6 +32,8 @@ import {
   HardDrive,
 } from "lucide-react";
 import PhotoCleanupSettings from "@/components/PhotoCleanupSettings";
+import { setStoreIntroCache } from "@/components/StoreIntroHint";
+import { STORE_INTRO_DEFAULT, STORE_INTRO_MAX } from "@/lib/store-intro";
 import { getStoredTheme, setStoredTheme, type Theme } from "@/lib/theme";
 import { ACCENT_PRESETS, getStoredAccent, setStoredAccent, type AccentColor } from "@/lib/accent";
 import { EBAY_STANDARD_FEE_PERCENT } from "@/lib/ebay-fees";
@@ -78,6 +82,19 @@ export default function SettingsPage() {
   const [footerSaving, setFooterSaving] = useState(false);
   const [footerSaved, setFooterSaved] = useState(false);
   const [footerError, setFooterError] = useState<string | null>(null);
+
+  // Store intro (added to the top of every listing description at publish
+  // time -- src/lib/store-intro.ts). Prefilled with a default only when the
+  // seller has nothing saved; nothing is saved until they tap Save or On.
+  const [introText, setIntroText] = useState("");
+  const [savedIntroText, setSavedIntroText] = useState("");
+  const [introEnabled, setIntroEnabled] = useState(false);
+  const [introSaving, setIntroSaving] = useState(false);
+  const [introSaved, setIntroSaved] = useState(false);
+  const [introError, setIntroError] = useState<string | null>(null);
+  const [measSeePhotos, setMeasSeePhotos] = useState(false);
+  const [measSaving, setMeasSaving] = useState(false);
+  const [measError, setMeasError] = useState<string | null>(null);
 
   const [theme, setTheme] = useState<Theme>("system");
   const [accent, setAccent] = useState<AccentColor>("indigo");
@@ -160,6 +177,11 @@ export default function SettingsPage() {
         const f = data.storeDescriptionFooter ?? "";
         setFooter(f);
         setSavedFooter(f);
+        const it = typeof data.storeIntroText === "string" ? data.storeIntroText : "";
+        setSavedIntroText(it);
+        setIntroText(it.trim() ? it : STORE_INTRO_DEFAULT);
+        setIntroEnabled(data.storeIntroEnabled === true);
+        setMeasSeePhotos(data.measurementsSeePhotos === true);
         // app_settings.accent_color is the source of truth (synced across
         // devices) — reconcile this device's cookie/attribute with it in
         // case another device changed it since our last visit here.
@@ -321,6 +343,62 @@ export default function SettingsPage() {
       setFeePercentError((err as Error).message || "Could not save — try again.");
     } finally {
       setFeePercentSaving(false);
+    }
+  }
+
+  async function saveIntro(patch: { storeIntroEnabled?: boolean; storeIntroText?: string }): Promise<boolean> {
+    setIntroSaving(true);
+    setIntroSaved(false);
+    setIntroError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save — try again.");
+      const enabled = patch.storeIntroEnabled ?? introEnabled;
+      const text = patch.storeIntroText ?? savedIntroText;
+      if (patch.storeIntroText !== undefined) setSavedIntroText(patch.storeIntroText);
+      if (patch.storeIntroEnabled !== undefined) setIntroEnabled(patch.storeIntroEnabled);
+      setStoreIntroCache({ enabled, text });
+      setIntroSaved(true);
+      setTimeout(() => setIntroSaved(false), 2000);
+      return true;
+    } catch (err) {
+      setIntroError((err as Error).message || "Could not save — try again.");
+      return false;
+    } finally {
+      setIntroSaving(false);
+    }
+  }
+
+  async function handleIntroToggle(next: boolean) {
+    if (introSaving || next === introEnabled) return;
+    // Turning it on also saves the text on screen (e.g. the prefilled default).
+    await saveIntro(next && introText !== savedIntroText ? { storeIntroEnabled: true, storeIntroText: introText } : { storeIntroEnabled: next });
+  }
+
+  async function handleMeasToggle(next: boolean) {
+    if (measSaving || next === measSeePhotos) return;
+    const prev = measSeePhotos;
+    setMeasSeePhotos(next);
+    setMeasSaving(true);
+    setMeasError(null);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ measurementsSeePhotos: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save — try again.");
+    } catch (err) {
+      setMeasSeePhotos(prev);
+      setMeasError((err as Error).message || "Could not save — try again.");
+    } finally {
+      setMeasSaving(false);
     }
   }
 
@@ -684,6 +762,68 @@ export default function SettingsPage() {
             <Check className="w-3 h-3" /> Saved
           </p>
         )}
+      </SettingsSection>
+
+      <SettingsSection
+        delay="d4"
+        title="Store intro (added to every listing)"
+        description="Write your welcome message once. When this is On, it's put at the very top of every eBay listing's Description, exactly as typed (line breaks kept), when you list, check with eBay, or update a listing. It isn't shown in the description box on review cards, and it's never added twice."
+        icon={MessageSquareText}
+      >
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <span className="text-xs text-[var(--text-secondary)]">Add to every listing</span>
+          <Switch checked={introEnabled} disabled={introSaving} onChange={handleIntroToggle} label="Store intro on" />
+        </div>
+        <textarea
+          className="input"
+          rows={10}
+          maxLength={STORE_INTRO_MAX}
+          value={introText}
+          onChange={(e) => { setIntroText(e.target.value); setIntroSaved(false); }}
+        />
+        <div className="flex items-center gap-3 mt-2">
+          <button
+            onClick={() => void saveIntro({ storeIntroText: introText })}
+            disabled={introSaving || introText === savedIntroText}
+            className="btn btn-primary text-xs px-3 py-1.5"
+          >
+            {introSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save"}
+          </button>
+          <span className="text-[11px] text-[var(--text-tertiary)]">{introText.length}/{STORE_INTRO_MAX}</span>
+          {introError && <p className="text-xs" style={{ color: "var(--danger)" }}>{introError}</p>}
+          {introSaved && (
+            <p className="text-xs flex items-center gap-1" style={{ color: "var(--success)" }}>
+              <Check className="w-3 h-3" /> Saved
+            </p>
+          )}
+        </div>
+        <div className="mt-3">
+          <p className="text-[11px] uppercase tracking-wide text-[var(--text-tertiary)] mb-1">Where it lands on eBay</p>
+          <div className="rounded-lg p-3 text-xs leading-relaxed" style={{ background: "var(--glass)", opacity: introEnabled ? 1 : 0.55 }}>
+            <p className="text-[10px] font-semibold text-[var(--text-tertiary)] mb-1">DESCRIPTION</p>
+            {introText.trim() ? (
+              <p className="whitespace-pre-line line-clamp-4 text-[var(--text-primary)]">{introText.trim()}</p>
+            ) : (
+              <p className="text-[var(--text-tertiary)]">(empty)</p>
+            )}
+            <p className="mt-2 text-[var(--text-tertiary)]">Item title · Details · Measurements · Condition</p>
+            <p className="text-[var(--text-tertiary)]">Shipping &amp; returns notes</p>
+            {!introEnabled && <p className="mt-2 text-[var(--text-tertiary)]">Off — listings won&apos;t include it.</p>}
+          </div>
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        delay="d4"
+        title="Measurements: see photos"
+        description="On: listings say “See photos for measurements.” instead of the measurements the AI read from your tape-measure photos. Off (default): the AI's measurements are listed."
+        icon={Ruler}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs text-[var(--text-secondary)]">{measSeePhotos ? "On — “See photos for measurements.”" : "Off — list the AI's measurements"}</span>
+          <Switch checked={measSeePhotos} disabled={measSaving} onChange={handleMeasToggle} label="Measurements: see photos" />
+        </div>
+        {measError && <p className="text-xs mt-2" style={{ color: "var(--danger)" }}>{measError}</p>}
       </SettingsSection>
 
       <SettingsSection
@@ -1092,6 +1232,27 @@ function PolicyPicker({
         </span>
       )}
     </label>
+  );
+}
+
+function Switch({ checked, disabled, onChange, label }: { checked: boolean; disabled?: boolean; onChange: (next: boolean) => void; label: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className="relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors disabled:opacity-60"
+      style={{ background: checked ? "var(--accent)" : "var(--border)" }}
+    >
+      <span
+        className="inline-block h-5 w-5 rounded-full bg-white shadow transition-transform"
+        style={{ transform: checked ? "translateX(22px)" : "translateX(2px)" }}
+      />
+      <span className="sr-only">{checked ? "On" : "Off"}</span>
+    </button>
   );
 }
 

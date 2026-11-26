@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireUser } from "@/lib/auth";
 import { isValidFeePercent } from "@/lib/ebay-fees";
+import { isMissingColumnError } from "@/lib/item-specifics";
+import { STORE_INTRO_MAX } from "@/lib/store-intro";
 
 export const runtime = "nodejs";
 
@@ -23,6 +25,19 @@ export async function GET() {
     .eq("user_id", user.id)
     .maybeSingle();
 
+  // Store intro + "Measurements: see photos" (migration 036), read on their
+  // own so a database without those columns still loads every other setting.
+  const { data: introRow } = await supabase
+    .from("app_settings")
+    .select("store_intro_enabled, store_intro_text, measurements_see_photos")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  const intro = {
+    storeIntroEnabled: introRow?.store_intro_enabled === true,
+    storeIntroText: typeof introRow?.store_intro_text === "string" ? introRow.store_intro_text : "",
+    measurementsSeePhotos: introRow?.measurements_see_photos === true,
+  };
+
   if (error || !data) {
     // No row yet for this user (never saved Settings before) — fall back
     // to "free"/no footer/indigo/off rather than failing the page.
@@ -36,6 +51,7 @@ export async function GET() {
       notificationEmailEnabled: true,
       notificationEmailHourUtc: 13,
       photoEditorLayout: "carousel",
+      ...intro,
     });
   }
   return NextResponse.json({
@@ -48,6 +64,7 @@ export async function GET() {
     notificationEmailEnabled: data.notification_email_enabled ?? true,
     notificationEmailHourUtc: data.notification_email_hour_utc ?? 13,
     photoEditorLayout: data.photo_editor_layout === "grid" ? "grid" : "carousel",
+    ...intro,
   });
 }
 
@@ -58,6 +75,21 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json();
   const { defaultShippingMode, storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc, photoEditorLayout } = body;
+  const { storeIntroEnabled, storeIntroText, measurementsSeePhotos } = body;
+
+  if (storeIntroEnabled !== undefined && typeof storeIntroEnabled !== "boolean") {
+    return NextResponse.json({ error: "storeIntroEnabled must be a boolean" }, { status: 400 });
+  }
+  if (measurementsSeePhotos !== undefined && typeof measurementsSeePhotos !== "boolean") {
+    return NextResponse.json({ error: "measurementsSeePhotos must be a boolean" }, { status: 400 });
+  }
+  if (storeIntroText !== undefined && typeof storeIntroText !== "string") {
+    return NextResponse.json({ error: "storeIntroText must be a string" }, { status: 400 });
+  }
+  // Rejected rather than cut: the intro is always sent to eBay in full.
+  if (typeof storeIntroText === "string" && storeIntroText.length > STORE_INTRO_MAX) {
+    return NextResponse.json({ error: `The store intro is too long (max ${STORE_INTRO_MAX} characters).` }, { status: 400 });
+  }
 
   if (defaultShippingMode !== undefined && defaultShippingMode !== "free" && defaultShippingMode !== "calculated") {
     return NextResponse.json({ error: "defaultShippingMode must be 'free' or 'calculated'" }, { status: 400 });
@@ -115,5 +147,25 @@ export async function PATCH(req: NextRequest) {
     .upsert(payload, { onConflict: "user_id" });
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ success: true, defaultShippingMode: defaultShippingMode === undefined ? undefined : "calculated", storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc, photoEditorLayout });
+
+  // Migration 036 columns, saved separately so a missing column never blocks
+  // the other settings (and gets a clear message instead of a generic error).
+  const introPayload: Record<string, unknown> = {};
+  if (storeIntroEnabled !== undefined) introPayload.store_intro_enabled = storeIntroEnabled;
+  if (storeIntroText !== undefined) introPayload.store_intro_text = storeIntroText;
+  if (measurementsSeePhotos !== undefined) introPayload.measurements_see_photos = measurementsSeePhotos;
+  if (Object.keys(introPayload).length) {
+    const { error: introError } = await supabase
+      .from("app_settings")
+      .update(introPayload)
+      .eq("user_id", user.id);
+    if (introError) {
+      const missing = ["store_intro_enabled", "store_intro_text", "measurements_see_photos"].some((c) => isMissingColumnError(introError, c));
+      return NextResponse.json(
+        { error: missing ? "Store intro isn't available yet (database update pending)." : introError.message },
+        { status: missing ? 503 : 500 },
+      );
+    }
+  }
+  return NextResponse.json({ success: true, defaultShippingMode: defaultShippingMode === undefined ? undefined : "calculated", storeDescriptionFooter, accentColor, autoDetectItemDividers, aiStoreCategorySuggestions, ebayFeePercentOverride, notificationEmailEnabled, notificationEmailHourUtc, photoEditorLayout, storeIntroEnabled, storeIntroText, measurementsSeePhotos });
 }

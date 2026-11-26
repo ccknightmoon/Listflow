@@ -195,3 +195,36 @@ describe("never sends an off-list Size to eBay", () => {
     } finally { aspectDefsMock.defs = []; }
   });
 });
+
+describe("store intro on publish / verify / revise", () => {
+  const INTRO = "Welcome to our store :)!\nExplore unique second-hand treasures with detailed photos!\n\nItem Condition: Just as seen in the pictures!";
+  const descPrefs = { storeIntro: INTRO, measurementsSeePhotos: false };
+  const firstText = (html: string) => html.replace(/<!--[\s\S]*?-->/g, "").replace(/<br>/g, "\n").replace(/<\/p>/g, "\n").replace(/<[^>]+>/g, "").trimStart();
+
+  it("Verify and Add both send the intro at the very top of the Description", async () => {
+    const calls: Array<[string, TradingItemInput]> = [];
+    const call = vi.fn(async (c: string, item: TradingItemInput) => { calls.push([c, item]); return c === "AddFixedPriceItem" ? ok("256000000021") : ok(); });
+    await publishDraftTrading(args({ descPrefs }), call as never);
+    for (const [, item] of calls) {
+      expect(firstText(item.descriptionHtml).startsWith(INTRO)).toBe(true);
+      expect(item.descriptionHtml.split("class=\"lf-store-intro\"").length).toBe(2);
+    }
+  });
+
+  it("Update on eBay (revise) adds it once, even if the saved description already has it", async () => {
+    const call = vi.fn(async (c: string, item: TradingItemInput) => { void c; void item; return ok(); });
+    await reviseDraftListing({ ...draft, ebay_listing_id: "256000000022" } as never, { categoryId: "155183", sku: "1001", storeFooter: null, descPrefs }, call as never);
+    const first = (call.mock.calls[0] as unknown as [string, TradingItemInput])[1].descriptionHtml;
+    expect(firstText(first).startsWith("Welcome to our store :)!")).toBe(true);
+    call.mockClear();
+    await reviseDraftListing({ ...draft, description: first, ebay_listing_id: "256000000022" } as never, { categoryId: "155183", sku: "1001", storeFooter: null, descPrefs }, call as never);
+    const again = (call.mock.calls[0] as unknown as [string, TradingItemInput])[1].descriptionHtml;
+    expect(again.split("Welcome to our store").length).toBe(2);
+  });
+
+  it("off = no intro", async () => {
+    const call = vi.fn(async () => ok());
+    await publishDraftTrading(args({ verifyOnly: true }), call as never);
+    expect((call.mock.calls[0] as unknown as [string, TradingItemInput])[1].descriptionHtml).not.toContain("lf-store-intro");
+  });
+});

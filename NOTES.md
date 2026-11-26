@@ -1,5 +1,23 @@
 # Listflow — change notes
 
+## Nov 25, 2026 — `feat/store-intro` (Store intro on every listing + "Measurements: see photos")
+
+Asked by Sel: stop pasting the same welcome paragraph into every eBay listing. Write it once in Settings; it goes at the very top of eBay's item Description (where he was pasting it), exactly as typed.
+
+### What changed
+- **Settings → "Store intro (added to every listing)"** (new card, styled like Shipping & returns notes): On/Off switch, textarea (prefilled with a default only when nothing is saved), Save, character count, and a small "Where it lands on eBay" preview (intro → item details → Shipping & returns). Turning it On also saves the text on screen.
+- **Settings → "Measurements: see photos"** (switch, default Off). The AI *does* add a measurement list to the description ("Measurements (taken flat)" from the tape-measure photos, built in `buildDescriptionHtml`). On = that list is replaced by "See photos for measurements." Item specifics (Chest Size etc.) are unchanged.
+- `src/lib/store-intro.ts` (new, pure): `finalizeListingDescription` runs last on every description sent to eBay — Trading Verify + Add (`buildItemForDraft` → `publishDraftTrading`/`verifyWithFixes`), "Update on eBay" (`reviseDraftListing`), and the Inventory fallback (`upsertInventoryItem`). Intro is the first thing in the Description, above the title; Shipping & returns stays at the bottom.
+  - Text kept line for line: each newline → `<br>` (blank lines stay blank), HTML-escaped, never reworded, never truncated (length is checked on save: max 2000; the API rejects longer rather than cutting). Sent in CDATA as before; plain `<p>`/`<br>` with inline styles, so it reads as normal text in the eBay app.
+  - Idempotent: wrapped in `<!--lf-store-intro--><div class="lf-store-intro" data-lf="store-intro">…</div><!--/lf-store-intro-->`; any existing block is removed before inserting (so re-publish/revise never doubles it, and editing the intro replaces the old one). If the text is already present unmarked (hand-pasted, or eBay stripped markers) nothing is added; a hand-pasted copy in a plain draft description is removed from the summary so it isn't shown twice. eBay-made descriptions get the block first too.
+  - Never saved into `drafts.description`.
+- Review cards (Batch Upload, New listing, Draft editor, swipe Review) show only a subtle "+ Store intro will be added when listed" line (tap to preview) — `src/components/StoreIntroHint.tsx`, one shared `/api/settings` fetch per page.
+- `GET/PATCH /api/settings`: `storeIntroEnabled`, `storeIntroText`, `measurementsSeePhotos`, read/written separately from the other settings so a database without migration 036 still loads/saves everything else (saving the intro then says "database update pending"). Publishing reads them separately too (missing columns = no intro, publishes normally).
+- Tests: `store-intro.test.ts` (Sel's exact text: Description starts with it, every line + blank line + ":)" kept, no cutoff, idempotent, markers stripped by eBay, hand-pasted copy, see-photos swap), `trading-publish.test.ts` (Verify/Add/Revise send it at the top once), `store-intro-hint.render.test.ts`. 850+ tests green, `tsc` + `next build` clean.
+
+### Migration (not applied)
+- `supabase-migrations/036_store_intro.sql` — three additive columns on `app_settings` (`store_intro_enabled` bool default false, `store_intro_text` text, `measurements_see_photos` bool default false). Same per-user row/RLS as `store_description_footer`.
+
 ## Nov 25, 2026 — `fix/size-category-validation` (Lacoste polo: Size "9", frozen card, wrong shelf)
 
 Reported: a Lacoste polo tagged "9" failed to list with `"9" is not a valid value for Size … (code 21920468)`, the batch card then couldn't be edited, and the item had been put on the "Outerwear & Coats" store shelf.

@@ -4,6 +4,7 @@ import { getEbayContext } from "./ebay-request-context";
 import { buildPackageWeightAndSize, type PackageVariant, type ShippingMode } from "./shipping";
 import { fetchAspectDefs, fetchAllowedConditions } from "./ebay-aspects";
 import { conditionNote, fitTitle, listingDescriptionHtml, pickCondition } from "./item-specifics";
+import { finalizeListingDescription, removeIntroFromPlainText, type DescriptionPrefs } from "./store-intro";
 import { buildPublishAspects } from "./publish-aspects";
 
 export const CONDITION_MAP: Record<string, string> = {
@@ -280,6 +281,8 @@ export async function upsertInventoryItem(sku: string, draft: {
   _shippingMode: ShippingMode = "free",
   storeFooter?: string | null,
   packageVariant: PackageVariant = "typed",
+  /** Settings → Store intro / Measurements: see photos (src/lib/store-intro.ts). */
+  descPrefs?: DescriptionPrefs | null,
 ) {
   // Listing quality (Nov 2026): aspects = the fixed draft fields, then
   // measured waist/inseam/rise, then the AI's category fill + the seller's
@@ -309,7 +312,7 @@ export async function upsertInventoryItem(sku: string, draft: {
       // clean/reusable, and every listing always picks up whatever the
       // seller has saved as their footer right now, not a snapshot frozen
       // in at draft-save time.
-      description: listingDescriptionHtml(draft, aspects, ms, storeFooter),
+      description: finalizeListingDescription(listingDescriptionHtml({ ...draft, description: removeIntroFromPlainText(draft.description, descPrefs?.storeIntro ?? null) }, aspects, ms, storeFooter), descPrefs),
       aspects,
       ...(() => {
         const urls = (draft.photo_urls ?? []).filter((u) => u?.startsWith("http"));

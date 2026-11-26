@@ -8,6 +8,7 @@ import { fetchAspectDefs, fetchAllowedConditions } from "@/lib/ebay-aspects";
 import { buildPublishAspects } from "@/lib/publish-aspects";
 import { conditionNote, fitTitle, isTemplateHtml, listingDescriptionHtml, pickCondition, sanitizeStoredSpecifics } from "@/lib/item-specifics";
 import type { LiveItem } from "@/lib/ebay-item";
+import { finalizeListingDescription, removeIntroFromPlainText, type DescriptionPrefs } from "@/lib/store-intro";
 import { buildPackageWeightAndSize } from "@/lib/shipping";
 import { createTtlDedupeCache } from "@/lib/ttl-cache";
 import { saveListingLink } from "@/lib/listing-link";
@@ -145,7 +146,7 @@ export function rejectedValuesError(rejected: BuiltItem["rejected"]): string | n
     .join(" · ");
 }
 
-export async function buildItemForDraft(draft: DraftRow, opts: { categoryId: string; sku: string; storeFooter: string | null; packageTyped?: boolean }): Promise<BuiltItem> {
+export async function buildItemForDraft(draft: DraftRow, opts: { categoryId: string; sku: string; storeFooter: string | null; descPrefs?: DescriptionPrefs | null; packageTyped?: boolean }): Promise<BuiltItem> {
   const defs = await fetchAspectDefs(opts.categoryId);
   const { aspects, missingRequired, measurements, rejected, sizeNote } = buildPublishAspects(draft as never, defs);
   const allowed = await fetchAllowedConditions(opts.categoryId);
@@ -162,7 +163,15 @@ export async function buildItemForDraft(draft: DraftRow, opts: { categoryId: str
       title: titleWithMappedSize(fitTitle(draft.title) || "Item", draft.size, aspects["Size"]?.[0] ?? null, sizeNote),
       // A description brought in from an eBay-made listing (its own HTML) is
       // sent back as-is; Listflow drafts get the usual generated layout.
-      descriptionHtml: isForeignHtml(draft.description) ? String(draft.description) : listingDescriptionHtml(draft as never, aspects, measurements, opts.storeFooter, sizeNote),
+      // Settings → Store intro goes on top and "Measurements: see photos"
+      // swaps the measurement list, both at build time (idempotent, never
+      // saved into the draft) -- see src/lib/store-intro.ts.
+      descriptionHtml: finalizeListingDescription(
+        isForeignHtml(draft.description)
+          ? String(draft.description)
+          : listingDescriptionHtml({ ...draft, description: removeIntroFromPlainText(draft.description as string | null | undefined, opts.descPrefs?.storeIntro ?? null) } as never, aspects, measurements, opts.storeFooter, sizeNote),
+        opts.descPrefs,
+      ),
       categoryId: opts.categoryId,
       conditionId: conditionIds[0],
       conditionDescription: conditionNote(draft.condition, draft.flaws),
@@ -186,7 +195,7 @@ export async function buildItemForDraft(draft: DraftRow, opts: { categoryId: str
  */
 export async function verifyWithFixes(
   draft: DraftRow,
-  base: { categoryId: string; sku: string; storeFooter: string | null },
+  base: { categoryId: string; sku: string; storeFooter: string | null; descPrefs?: DescriptionPrefs | null },
   addFields: Pick<TradingItemInput, "uuid" | "policies" | "postalCode" | "scheduleTime">,
   call: (c: TradingCall, item: TradingItemInput) => Promise<TradingResult> = tradingItemCall,
 ): Promise<{ result: TradingResult; item: TradingItemInput; missingRequired: string[]; attempts: number; bestOfferDropped?: boolean }> {
@@ -238,6 +247,8 @@ export interface TradingPublishArgs {
   sku: string;
   categoryId: string;
   storeFooter: string | null;
+  /** Settings → Store intro / Measurements: see photos. */
+  descPrefs?: DescriptionPrefs | null;
   shippingProfileId: string;
   savedReturnProfileId: string | null | undefined;
   verifyOnly?: boolean;
@@ -254,7 +265,7 @@ export async function publishDraftTrading(a: TradingPublishArgs, call: (c: Tradi
     postalCode: listingPostalCode(),
     ...(a.scheduleDays ? { scheduleTime: scheduleTimeFromNow(a.scheduleDays) } : {}),
   };
-  const v = await verifyWithFixes(a.draft, { categoryId: a.categoryId, sku: a.sku, storeFooter: a.storeFooter }, addFields, call);
+  const v = await verifyWithFixes(a.draft, { categoryId: a.categoryId, sku: a.sku, storeFooter: a.storeFooter, descPrefs: a.descPrefs }, addFields, call);
   const warnings = v.result.warnings.map((w) => w.long || w.short).filter(Boolean);
   if (v.bestOfferDropped) warnings.unshift("eBay doesn't allow Best Offer for this item, so it lists at the fixed price (no offers).");
   const missingRequiredAspects = v.missingRequired.length ? v.missingRequired : undefined;
@@ -299,7 +310,7 @@ export async function publishDraftTrading(a: TradingPublishArgs, call: (c: Tradi
  */
 export async function reviseDraftListing(
   draft: DraftRow,
-  opts: { categoryId: string; sku: string; storeFooter: string | null; live?: LiveItem | null },
+  opts: { categoryId: string; sku: string; storeFooter: string | null; descPrefs?: DescriptionPrefs | null; live?: LiveItem | null },
   call: (c: TradingCall, item: TradingItemInput) => Promise<TradingResult> = tradingItemCall,
 ): Promise<{ ok: boolean; inventoryModel?: boolean; error?: string; warnings?: string[]; missingRequired?: string[] }> {
   const built = await buildItemForDraft(draft, opts);

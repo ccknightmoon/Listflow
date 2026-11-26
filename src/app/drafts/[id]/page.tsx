@@ -3,6 +3,7 @@
 import { rememberDeleted } from "@/lib/deleted-drafts";
 import CurrencyInput from "@/components/CurrencyInput";
 import PriceFloorFields from "@/components/PriceFloorFields";
+import StoreIntroHint from "@/components/StoreIntroHint";
 import { checkPriceAndFloor, moneyText } from "@/lib/offer-floor";
 import Sheet from "@/components/Sheet";
 import PhotoDropZone from "@/components/PhotoDropZone";
@@ -1637,6 +1638,7 @@ export default function DraftDetailPage({ params }: { params: Promise<{ id: stri
               value={description}
               onChange={(e) => setDescription(e.target.value)}
             />
+            <StoreIntroHint className="mt-1" />
           </div>
         </div>
       </div>

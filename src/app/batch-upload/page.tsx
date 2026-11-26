@@ -2,6 +2,7 @@
 
 import CurrencyInput from "@/components/CurrencyInput";
 import PriceFloorFields from "@/components/PriceFloorFields";
+import StoreIntroHint from "@/components/StoreIntroHint";
 import { checkPriceAndFloor, defaultFloorFor, moneyText, withPriceCheck } from "@/lib/offer-floor";
 import { confirmAction } from "@/lib/confirm";
 import { takePendingPhotos } from "@/lib/pending-photos";
@@ -3625,6 +3626,8 @@ export default function BatchUploadPage() {
                       }}
                     />
                   ) : null}
+
+                  <StoreIntroHint className="mb-2" />
 
                   <PriceFloorFields
                     idPrefix={`batch-${i}`}
