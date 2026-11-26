@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, LayoutGrid, BarChart3, MessageCircle, Tag, Truck, Settings, Plus, AlertTriangle, type LucideIcon } from "lucide-react";
+import { Home, LayoutGrid, BarChart3, MessageCircle, Tag, Truck, Settings, Briefcase, Plus, AlertTriangle, type LucideIcon } from "lucide-react";
 import { Z } from "@/lib/z-layers";
 import { isSidebarVisible, isSidebarLinkActive, SIDEBAR_LINKS, SIDEBAR_WIDTH_PX } from "@/lib/nav-config";
 import { useAiUsageWarning } from "@/lib/use-ai-usage-warning";
@@ -16,6 +16,7 @@ const ICONS: Record<string, LucideIcon> = {
   "/messages": MessageCircle,
   "/offers": Tag,
   "/ship": Truck,
+  "/business": Briefcase,
   "/settings": Settings,
 };
 

@@ -26,6 +26,7 @@ export const MORE_LINKS = [
   { href: "/messages", label: "Messages" },
   { href: "/offers", label: "Offers" },
   { href: "/ship", label: "Ship orders" },
+  { href: "/business", label: "Business" },
   { href: "/settings", label: "Settings" },
 ] as const;
 
@@ -58,6 +59,7 @@ export const SIDEBAR_LINKS = [
   { href: "/messages", label: "Messages" },
   { href: "/offers", label: "Offers" },
   { href: "/ship", label: "Ship" },
+  { href: "/business", label: "Business" },
   { href: "/settings", label: "Settings" },
 ] as const;
 

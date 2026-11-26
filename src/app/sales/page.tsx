@@ -674,7 +674,7 @@ export default function SalesPage() {
                         <p className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>{shortDate(Date.parse(s.soldAt))} · sold {money(s.itemTotal)}</p>
                       </div>
                       {blocked ? (
-                        <span className="text-[10px] text-right max-w-[110px]" style={{ color: "var(--text-tertiary)" }}>Needs DB update (025)</span>
+                        <span className="text-[10px] text-right max-w-[110px]" style={{ color: "var(--text-tertiary)" }}>Needs DB update (040)</span>
                       ) : (
                         <>
                           <CurrencyInput

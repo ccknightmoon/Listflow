@@ -127,7 +127,7 @@ async function loadDrafts(supabase: Supabase, listingIds: string[]): Promise<Map
   return map;
 }
 
-/** Costs saved for sales without a draft (needs migration 025; empty if not applied). */
+/** Costs saved for sales without a draft (needs migration 040, which replaces 025; empty if not applied). */
 async function loadSaleCosts(supabase: Supabase): Promise<{ costs: Map<string, number>; available: boolean }> {
   const { data, error } = await supabase.from("sale_costs").select("sale_key, cost");
   if (error) return { costs: new Map(), available: false };

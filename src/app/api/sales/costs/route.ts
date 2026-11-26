@@ -8,7 +8,7 @@ export const runtime = "nodejs";
 // Save the item cost for one sale (Sales page "Add costs").
 // - Sale listed through Listflow -> saved on its draft (drafts.cost_basis),
 //   works today.
-// - Sale with no draft -> saved in sale_costs, which needs migration 025.
+// - Sale with no draft -> saved in sale_costs, which needs migration 040 (replaces 025).
 //   If that table doesn't exist yet the response says so (needsMigration)
 //   instead of failing silently.
 export async function POST(req: Request) {
@@ -54,7 +54,7 @@ export async function POST(req: Request) {
     const missingTable = error.code === "42P01" || error.code === "PGRST205" || /sale_costs/.test(error.message ?? "");
     if (missingTable) {
       return NextResponse.json({
-        error: "Costs for items listed outside Listflow need a one-time database update (migration 025).",
+        error: "Costs for items listed outside Listflow need a one-time database update (migration 040).",
         needsMigration: true,
       }, { status: 409 });
     }
